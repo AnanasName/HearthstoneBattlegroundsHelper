@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# Сырые логи, скопированные для разбора, но ещё не оформленные как fixture.
+# Оформленные fixtures в data/fixtures/ коммитятся.
+data/logs-raw/
+
+# Windows
+Thumbs.db
+desktop.ini
