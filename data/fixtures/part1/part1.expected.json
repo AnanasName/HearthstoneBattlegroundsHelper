@@ -1,0 +1,66 @@
+{
+  "$comment": [
+    "Полная партия Battlegrounds от выбора героя до финального места.",
+    "Снята 03.08.2026 в четыре приёма: клиент перезапускался посреди партии,",
+    "чтобы обойти предел лога в 10000 КБ (см. docs/power-log.md).",
+    "В checkpoints попадает ТОЛЬКО то, что подтвердил человек, а не то,",
+    "что вывел парсер. Раздел растёт по мере ручной разметки."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-03T00:16:38+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerEntityId": 6
+  },
+
+  "segments": [
+    { "file": "segment1.log", "from": "00:17:32", "to": "00:25:23", "maxTurn": 11, "maxTechLevel": 5, "attackBlocks": 84, "endsWith": "truncationBanner" },
+    { "file": "segment2.log", "from": "00:27:01", "to": "00:31:04", "maxTurn": 17, "maxTechLevel": 6, "attackBlocks": 52, "endsWith": "truncationBanner" },
+    { "file": "segment3.log", "from": "00:33:39", "to": "00:37:47", "maxTurn": 21, "maxTechLevel": 6, "attackBlocks": 18, "endsWith": "truncationBanner" },
+    { "file": "segment4.log", "from": "00:38:56", "to": "00:41:41", "maxTurn": 24, "maxTechLevel": 6, "attackBlocks": 17, "endsWith": "finalGameOver" }
+  ],
+
+  "$gapsComment": [
+    "Провалы между сегментами — время, пока клиент перезапускался.",
+    "Событий за них нет, но состояние не теряется: каждый сегмент после",
+    "первого начинается с полного дампа (DebugPrintPowerList Count=177",
+    "против Count=44 при обычном старте партии)."
+  ],
+  "gaps": [
+    { "afterSegment": 1, "from": "00:25:23", "to": "00:27:01", "minutes": 1.6 },
+    { "afterSegment": 2, "from": "00:31:04", "to": "00:33:39", "minutes": 2.6 },
+    { "afterSegment": 3, "from": "00:37:47", "to": "00:38:56", "minutes": 1.1 }
+  ],
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "segment": 4,
+      "anchor": "TAG_CHANGE Entity=GameEntity tag=STEP value=FINAL_GAMEOVER",
+      "verifiedBy": "человек, подтверждено 03.08.2026",
+      "expect": {
+        "phase": "gameOver",
+        "hero": {
+          "cardId": "BG22_HERO_201_SKIN_D",
+          "localizedName": "Благой Фаэлин",
+          "entityId": 104
+        },
+        "finalPlace": 4,
+        "playState": "LOST"
+      },
+      "$note": [
+        "Отсюда выведено правило: в финальном списке мест свой герой лежит",
+        "в zone=PLAY, чужие — в SETASIDE. Правило подтверждено человеком",
+        "и только поэтому может использоваться в коде."
+      ]
+    }
+  ],
+
+  "$todo": [
+    "Разметить контрольные точки по ходу партии: состав борда, золото,",
+    "тир и hp на конкретных ходах. Требует ручной сверки с записью игры."
+  ]
+}

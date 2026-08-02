@@ -121,7 +121,15 @@ LogInfo                 m_truncatePos
 ## Чтение файла
 
 - **Кодировка UTF-8 без BOM.** Первые байты — сразу `44 20 32 32` (`D 22`), сигнатуры нет.
-- **Переводы строк CRLF** (`0D 0A`).
+- **Переводы строк смешанные.** Обычные строки завершаются CRLF, а рамка и баннер
+  обрезки — одиночными LF. Хвост `segment1.log` побайтово:
+
+  ```
+  ...errorParam=<CR><LF><LF><LF>====<LF>Truncating log...<LF>====<LF><CR><LF>
+  ```
+
+  Разбиение только по CRLF склеивает весь баннер в одну строку и прячет тот факт,
+  что лог оборван. Разбивать надо по `/\r?\n/`.
 - ⚠️ Читать строго как UTF-8. При чтении в системной кодировке Windows парсер не падает,
   а тихо портит кириллицу: `PlayerName=Клеопатра` превращается в `РљР»РµРѕРїР°С‚СЂР°`.
 - ⚠️ **Файл держит запущенная игра.** Открытие без разделяемого доступа падает с
@@ -166,6 +174,15 @@ D 22:32:25.3752664 GameState.DebugPrintPower() -     GameEntity EntityID=7
 
 Наблюдались: `TAG_CHANGE` (5906), `BLOCK_START`/`BLOCK_END` (по 456), `FULL_ENTITY` (294),
 `SHOW_ENTITY` (78), `HIDE_ENTITY` (62), `META_DATA` (84), `SUB_SPELL_START`/`SUB_SPELL_END` (по 26).
+
+Источник — **не всегда** `Класс.Метод`. В фикстурах 24 раза за партию встречается
+
+```
+D 00:25:07.8784271 PowerSpellController [taskListId=2162].InitPowerSpell() - FAILED to attach…
+```
+
+то есть с пробелом и скобками внутри. Брать источник надо нежадно до первого `() -`,
+а не по списку допустимых символов.
 
 Дескриптор сущности:
 
@@ -248,6 +265,45 @@ option 4 type=POWER mainEntity=[… id=408 zonePos=1 cardId=BG35_814 player=11] 
 
 - `PowerProcessor.DoTaskListForCard() - unhandled BlockType PLAY for sourceEntity […]` —
   это клиент не нашёл анимацию, не ошибка парсинга.
+
+## Конец партии — подтверждено человеком
+
+Партия 1 из фикстур, `segment4.log`, 03.08.2026:
+
+```
+TAG_CHANGE Entity=AngryMem#2886 tag=PLAYSTATE value=LOST
+TAG_CHANGE Entity=Shockwave     tag=PLAYSTATE value=WON
+TAG_CHANGE Entity=GameEntity    tag=NEXT_STEP value=FINAL_GAMEOVER
+TAG_CHANGE Entity=[… Лесной властелин Кенарий … cardId=BG32_HERO_001 …]      PLAYER_LEADERBOARD_PLACE=1
+TAG_CHANGE Entity=[… Змееуст Вайш … cardId=BG23_HERO_304_SKIN_B …]           PLAYER_LEADERBOARD_PLACE=2
+TAG_CHANGE Entity=[… Алекстраза … cardId=TB_BaconShop_HERO_56 …]             PLAYER_LEADERBOARD_PLACE=3
+TAG_CHANGE Entity=[… Благой Фаэлин … cardId=BG22_HERO_201_SKIN_D player=6]   PLAYER_LEADERBOARD_PLACE=4
+TAG_CHANGE Entity=GameEntity    tag=STEP value=FINAL_GAMEOVER
+```
+
+Игрок подтвердил: он играл Благим Фаэлином и занял 4-е место. Отсюда следует правило,
+которое **можно** использовать в коде, потому что оно проверено человеком:
+
+> В финальном списке мест свой герой лежит в `zone=PLAY`, чужие — в `SETASIDE`.
+
+Финал отмечается `STEP`/`NEXT_STEP` со значением `FINAL_GAMEOVER`, а собственный исход —
+тегом `PLAYSTATE` на сущности с BattleTag игрока.
+
+## Реконнект
+
+Сегменты 2–4 партии 1 начинаются с полного дампа состояния: `DebugPrintPowerList - Count=177`
+против `Count=44` при обычном старте партии. Благодаря этому части сшиваются по состоянию,
+а не по непрерывности событий, и провалы в 1–3 минуты между ними не ломают восстановление.
+
+Скорость роста `Power.log` в BG растёт по ходу партии — борды больше, событий на ход больше:
+
+| фаза партии | скорость | запас до предела |
+|---|---|---|
+| начало, ходы 1–11 | ≈1.1 МБ/мин | ≈9 минут |
+| середина, ходы 12–21 | ≈2.0 МБ/мин | ≈5 минут |
+| конец, ходы 22+ | ≈3.2 МБ/мин | ≈3 минуты |
+
+То есть перезапускаться надо не по часам, а по факту: каждые ~3 минуты к концу партии.
 
 ## Гипотезы — НЕ использовать в коде до подтверждения
 
