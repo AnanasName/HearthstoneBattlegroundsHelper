@@ -54,25 +54,58 @@ Truncating log, which has reached the size limit of 10000KB
 `Zone.log` рос быстрее (≈1.7 МБ/мин против ≈1.0 у `Power.log`) и упёрся первым,
 утащив за собой всё остальное. Игрок после этого отыграл ещё почти час — в логах пусто.
 
-### Через log.config это НЕ настраивается
+### Через log.config это НЕ настраивается — но настраивается через client.config
 
-Проверено отражением по `Blizzard.T5.Logging.dll`:
+В `log.config` ключа для лимита нет: там разбираются ровно восемь ключей
+(`ConsolePrinting`, `ScreenPrinting`, `FilePrinting`, `MinLevel`, `DefaultLevel`,
+`AlwaysPrintErrors`, `TruncatePos`, `Verbose`), и `TruncatePos` к размеру файла
+отношения не имеет — это обрезка длины отдельного сообщения. Проверено на практике:
+`TruncatePos=200000` лимит не изменил.
+
+Однако лимит читается из **другого файла**. Восстановлено по IL (метод найден перебором
+строковых токенов, вызовы разрешены через `Module.ResolveMethod`):
 
 ```
-LogSessionConfig        MaxFileSizeKilobytes, MaxFileSizeBytes,
-                        MayLimitMaxFileSize, LogWritesBetweenCheckingMaxFileSize
-StandardFileLogPrinter  CloseIfMaxFileSizeReached, m_maxFileSizeLimitReached
-LogInfo                 m_truncatePos
+Log.PopulateLogSessionConfigOptions (Assembly-CSharp.dll):
+    new ConfigFile()
+    PlatformFilePaths.GetClientConfigPath()      // GetPathForConfigFile("client.config")
+    ConfigFile.FullLoad(...)
+    ConfigFile.Get("Log.FileSizeLimit.Int", 10000)
+    LogSessionConfig.set_MaxFileSizeKilobytes(...)
 ```
 
-`MaxFileSizeKilobytes` отсутствует среди строковых литералов, по которым разбирается
-`log.config` (там ровно восемь ключей, перечисленных выше) — значит предел задан в коде.
-`TruncatePos` к размеру файла отношения не имеет: это обрезка длины отдельного
-сообщения. Проверено на практике — `TruncatePos=200000` не изменил лимит,
-запись снова встала на 10 243 732 и 10 251 973 байтах.
+То есть: `%LOCALAPPDATA%\Blizzard\Hearthstone\client.config`, полный ключ
+`Log.FileSizeLimit.Int`, дефолт 10000 КБ. `ConfigFile` (`Blizzard.T5.Configuration.dll`) —
+тот же INI-парсер, что читает log.config: `FindEntryIndex` сравнивает полный ключ,
+склеенный из секции и имени, поэтому файл выглядит так:
 
-`CloseIfMaxFileSizeReached` + одноразовый флаг `m_maxFileSizeLimitReached` означают,
-что принтер закрывается насовсем. Ротации нет, дозаписи после лимита нет.
+```
+[Log]
+FileSizeLimit.Int=-1
+```
+
+Семантика значения — из IL `Blizzard.T5.Logging.dll`:
+
+- `LogSessionConfig..ctor`: `ldc.i4 0x2710` → дефолт 10000 КБ зашит; проверка размера
+  каждые 100 записей (`LogWritesBetweenCheckingMaxFileSize`).
+- `get_MayLimitMaxFileSize` = `MaxFileSizeKilobytes > -1` → **отрицательное значение
+  выключает лимит**.
+- `CloseIfMaxFileSizeReached` начинается с `if (!MayLimitMaxFileSize) return` —
+  при выключенном лимите до сравнений размера дело не доходит, значит `-1` безопасен.
+- Одноразовый флаг `m_maxFileSizeLimitReached`: после срабатывания лимита принтер
+  закрыт насовсем, ротации нет. Поэтому опция должна стоять ДО запуска клиента.
+
+client.config игра только читает (в отличие от options.txt, который она перезаписывает
+при выходе) — файл можно класть при работающем клиенте, подхватится со следующего запуска.
+
+Статус: ⚠️ **выведено из IL, на живой партии ещё не проверено.** Протокол проверки:
+одна полная партия BG без перезапусков; успех = `Power.log` больше 10 250 000 байт,
+баннера нет, `FINAL_GAMEOVER` в конце. До подтверждения реконнект-метод не хоронить.
+
+Методическая заметка: строка `Log.FileSizeLimit.Int` не находилась обычным поиском,
+потому что UTF-16-литералы в сборках лежат и по нечётным смещениям — сканировать надо
+в обоих выравниваниях. Первые сканы этим страдали и пропустили в том числе сам текст
+баннера.
 
 ### Что это значит на практике
 
@@ -109,12 +142,13 @@ LogInfo                 m_truncatePos
 закрыл файл по лимиту — но тогда она бесполезна: `m_maxFileSizeLimitReached` уже взведён,
 и запись не возобновляется. Проверено: обрезанный в 0 `Power.log` так и остался нулевым.
 
-### Рабочий обходной путь: реконнект
+### Обходной путь, если client.config не подтвердится: реконнект
 
-Единственный способ получить партию BG целиком — **перезапустить клиент прямо посреди
-партии**. Battlegrounds позволяет переподключиться к идущей игре, при этом создаётся новая
-папка сессии с собственным лимитом в 10000 КБ, а клиент делает полный дамп состояния.
-Полная партия собирается из двух логов: до перезапуска и после.
+До подтверждения `Log.FileSizeLimit.Int` единственный проверенный способ получить партию
+BG целиком — **перезапустить клиент прямо посреди партии**. Battlegrounds позволяет
+переподключиться к идущей игре, при этом создаётся новая папка сессии с собственным
+лимитом в 10000 КБ, а клиент делает полный дамп состояния. Полная партия собирается
+из нескольких логов; партия 1 в фикстурах собрана именно так, из четырёх частей.
 
 Побочная польза: это единственный способ увидеть, как выглядит дамп при реконнекте.
 
