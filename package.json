@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "capture": "tsx src/ui/capture.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
