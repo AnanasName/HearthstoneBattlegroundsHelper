@@ -121,13 +121,24 @@ async function main(): Promise<void> {
         tailer.offset >= opts.truncateAtBytes
       ) {
         const before = tailer.offset;
-        await tailer.truncateSource();
-        truncations += 1;
-        justTruncated = true;
-        console.log(
-          `--- обнулил источник на ${mb(before)} МБ (обнулений: ${truncations}, ` +
-            `в архиве ${mb(captured)} МБ)`,
-        );
+        try {
+          await tailer.truncateSource();
+          truncations += 1;
+          justTruncated = true;
+          console.log(
+            `--- обнулил источник на ${mb(before)} МБ (обнулений: ${truncations}, ` +
+              `в архиве ${mb(captured)} МБ)`,
+          );
+        } catch (err) {
+          // Проверено 02.08: пока клиент пишет в лог, он держит файл так, что
+          // открыть его на запись нельзя — EBUSY. Обрезка снаружи невозможна.
+          truncationDisabled = true;
+          console.log(
+            `\n!!! обнулить источник не вышло: ${String(err)}\n` +
+              '!!! живой лог держит клиент, обрезка снаружи невозможна.\n' +
+              '!!! продолжаю просто вычитывать.\n',
+          );
+        }
       }
     }
 
