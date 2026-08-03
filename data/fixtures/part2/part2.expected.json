@@ -38,7 +38,7 @@
     {
       "id": "final-placement",
       "anchor": "TAG_CHANGE Entity=GameEntity tag=STEP value=FINAL_GAMEOVER",
-      "verifiedBy": "ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ ЧЕЛОВЕКОМ",
+      "verifiedBy": "человек, подтверждено 04.08.2026",
       "expect": {
         "phase": "gameOver",
         "hero": {
@@ -49,6 +49,28 @@
         "finalPlace": 5,
         "playState": "LOST"
       }
+    },
+    {
+      "id": "anomaly",
+      "anchor": "FULL_ENTITY - Creating ID=362 CardID=BG27_Anomaly_301",
+      "verifiedBy": "человек, подтверждено 04.08.2026",
+      "expect": {
+        "anomaly": {
+          "cardId": "BG27_Anomaly_301",
+          "dbId": 102075,
+          "localizedName": "Ложные идолы",
+          "englishName": "False Idols",
+          "entityId": 362,
+          "cardType": "BATTLEGROUND_ANOMALY"
+        }
+      },
+      "$note": [
+        "Игрок назвал аномалию партии, и она сошлась с логом сразу по двум",
+        "путям: тегом BACON_GLOBAL_ANOMALY_DBID=102075 на GameEntity и",
+        "отдельной сущностью с cardId. Значит маппинг dbId->cardId для",
+        "аномалий НЕ нужен: достаточно найти сущность с",
+        "CARDTYPE=BATTLEGROUND_ANOMALY."
+      ]
     }
   ],
 
@@ -58,10 +80,13 @@
     "Надёжнее опираться на TAG_CHANGE Entity=<BattleTag> tag=PLAYSTATE,",
     "где сущность названа по имени аккаунта, а не по герою.",
     "",
-    "Под player=4 в финале проходят ДВА разных id с одинаковым cardId",
-    "TB_BaconShop_HERO_70_SKIN_H: id=94 с местом 5 и id=16441 с местом 6.",
-    "Природа второй сущности не выяснена. До выяснения выбирать героя",
-    "только по id из PLAY/GRAVEYARD, не по cardId и не по player."
+    "Двойник героя объяснён. Под player=4 проходят два id с одним cardId:",
+    "id=94 — настоящий герой, 2812 упоминаний за партию; id=16441 — 20",
+    "упоминаний, все в концовке. Второй создан на строке 288743 (96% файла)",
+    "внутри BLOCK_START BlockType=DEATHS по триггеру BaconShop8PlayerEnchant,",
+    "сразу в SETASIDE. Это служебная копия на момент вылета игрока.",
+    "Вывод для парсера: своего героя брать по сущности, живущей всю партию,",
+    "а не по cardId — на концовке cardId перестаёт быть уникальным."
   ],
 
   "$todo": [
