@@ -22,3 +22,12 @@ export function part1Segment(n: 1 | 2 | 3 | 4): string {
 export function part1SegmentLines(n: 1 | 2 | 3 | 4): string[] {
   return splitLogLines(part1Segment(n));
 }
+
+/**
+ * Партия 2 — эталонная: полная партия Battlegrounds одним файлом, без
+ * переподключений и без провалов. 41 МБ, 301 289 строк, 23 минуты.
+ * Снята после снятия предела размера логов через client.config.
+ */
+export function part2Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part2', 'game.log'), 'utf8');
+}
