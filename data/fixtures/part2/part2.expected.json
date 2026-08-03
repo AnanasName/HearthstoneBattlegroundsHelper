@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "Полная партия Battlegrounds ОДНИМ файлом, без переподключений.",
+    "Снята 03.08.2026 после снятия предела размера логов через client.config",
+    "(Log.FileSizeLimit.Int=1000000 в каталоге установки, см. docs/power-log.md).",
+    "Это эталонная фикстура: в отличие от part1, здесь нет провалов между",
+    "сегментами и нет дампов реконнекта — непрерывный поток событий",
+    "от выбора героя до финального места.",
+    "",
+    "В checkpoints попадает ТОЛЬКО подтверждённое человеком."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-03T23:53:33+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerEntityId": 4
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 41394434,
+    "lines": 301289,
+    "from": "23:53:33",
+    "to": "00:16:36",
+    "durationMinutes": 23.0,
+    "truncationBanners": 0,
+    "createGameBlocks": 1,
+    "maxTurn": 24,
+    "maxTechLevel": 5,
+    "attackBlocks": 172,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "anchor": "TAG_CHANGE Entity=GameEntity tag=STEP value=FINAL_GAMEOVER",
+      "verifiedBy": "ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ ЧЕЛОВЕКОМ",
+      "expect": {
+        "phase": "gameOver",
+        "hero": {
+          "cardId": "TB_BaconShop_HERO_70_SKIN_H",
+          "localizedName": "Воришка Бигглсуорт",
+          "entityId": 94
+        },
+        "finalPlace": 5,
+        "playState": "LOST"
+      }
+    }
+  ],
+
+  "$observations": [
+    "Уточнение к правилу 'свой герой в zone=PLAY': оно верно в МОМЕНТ",
+    "STEP=FINAL_GAMEOVER, но сразу после герой уезжает в GRAVEYARD.",
+    "Надёжнее опираться на TAG_CHANGE Entity=<BattleTag> tag=PLAYSTATE,",
+    "где сущность названа по имени аккаунта, а не по герою.",
+    "",
+    "Под player=4 в финале проходят ДВА разных id с одинаковым cardId",
+    "TB_BaconShop_HERO_70_SKIN_H: id=94 с местом 5 и id=16441 с местом 6.",
+    "Природа второй сущности не выяснена. До выяснения выбирать героя",
+    "только по id из PLAY/GRAVEYARD, не по cardId и не по player."
+  ],
+
+  "$todo": [
+    "Разметить контрольные точки по ходу партии: состав борда, золото,",
+    "тир и hp на конкретных ходах. Требует записи экрана."
+  ]
+}
