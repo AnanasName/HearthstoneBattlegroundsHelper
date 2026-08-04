@@ -15,11 +15,15 @@ import { readFileSync } from 'node:fs';
 
 import { AllCardsService } from '@firestone-hs/reference-data';
 import { simulateBattle } from '@firestone-hs/simulate-bgs-battle';
-import type { BgsBattleInfo } from '@firestone-hs/simulate-bgs-battle/dist/bgs-battle-info';
-import type { BgsPlayerEntity } from '@firestone-hs/simulate-bgs-battle/dist/bgs-player-entity';
-import type { BoardEntity } from '@firestone-hs/simulate-bgs-battle/dist/board-entity';
-import { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data';
-import type { SimulationResult } from '@firestone-hs/simulate-bgs-battle/dist/simulation-result';
+// Пакет не объявляет карту exports, а точка входа реэкспортирует только
+// simulateBattle. Типы приходится брать глубокими импортами, и под NodeNext
+// они обязаны нести расширение .js — иначе tsc их не находит, хотя tsx
+// резолвит и код при этом работает.
+import type { BgsBattleInfo } from '@firestone-hs/simulate-bgs-battle/dist/bgs-battle-info.js';
+import type { BgsPlayerEntity } from '@firestone-hs/simulate-bgs-battle/dist/bgs-player-entity.js';
+import type { BoardEntity } from '@firestone-hs/simulate-bgs-battle/dist/board-entity.js';
+import { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data.js';
+import type { SimulationResult } from '@firestone-hs/simulate-bgs-battle/dist/simulation-result.js';
 
 const CARDS_PATH = 'data/cards/cards_enUS.json';
 
@@ -29,7 +33,9 @@ function hero(cardId: string, hpLeft: number, tavernTier: number): BgsPlayerEnti
 }
 
 function minion(entityId: number, cardId: string, attack: number, health: number): BoardEntity {
-  return { entityId, cardId, attack, health } as BoardEntity;
+  // Остальные поля BoardEntity опциональны — минимального набора хватает,
+  // чтобы симулятор отработал. Что стоит добавить, перечислено в docs/simulator.md.
+  return { entityId, cardId, attack, health };
 }
 
 function run(
