@@ -9,6 +9,7 @@
   },
   "scripts": {
     "capture": "tsx src/ui/capture.ts",
+    "demo:phase1": "tsx src/ui/demo-phase1.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

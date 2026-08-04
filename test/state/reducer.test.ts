@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
+import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
-import { reduceLog } from '../../src/state/reducer.js';
+import { createReducer, reduceLog } from '../../src/state/reducer.js';
+import type { GameState } from '../../src/state/types.js';
 import { part2Game } from '../fixtures.js';
+
+/** Снимки состояния по ходу партии — иначе видно только финал. */
+function snapshots(): GameState[] {
+  const text = part2Game();
+  const reducer = createReducer(readPlayers(text));
+  const out: GameState[] = [];
+  let n = 0;
+
+  for (const event of readPowerEvents(text)) {
+    reducer.step(event);
+    n += 1;
+    if (n % 500 === 0) out.push(reducer.snapshot());
+  }
+  return out;
+}
 
 /**
  * Сверка с data/fixtures/part2/part2.expected.json — теми точками,
@@ -77,5 +94,70 @@ describe('reduceLog на эталонной партии', () => {
   it('позиции борда идут по возрастанию', () => {
     const positions = state.board.map((m) => m.zonePos);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+});
+
+describe('магазин и борд противника по ходу партии', () => {
+  const shots = snapshots();
+
+  it('снимков достаточно, и обе фазы встречаются', () => {
+    expect(shots.length).toBeGreaterThan(50);
+    expect(shots.some((s) => s.phase === 'tavern')).toBe(true);
+    expect(shots.some((s) => s.phase === 'combat')).toBe(true);
+  });
+
+  it('свой борд нигде за партию не превышает семи миньонов', () => {
+    const worst = Math.max(...shots.map((s) => s.board.length));
+    expect(worst).toBeLessThanOrEqual(7);
+  });
+
+  it('магазин заполняется в таверне и пуст вне её', () => {
+    const inTavern = shots.filter((s) => s.phase === 'tavern');
+    expect(inTavern.some((s) => s.shop.length > 0)).toBe(true);
+
+    for (const s of shots) {
+      if (s.phase !== 'tavern') expect(s.shop).toHaveLength(0);
+    }
+  });
+
+  it('размер магазина правдоподобен: не больше семи позиций', () => {
+    const worst = Math.max(...shots.map((s) => s.shop.length));
+    expect(worst).toBeGreaterThan(0);
+    expect(worst).toBeLessThanOrEqual(7);
+  });
+
+  it('борд противника виден в бою и пуст вне боя', () => {
+    const inCombat = shots.filter((s) => s.phase === 'combat');
+    expect(inCombat.some((s) => s.opponentBoard.length > 0)).toBe(true);
+
+    for (const s of shots) {
+      if (s.phase !== 'combat') expect(s.opponentBoard).toHaveLength(0);
+    }
+  });
+
+  it('борд противника тоже не длиннее семи', () => {
+    const worst = Math.max(...shots.map((s) => s.opponentBoard.length));
+    expect(worst).toBeLessThanOrEqual(7);
+  });
+
+  it('магазин и борд противника никогда не заполнены одновременно', () => {
+    for (const s of shots) {
+      expect(s.shop.length > 0 && s.opponentBoard.length > 0).toBe(false);
+    }
+  });
+
+  it('золото за партию не выходит за разумные пределы', () => {
+    for (const s of shots) {
+      expect(s.gold).toBeGreaterThanOrEqual(0);
+      expect(s.gold).toBeLessThanOrEqual(20);
+    }
+  });
+
+  it('тир таверны растёт монотонно и доходит до 5', () => {
+    const levels = shots.map((s) => s.techLevel);
+    for (let i = 1; i < levels.length; i += 1) {
+      expect(levels[i]!).toBeGreaterThanOrEqual(levels[i - 1]!);
+    }
+    expect(Math.max(...levels)).toBe(5);
   });
 });

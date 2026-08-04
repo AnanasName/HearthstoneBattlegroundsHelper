@@ -216,6 +216,19 @@ export function createReducer(players: Players): Reducer {
       return;
     }
 
+    // HIDE_ENTITY несёт смену зоны прямо в строке и начинается не с TAG_CHANGE,
+    // поэтому без отдельной ветки все 1221 событие скрытия проваливались мимо
+    // разбора, и убранные сущности оставались в PLAY.
+    if (content.startsWith('HIDE_ENTITY')) {
+      const hidden = descriptorHere;
+      const m = /\btag=(\w+) value=(-?\w+)\s*$/.exec(content);
+      if (hidden !== null && m?.[1] !== undefined && m[2] !== undefined) {
+        applyToEntity(touch(hidden.id, hidden.cardId), m[1], m[2]);
+      }
+      current = null;
+      return;
+    }
+
     const tagLine = TAG_RE.exec(content);
     if (tagLine !== null) {
       const [, tag, value] = tagLine;
@@ -276,15 +289,24 @@ export function createReducer(players: Players): Reducer {
     // Белый список, а не чёрный: у части сущностей CARDTYPE в логе не встречается
     // вовсе, и при фильтрации «всё кроме» они молча оказывались на борду —
     // 455 штук вместо максимум семи. Берём только явные MINION.
-    const mine = (zone: string): Minion[] =>
+    const minionsIn = (zone: string, ownedBySelf: boolean): Minion[] =>
       self === null
         ? []
         : [...entities.values()]
             .filter(
-              (e) => e.controller === self && e.zone === zone && e.cardType === 'MINION',
+              (e) =>
+                e.cardType === 'MINION' &&
+                e.zone === zone &&
+                (ownedBySelf ? e.controller === self : e.controller !== self),
             )
             .sort((a, b) => a.zonePos - b.zonePos)
             .map(toMinion);
+
+    const mine = (zone: string): Minion[] => minionsIn(zone, true);
+
+    // Чужие миньоны в PLAY — это магазин в таверне и борд противника в бою.
+    // Различает их только фаза: сама зона и контроллер одинаковые.
+    const theirs = phase === 'gameOver' ? [] : minionsIn('PLAY', false);
 
     return {
       ...EMPTY_STATE,
@@ -299,6 +321,8 @@ export function createReducer(players: Players): Reducer {
       playerId: self,
       board: mine('PLAY'),
       hand: mine('HAND'),
+      shop: phase === 'tavern' ? theirs : [],
+      opponentBoard: phase === 'combat' ? theirs : [],
       hero:
         heroEntity === undefined || heroEntity === null
           ? null

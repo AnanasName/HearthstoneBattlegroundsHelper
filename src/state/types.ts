@@ -61,6 +61,21 @@ export interface GameState {
   readonly board: readonly Minion[];
   /** Своя рука. */
   readonly hand: readonly Minion[];
+  /**
+   * Магазин таверны. Непуст только в фазе `tavern`.
+   *
+   * Это миньоны в `zone=PLAY` под чужим контроллером. Подтверждено блоком
+   * покупки: цель `TB_BaconShop_DragBuy` — именно такой миньон.
+   */
+  readonly shop: readonly Minion[];
+  /**
+   * Борд противника. Непуст только в фазе `combat`.
+   *
+   * Те же чужие миньоны в `zone=PLAY`, что и магазин, — различает их только
+   * фаза. В таверне чужой слот занимает Бармен Боб, на бой в него
+   * подставляется оппонент.
+   */
+  readonly opponentBoard: readonly Minion[];
   /** Аномалия партии, `cardId` сущности с `CARDTYPE=BATTLEGROUND_ANOMALY`. */
   readonly anomalyCardId: string | null;
   /** Финальное место, появляется на `FINAL_GAMEOVER`. */
@@ -80,6 +95,8 @@ export const EMPTY_STATE: GameState = {
   hero: null,
   board: [],
   hand: [],
+  shop: [],
+  opponentBoard: [],
   anomalyCardId: null,
   finalPlace: null,
   playerBattleTag: null,
