@@ -10,6 +10,7 @@
   "scripts": {
     "capture": "tsx src/ui/capture.ts",
     "demo:phase1": "tsx src/ui/demo-phase1.ts",
+    "spike:battle": "tsx src/advisors/battle/spike.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,5 +25,8 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.47.0",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@firestone-hs/simulate-bgs-battle": "^1.1.726"
   }
 }
