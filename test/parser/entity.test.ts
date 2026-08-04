@@ -80,9 +80,12 @@ describe('parseEntityRef', () => {
     expect(byId).toEqual({ kind: 'id', id: 1 });
 
     const byDesc = parseEntityRef(
-      '[entityName=Бармен Боб id=64 zone=PLAY zonePos=0 cardId=TB_BaconShopBob player=4] tag=X value=1',
+      '[entityName=Бармен Боб id=62 zone=PLAY zonePos=0 cardId=TB_BaconShopBob player=12] tag=X value=1',
     );
     expect(byDesc?.kind).toBe('descriptor');
+    // Боб принадлежит НЕ игроку: в партии 2 игрок это player=4, а Боб — player=12,
+    // все 2319 упоминаний. На этом стоит различение магазина и своего борда.
+    expect(byDesc?.kind === 'descriptor' ? byDesc.descriptor.player : null).toBe(12);
   });
 
   it('BattleTag игрока — самый надёжный якорь для "кто я"', () => {
