@@ -7,6 +7,11 @@ coverage/
 # Оформленные fixtures в data/fixtures/ коммитятся.
 data/logs-raw/
 
+# Скриншоты для сверки разметки. В git не кладём: PNG по 5 МБ почти не жмутся,
+# восемь штук дали +40 МБ. Выводы из них живут в partN.expected.json,
+# сами картинки — сырьё, хранятся локально.
+data/screenshots/
+
 # Windows
 Thumbs.db
 desktop.ini
