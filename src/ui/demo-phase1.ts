@@ -37,7 +37,8 @@ function printState(state: GameState): void {
 
   console.log(
     `\n─── ход ${String(state.turn).padStart(2)}  фаза ${state.phase.padEnd(8)}  ` +
-      `тир ${String(state.techLevel)}  золото ${String(state.gold)}  hp ${hp}`,
+      `тир ${String(state.techLevel)}  ` +
+      `золото ${String(state.gold)}/${String(state.goldTotal)}  hp ${hp}`,
   );
 
   if (state.board.length > 0) {

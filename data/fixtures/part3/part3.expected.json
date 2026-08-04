@@ -1,0 +1,106 @@
+{
+  "$comment": [
+    "Партия, снятая 04.08.2026 вместе со скриншотами игрока.",
+    "Это первая фикстура, где контрольные точки проверены КАРТИНКОЙ,",
+    "а не только памятью человека: скриншоты лежат в data/screenshots/",
+    "и сверялись с выводом npm run demo:phase1 напрямую.",
+    "",
+    "Важно про моменты времени: скриншоты сняты в середине фазы таверны,",
+    "а парсер печатает состояние на её КОНЕЦ. Поэтому отдельные значения",
+    "здоровья отличаются на единицу — между кадром и концом фазы миньон",
+    "успевал получить баф. Это не расхождение модели."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-04T12:38:39+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerEntityId": 3
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 22694032,
+    "lines": 158571,
+    "truncationBanners": 0,
+    "createGameBlocks": 1,
+    "maxTurn": 16,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "screenshot": "final_screen.png",
+      "verifiedBy": "скриншот, сверено 04.08.2026",
+      "expect": {
+        "phase": "gameOver",
+        "finalPlace": 8,
+        "hero": { "cardId": "TB_BaconShop_HERO_60", "entityId": 93 }
+      },
+      "$note": "На экране крупно: «8-е место!». Парсер вывел 8 независимо, из тегов."
+    },
+    {
+      "id": "mid-tavern-board-and-shop",
+      "screenshot": "fourth_turn.png",
+      "turn": 7,
+      "verifiedBy": "скриншот, сверено 04.08.2026",
+      "expect": {
+        "phase": "tavern",
+        "gold": 0,
+        "goldTotal": 6,
+        "hero": { "health": 30, "armor": 7 },
+        "board": [
+          { "zonePos": 1, "attack": 1, "health": 1 },
+          { "zonePos": 2, "attack": 4, "health": 5 },
+          { "zonePos": 3, "attack": 3, "health": 2 },
+          { "zonePos": 4, "attack": 2, "health": 6 },
+          { "zonePos": 5, "attack": 3, "health": 3 },
+          { "zonePos": 6, "attack": 2, "health": 8 }
+        ],
+        "shop": [
+          { "attack": 2, "health": 3 },
+          { "attack": 5, "health": 1 },
+          { "attack": 3, "health": 5 }
+        ]
+      },
+      "$note": [
+        "Магазин на экране совпал с парсером в точности — 2/3, 5/1, 3/5.",
+        "Это прямое подтверждение правила «магазин = чужие миньоны в PLAY",
+        "во время таверны», выведенного ранее из блока покупки.",
+        "Четвёртый миньон борда на кадре 2/5, у парсера 2/6 — разница моментов."
+      ]
+    },
+    {
+      "id": "late-tavern-board",
+      "screenshot": "eigth_turn.png",
+      "verifiedBy": "скриншот, сверено 04.08.2026",
+      "expect": {
+        "gold": 0,
+        "goldTotal": 10,
+        "techLevel": 5,
+        "board": [
+          { "zonePos": 1, "attack": 55, "health": 55 },
+          { "zonePos": 2, "attack": 8, "health": 3 },
+          { "zonePos": 3, "attack": 13, "health": 22 },
+          { "zonePos": 4, "attack": 12, "health": 12 },
+          { "zonePos": 5, "attack": 6, "health": 6 },
+          { "zonePos": 6, "attack": 13, "health": 15 }
+        ]
+      },
+      "$note": [
+        "Порядок слева направо совпал полностью, атака у всех шести точно.",
+        "Здоровье третьего на кадре 21, у парсера 22 — разница моментов."
+      ]
+    }
+  ],
+
+  "$foundByScreenshots": [
+    "Золото считалось неверно: показывалось RESOURCES (сколько выдано на ход)",
+    "вместо остатка. Экран показывал 0/6 и 0/10, парсер — 6 и 10.",
+    "Прямого тега на остаток в логе нет, он считается как",
+    "RESOURCES минус RESOURCES_USED."
+  ]
+}

@@ -81,7 +81,7 @@ export function createReducer(players: Players): Reducer {
   let phase: Phase = 'tavern';
   let turn = 0;
   let techLevel = 1;
-  let gold = 0;
+  let goldTotal = 0;
   let goldSpent = 0;
   let anomalyCardId: string | null = null;
   let finalPlace: number | null = null;
@@ -165,7 +165,7 @@ export function createReducer(players: Players): Reducer {
         if (subject.kind === 'self' && n !== null) techLevel = n;
         return;
       case 'RESOURCES':
-        if (subject.kind === 'self' && n !== null) gold = n;
+        if (subject.kind === 'self' && n !== null) goldTotal = n;
         return;
       case 'RESOURCES_USED':
         if (subject.kind === 'self' && n !== null) goldSpent = n;
@@ -313,7 +313,9 @@ export function createReducer(players: Players): Reducer {
       phase,
       turn,
       techLevel,
-      gold,
+      // Остаток, а не выданное на ход: в игре слева от дроби показан именно он.
+      gold: Math.max(0, goldTotal - goldSpent),
+      goldTotal,
       goldSpent,
       anomalyCardId,
       finalPlace,

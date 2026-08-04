@@ -31,3 +31,11 @@ export function part1SegmentLines(n: 1 | 2 | 3 | 4): string[] {
 export function part2Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part2', 'game.log'), 'utf8');
 }
+
+/**
+ * Партия 3 — снята вместе со скриншотами игрока, поэтому её контрольные точки
+ * проверены изображением, а не памятью. Скриншоты в data/screenshots/.
+ */
+export function part3Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part3', 'game.log'), 'utf8');
+}

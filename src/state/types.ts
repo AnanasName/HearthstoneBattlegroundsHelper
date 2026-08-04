@@ -52,8 +52,16 @@ export interface GameState {
   readonly turn: number;
   /** Тир таверны из `PLAYER_TECH_LEVEL`. */
   readonly techLevel: number;
-  /** Текущее золото. */
+  /**
+   * Доступное золото — именно оно показано в игре слева от дроби.
+   *
+   * В логе прямого тега на остаток нет: `RESOURCES` — сколько золота выдано
+   * на ход, `RESOURCES_USED` — сколько потрачено. Остаток считается разностью.
+   * Проверено по скриншоту: экран показывал `0/6` при `RESOURCES=6`.
+   */
   readonly gold: number;
+  /** Всего золота на ход — знаменатель дроби на экране, тег `RESOURCES`. */
+  readonly goldTotal: number;
   /** Потрачено золота за ход — `RESOURCES_USED`. */
   readonly goldSpent: number;
   readonly hero: Hero | null;
@@ -91,6 +99,7 @@ export const EMPTY_STATE: GameState = {
   turn: 0,
   techLevel: 1,
   gold: 0,
+  goldTotal: 0,
   goldSpent: 0,
   hero: null,
   board: [],
