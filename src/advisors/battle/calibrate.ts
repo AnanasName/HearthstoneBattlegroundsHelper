@@ -17,13 +17,11 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { AllCardsService } from '@firestone-hs/reference-data';
-import { simulateBattle } from '@firestone-hs/simulate-bgs-battle';
-import { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data.js';
 import type { SimulationResult } from '@firestone-hs/simulate-bgs-battle/dist/simulation-result.js';
 
 import { readBattleEpisodes, type BattleEpisode, type Outcome } from './episodes.js';
 import { toBattleInfo } from './mapper.js';
+import { createBattleSimulator } from './simulator.js';
 
 const FIXTURES = [
   'data/fixtures/part2/game.log',
@@ -45,24 +43,8 @@ function predicted(result: SimulationResult, outcome: Outcome): number {
   }
 }
 
-function run(
-  episode: BattleEpisode,
-  cards: AllCardsService,
-  cardsData: CardsData,
-): SimulationResult {
-  const generator = simulateBattle(toBattleInfo(episode, SIMULATIONS), cards, cardsData);
-  let step = generator.next();
-  while (step.done !== true) step = generator.next();
-  return step.value;
-}
-
 function main(): void {
-  const cards = new AllCardsService();
-  cards.initializeCardsDbFromCards(
-    JSON.parse(readFileSync('data/cards/cards_enUS.json', 'utf8')) as never,
-  );
-  const cardsData = new CardsData(cards, false);
-  cardsData.inititialize();
+  const simulator = createBattleSimulator();
 
   const rows: {
     fixture: string;
@@ -78,7 +60,7 @@ function main(): void {
     console.log('  ход   мой борд  враг   факт        предсказано (побед/ничьих/поражений)');
 
     for (const episode of episodes) {
-      const result = run(episode, cards, cardsData);
+      const result = simulator.run(toBattleInfo(episode, SIMULATIONS));
       const p = predicted(result, episode.outcome);
       rows.push({ fixture: short, episode, result, p });
 

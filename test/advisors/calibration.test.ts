@@ -1,12 +1,8 @@
-import { readFileSync } from 'node:fs';
-
-import { AllCardsService } from '@firestone-hs/reference-data';
-import { simulateBattle } from '@firestone-hs/simulate-bgs-battle';
-import { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { readBattleEpisodes, type BattleEpisode } from '../../src/advisors/battle/episodes.js';
 import { toBattleInfo } from '../../src/advisors/battle/mapper.js';
+import { createBattleSimulator } from '../../src/advisors/battle/simulator.js';
 import { part2Game, part3Game } from '../fixtures.js';
 
 /**
@@ -30,20 +26,12 @@ describe('калибровка симулятора на боях с извес�
   let rows: Row[] = [];
 
   beforeAll(() => {
-    const cards = new AllCardsService();
-    cards.initializeCardsDbFromCards(
-      JSON.parse(readFileSync('data/cards/cards_enUS.json', 'utf8')) as never,
-    );
-    const cardsData = new CardsData(cards, false);
-    cardsData.inititialize();
+    const simulator = createBattleSimulator();
 
     rows = [];
     for (const text of [part2Game(), part3Game()]) {
       for (const episode of readBattleEpisodes(text)) {
-        const generator = simulateBattle(toBattleInfo(episode, SIMULATIONS), cards, cardsData);
-        let step = generator.next();
-        while (step.done !== true) step = generator.next();
-        const r = step.value;
+        const r = simulator.run(toBattleInfo(episode, SIMULATIONS));
 
         const actualProbability =
           episode.outcome === 'won'

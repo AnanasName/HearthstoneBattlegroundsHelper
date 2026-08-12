@@ -11,9 +11,7 @@
  * Скрипт оставлен в репозитории намеренно: замеры надо перепроверять при
  * обновлении симулятора, а не доверять числам, записанным однажды в документацию.
  */
-import { readFileSync } from 'node:fs';
-
-import { AllCardsService } from '@firestone-hs/reference-data';
+import type { AllCardsService } from '@firestone-hs/reference-data';
 import { simulateBattle } from '@firestone-hs/simulate-bgs-battle';
 // Пакет не объявляет карту exports, а точка входа реэкспортирует только
 // simulateBattle. Типы приходится брать глубокими импортами, и под NodeNext
@@ -22,10 +20,10 @@ import { simulateBattle } from '@firestone-hs/simulate-bgs-battle';
 import type { BgsBattleInfo } from '@firestone-hs/simulate-bgs-battle/dist/bgs-battle-info.js';
 import type { BgsPlayerEntity } from '@firestone-hs/simulate-bgs-battle/dist/bgs-player-entity.js';
 import type { BoardEntity } from '@firestone-hs/simulate-bgs-battle/dist/board-entity.js';
-import { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data.js';
+import type { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data.js';
 import type { SimulationResult } from '@firestone-hs/simulate-bgs-battle/dist/simulation-result.js';
 
-const CARDS_PATH = 'data/cards/cards_enUS.json';
+import { loadCards } from './simulator.js';
 
 /** Минимальный герой: только обязательные поля BgsPlayerEntity. */
 function hero(cardId: string, hpLeft: number, tavernTier: number): BgsPlayerEntity {
@@ -38,6 +36,12 @@ function minion(entityId: number, cardId: string, attack: number, health: number
   return { entityId, cardId, attack, health };
 }
 
+/**
+ * Прогон с умолчаниями пакета, а не с нашими опциями.
+ *
+ * Намеренно: этот спайк отвечает на вопрос «что представляет собой пакет как
+ * он есть». Числа под наши настройки — в `npm run spike:position`.
+ */
 function run(
   input: BgsBattleInfo,
   cards: AllCardsService,
@@ -52,9 +56,7 @@ function run(
 function main(): void {
   // ─── 1. загрузка карт без сети ─────────────────────────────────────────────
   const started = Date.now();
-  const parsed: unknown = JSON.parse(readFileSync(CARDS_PATH, 'utf8'));
-  const cards = new AllCardsService();
-  cards.initializeCardsDbFromCards(parsed as never);
+  const { cards, cardsData } = loadCards();
   const all = cards.getCards();
   console.log(
     `карты: ${all.length.toLocaleString('ru-RU')} штук за ${String(Date.now() - started)} мс, из файла`,
@@ -86,9 +88,6 @@ function main(): void {
     }
   }
   console.log(missing === 0 ? '  все найдены' : `  отсутствует: ${String(missing)}`);
-
-  const cardsData = new CardsData(cards, false);
-  cardsData.inititialize();
 
   // ─── 3. пример боя из фикстуры part3, ход 7 ────────────────────────────────
   const example: BgsBattleInfo = {
@@ -153,11 +152,13 @@ function main(): void {
     `  фаза 2 (3000 симуляций ≤ 2000 мс): ${String(budget3000)} мс — ` +
       (budget3000 <= 2000 ? 'укладываемся' : 'НЕ укладываемся'),
   );
+  // Оценка снизу и только снизу: здесь не учтена постоянная часть вызова
+  // симулятора, а она стоит как семьдесят симуляций на каждом кандидате.
+  // Настоящие числа фазы 3 меряет `npm run spike:position`.
   const full = 5040 * 300 * perSim;
-  console.log(`  фаза 3, полный перебор 5040 x 300: ${(full / 1000).toFixed(0)} с в один поток`);
-  console.log(`  он же на 8 воркерах: ${(full / 1000 / 8).toFixed(0)} с`);
   console.log(
-    `  beam search 200 кандидатов x 300: ${((200 * 300 * perSim) / 1000).toFixed(1)} с в один поток`,
+    `  фаза 3, полный перебор 5040 x 300: не меньше ${(full / 1000).toFixed(0)} с в один поток` +
+      ` (без учёта накладных на вызов, см. spike:position)`,
   );
 }
 
