@@ -156,6 +156,38 @@ describe('энчанты', () => {
   });
 });
 
+describe('признаки миньонов и сила героя', () => {
+  const state = reduceLog(part2Game());
+
+  it('золотые определяются тегом PREMIUM, а не суффиксом _G', () => {
+    // В эталонной партии 25 золотых миньонов не имеют суффикса _G,
+    // обратных случаев нет ни одного — эвристика по имени пропускала их.
+    const golden = state.board.filter((m) => m.golden);
+    expect(golden.length).toBeGreaterThan(0);
+  });
+
+  it('maxHealth не меньше текущего здоровья', () => {
+    for (const m of [...state.board, ...state.hand]) {
+      if (m.health === null || m.maxHealth === null) continue;
+      expect(m.maxHealth).toBeGreaterThanOrEqual(m.health);
+    }
+  });
+
+  it('сила героя опознана', () => {
+    expect(state.hero?.heroPowerCardId).not.toBeNull();
+    expect(state.hero?.heroPowerCardId).toMatch(/^TB_BaconShop_HP_/);
+  });
+
+  it('ключевые слова читаются как булевы признаки', () => {
+    const all = [...state.board, ...state.shop, ...state.opponentBoard];
+    for (const m of all) {
+      expect(typeof m.taunt).toBe('boolean');
+      expect(typeof m.stealth).toBe('boolean');
+      expect(typeof m.divineShield).toBe('boolean');
+    }
+  });
+});
+
 describe('следующий противник известен заранее', () => {
   /**
    * Проверено на обеих полных партиях: объявление NEXT_OPPONENT_PLAYER_ID

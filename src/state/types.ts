@@ -54,8 +54,16 @@ export interface Minion {
   readonly venomous: boolean;
   readonly reborn: boolean;
   readonly windfury: boolean;
-  /** Золотой миньон. Признак пока не подтверждён, см. docs/power-log.md. */
+  readonly stealth: boolean;
+  /**
+   * Золотой миньон — тег `PREMIUM`.
+   *
+   * Не суффикс `_G` в `cardId`: в эталонной партии 25 золотых миньонов такого
+   * суффикса не имеют, тогда как обратных случаев нет ни одного.
+   */
   readonly golden: boolean;
+  /** Здоровье без учёта полученного урона — тег `HEALTH`. */
+  readonly maxHealth: number | null;
   /** Тир миньона из тега `TECH_LEVEL`. */
   readonly techLevel: number | null;
   /** Наложенные энчанты, в порядке наложения. */
@@ -78,6 +86,9 @@ export interface Hero {
   readonly health: number | null;
   readonly armor: number;
   readonly damage: number;
+  /** Сила героя — сущность `CARDTYPE=HERO_POWER` под своим контроллером. */
+  readonly heroPowerCardId: string | null;
+  readonly heroPowerEntityId: number | null;
 }
 
 /**

@@ -95,15 +95,19 @@ simulateBattle(
 |---|---|
 | `entityId`, `cardId`, `attack`, `health` | ✅ есть |
 | `taunt`, `divineShield`, `poisonous`, `venomous`, `reborn`, `windfury` | ✅ есть |
+| `stealth` | ✅ есть |
 | `tavernTier` | ✅ есть как `techLevel` |
-| `cleave` | ❌ нет |
-| `stealth` | ❌ нет |
-| `enchantments: BoardEnchantment[]` | ❌ нет |
-| `scriptDataNum1…6` | ❌ нет, в логе это `TAG_SCRIPT_DATA_NUM_1…6` |
-| `tags: { [tag: number]: number }` | ❌ нет |
-| `maxHealth`, `maxAttack` | ❌ нет |
+| `enchantments: BoardEnchantment[]` | ✅ есть |
+| `scriptDataNum1…6` | ✅ есть |
+| `tags: { [tag: number]: number }` | ✅ есть |
+| `maxHealth` | ✅ есть |
+| `cleave` | ⚠️ тега в логе нет вовсе — это свойство карты, симулятор возьмёт его из базы по `cardId` |
+| `maxAttack` | ⚠️ отдельного тега нет; `ATK` и так максимум |
 | `avengeCurrent`, `avengeDefault` | ❌ нет |
 | `frenzyChargesLeft` | ❌ нет |
+
+Отдельно про золотых: признак — **тег `PREMIUM`**, а не суффикс `_G` в `cardId`.
+В эталонной партии 25 золотых миньонов суффикса не имеют, обратных случаев ноль.
 
 `BoardEnchantment` — это `{ cardId, timing, tagScriptDataNum1?, tagScriptDataNum2?, … }`.
 То есть симулятору нужны энчанты **списком с их cardId**, а не только итоговые
@@ -117,11 +121,28 @@ simulateBattle(
 | поле | статус |
 |---|---|
 | `cardId`, `hpLeft`, `tavernTier` | ✅ есть |
-| `heroPowers: BgsHeroPower[]` | ❌ нет |
+| `heroPowers: BgsHeroPower[]` | ⚠️ `cardId` и `entityId` силы героя есть; счётчики использования нет |
+| `hand: BoardEntity[]` | ✅ рука собирается теми же полями, что борд |
+| `globalInfo` | ⚠️ семь полей из ~60, см. ниже |
 | `questEntities`, `questRewards` | ❌ нет |
-| `trinkets: BoardTrinket[]` | ❌ нет, хотя в фикстуре part1 тринкеты есть |
-| `hand: BoardEntity[]` | ⚠️ рука есть, но без полей BoardEntity |
-| `globalInfo` | ❌ нет, около 60 счётчиков |
+| `trinkets: BoardTrinket[]` | ❌ нет, механика требует разбора |
+
+**Про `globalInfo`.** Замаплены только те счётчики, для которых в фикстурах нашёлся
+именованный тег: потраченное золото, сыгранные заклинания, карты за ход, бафы
+элементалей и заклинаний таверны. Остальные приходят **безымянными числовыми
+тегами** — на сущности игрока их 62 штуки за партию, сопоставить их с полями
+симулятора не по чему. Плюс набор именованных тегов зависит от механик партии:
+счётчики кровавых самоцветов появятся только там, где были кабаны.
+
+**Про тринкеты.** В зоне `PLAY` лежат только слоты `BG30_Trinket_1st` и
+`BG30_Trinket_2nd`, а сами предметы (`BG30_MagicItem_*`, `BG35_MagicItem_*`)
+оказываются в `REMOVEDFROMGAME` — и взятые, и отвергнутые при выборе.
+Как отличить одно от другого, пока неясно; гадать не стали.
+
+**Про `validTribes`.** Теги `BACON_SUBSET_*` висят на самих миньонах, а не на
+`GameEntity`, то есть означают принадлежность карты к племени, а не список племён
+партии. За эталонную партию их семь разных, что больше обычного числа активных
+племён — значит вывести список прямым объединением нельзя.
 
 `BgsPlayerGlobalInfo` — набор накопительных счётчиков вроде
 `BloodGemAttackBonus`, `PiratesPlayedThisGame`, `UndeadAttackBonus`,

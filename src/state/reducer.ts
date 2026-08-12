@@ -99,9 +99,11 @@ function toMinion(e: Entity, enchantments: readonly Enchantment[]): Minion {
     venomous: flag(e, 'VENOMOUS'),
     reborn: flag(e, 'REBORN'),
     windfury: flag(e, 'WINDFURY'),
-    // Признак золотого пока не подтверждён; суффикс _G в cardId — наблюдение,
-    // встреченное в фикстуре (BG31_815_G), но правилом его считать рано.
-    golden: e.cardId.endsWith('_G'),
+    stealth: flag(e, 'STEALTH'),
+    // Тег PREMIUM, а не суффикс _G: 25 золотых миньонов эталонной партии
+    // такого суффикса не имеют, обратных случаев нет.
+    golden: flag(e, 'PREMIUM'),
+    maxHealth: health,
     techLevel: e.tags.get('TECH_LEVEL') ?? null,
   };
 }
@@ -479,6 +481,19 @@ export function createReducer(players: Players): Reducer {
     applyGlobal(tag, value, subject);
   };
 
+  /** Своя сила героя: живая сущность HERO_POWER под своим контроллером. */
+  const heroPower = (): { heroPowerCardId: string | null; heroPowerEntityId: number | null } => {
+    const self = players.selfPlayerId;
+    if (self === null) return { heroPowerCardId: null, heroPowerEntityId: null };
+
+    for (const e of entities.values()) {
+      if (e.cardType !== 'HERO_POWER' || e.controller !== self) continue;
+      if (DEAD_ZONES.has(e.zone) || e.cardId === '') continue;
+      return { heroPowerCardId: e.cardId, heroPowerEntityId: e.id };
+    }
+    return { heroPowerCardId: null, heroPowerEntityId: null };
+  };
+
   const snapshot = (): GameState => {
     const self = players.selfPlayerId;
     const heroEntity = heroEntityId === null ? null : entities.get(heroEntityId);
@@ -519,6 +534,7 @@ export function createReducer(players: Players): Reducer {
         heroEntity === undefined || heroEntity === null
           ? null
           : {
+              ...heroPower(),
               entityId: heroEntity.id,
               cardId: heroEntity.cardId,
               health: heroEntity.tags.get('HEALTH') ?? null,
