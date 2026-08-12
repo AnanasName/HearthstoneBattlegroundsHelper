@@ -35,14 +35,21 @@ class SilentPosition implements PositionSource {
   cancel(): void {}
 }
 
-/** Лог Hearthstone на диске: папка сессии клиента с Power.log внутри. */
-function makeLogsRoot(text: string): { logsRoot: string; powerLog: string } {
+/**
+ * Лог Hearthstone на диске: папка сессии клиента с Power.log внутри.
+ *
+ * `text === null` — сессия без лога: так выглядит только что запущенный
+ * клиент, ещё не вошедший в партию. Файл создаётся ЛЕНИВО, при первом
+ * сообщении канала: в сессии от 12.08 клиент стартовал в 21:17:17,
+ * а первая строка лога датирована 21:18:34.
+ */
+function makeLogsRoot(text: string | null): { logsRoot: string; powerLog: string } {
   const logsRoot = mkdtempSync(join(tmpdir(), 'hsbg-logs-'));
   const dir = join(logsRoot, 'Hearthstone_2026_08_13_00_00_00');
   mkdirSync(dir);
 
   const powerLog = join(dir, 'Power.log');
-  writeFileSync(powerLog, text, 'utf8');
+  if (text !== null) writeFileSync(powerLog, text, 'utf8');
   return { logsRoot, powerLog };
 }
 
@@ -82,6 +89,48 @@ describe('живая сессия на дописываемом файле', () 
     const state = onTavern.mock.calls[0]?.[1];
     expect(state?.hero).not.toBeNull();
     expect(state?.board.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('лог, появившийся после запуска помощника, подхватывается сам', async () => {
+    // Игрок запустил помощник, пока Hearthstone в меню: папка сессии есть,
+    // Power.log ещё нет. Требовать за это перезапуска помощника нельзя.
+    const started = makeLogsRoot(null);
+    logsRoot = started.logsRoot;
+
+    const onTavern = vi.fn<(advice: unknown, state: GameState) => void>();
+    const notices: string[] = [];
+    session = startLiveSession(
+      { cards: loadCardIndex(), position: new SilentPosition() },
+      {
+        onTavern,
+        onNotice: (notice) => {
+          notices.push(notice.kind);
+        },
+      },
+      { watcher: { logsRoot, pollMs: 20, sessionCheckMs: 60_000 }, advisor: { quietMs: 30 } },
+    );
+
+    await vi.waitFor(
+      () => {
+        expect(notices).toContain('noPowerLog');
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // Партия началась — клиент завёл файл.
+    const text = part3Game();
+    writeFileSync(started.powerLog, text.slice(0, Math.floor(text.length * 0.6)), 'utf8');
+
+    await vi.waitFor(
+      () => {
+        expect(onTavern).toHaveBeenCalled();
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+    expect(notices).toContain('watching');
+    // Именно «нашёлся впервые», а не «клиент перезапущен»: путать эти два
+    // события значит врать игроку о том, что произошло.
+    expect(notices).not.toContain('switched');
   }, 60_000);
 
   it('дописанные строки поднимают новый совет', async () => {

@@ -7,8 +7,8 @@ import { PositionWorker } from '../live/position/client.js';
 import { startLiveSession, type LiveSession } from '../live/session.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
+import { checkGameSetup, waitingForLogText } from '../ui/setup.js';
 import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
-import { ensureLogSizeLimit, inspectClientConfig } from '../watcher/clientConfig.js';
 import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.js';
 
 /**
@@ -107,8 +107,10 @@ function createWindow(): BrowserWindow {
  */
 function describeNotice(notice: LiveNotice): OverlayView | null {
   switch (notice.kind) {
-    case 'noLog':
-      return { ...EMPTY_VIEW, header: 'логов нет: включите log.config и перезапустите игру' };
+    case 'noSessions':
+      return { ...EMPTY_VIEW, header: `логов не нашлось в ${notice.logsRoot}` };
+    case 'noPowerLog':
+      return { ...EMPTY_VIEW, header: waitingForLogText(notice.sessionDir) };
     case 'watching':
       return { ...EMPTY_VIEW, header: 'жду партию' };
     case 'switched':
@@ -121,33 +123,13 @@ function describeNotice(notice: LiveNotice): OverlayView | null {
   }
 }
 
-/**
- * Проверка предела размера логов при каждом запуске.
- *
- * Файл лежит в каталоге игры, и обновление Hearthstone его сносит. Запись туда
- * требует прав на Program Files, поэтому отказ ожидаем и падением приложения
- * быть не должен: без починки помощник работает, просто лог оборвётся
- * на десяти мегабайтах.
- */
-function checkLogLimit(): string | null {
-  const installDir = DEFAULT_LOGS_ROOT.replace(/[\\/]Logs$/, '');
-  try {
-    if (inspectClientConfig(installDir).sufficient) return null;
-    return ensureLogSizeLimit(installDir)
-      ? 'предел размера логов поправлен — перезапустите Hearthstone'
-      : 'предел размера логов мал, поправить не вышло';
-  } catch {
-    return 'не хватило прав поправить client.config — запустите от администратора';
-  }
-}
-
 function start(): void {
   const cards = loadCardIndex();
   const worker = new PositionWorker();
   position = worker;
 
-  const warning = checkLogLimit();
-  if (warning !== null) send({ ...EMPTY_VIEW, header: warning });
+  const problem = checkGameSetup(DEFAULT_LOGS_ROOT);
+  if (problem !== null) send({ ...EMPTY_VIEW, header: problem.text });
 
   let latest: GameState | null = null;
   let tavern: ViewInput['tavern'] = null;

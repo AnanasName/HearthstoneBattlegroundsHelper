@@ -14,7 +14,6 @@
  * под рукой.
  */
 import { readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { ResolvedOpponent } from '../advisors/position/opponent.js';
@@ -34,8 +33,8 @@ import {
   recommendationLine,
   situationLine,
 } from './format.js';
-import { ensureLogSizeLimit, inspectClientConfig } from '../watcher/clientConfig.js';
 import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
+import { checkGameSetup, waitingForLogText } from './setup.js';
 
 interface Args {
   readonly logsRoot: string;
@@ -119,11 +118,14 @@ function printPosition(
 
 function printNotice(notice: LiveNotice): void {
   switch (notice.kind) {
-    case 'noLog':
+    case 'noSessions':
       console.log(
-        `логов не нашлось в ${notice.logsRoot}\n` +
-          'проверьте log.config и что клиент перезапускали после его правки',
+        `папок с логами не нашлось в ${notice.logsRoot}\n` +
+          'проверьте путь установки игры: --logs-root <путь>',
       );
+      return;
+    case 'noPowerLog':
+      console.log(waitingForLogText(notice.sessionDir));
       return;
     case 'watching':
       console.log(`слежу за ${notice.path}`);
@@ -194,18 +196,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Настройка предела размера логов проверяется при каждом запуске: файл лежит
-  // в каталоге игры, и обновление Hearthstone его сносит.
-  const installDir = dirname(args.logsRoot);
-  const config = inspectClientConfig(installDir);
-  if (!config.sufficient) {
-    const fixed = ensureLogSizeLimit(installDir);
-    console.log(
-      fixed
-        ? 'предел размера логов был мал — поправил, нужен перезапуск Hearthstone'
-        : 'предел размера логов мал, и поправить не вышло: запустите с правами на каталог игры',
-    );
-  }
+  // Настройки игры проверяются при каждом запуске: они лежат вне нашего
+  // каталога, и обновление Hearthstone их не бережёт.
+  const problem = checkGameSetup(args.logsRoot);
+  if (problem !== null) console.log(problem.text);
 
   const session = startLiveSession({ cards, position }, { ...handlers, onNotice: printNotice }, {
     watcher: { logsRoot: args.logsRoot },

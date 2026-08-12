@@ -1,4 +1,7 @@
-import { DEFAULT_LOGS_ROOT, findLatestPowerLog } from '../watcher/logPaths.js';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { DEFAULT_LOGS_ROOT, findLatestSession, POWER_LOG_NAME } from '../watcher/logPaths.js';
 import { FileTailer } from '../watcher/tail.js';
 import type { GameState } from '../state/types.js';
 import { GameFeed, type FeedGame } from './feed.js';
@@ -47,9 +50,19 @@ export interface LiveUpdate {
   readonly path: string;
 }
 
-/** Событие, о котором стоит сказать вслух, но которое не меняет совета. */
+/**
+ * Событие, о котором стоит сказать вслух, но которое не меняет совета.
+ *
+ * Отсутствие лога разделено на два случая, и это не педантизм. `Power.log`
+ * создаётся клиентом ЛЕНИВО — не при запуске игры, а при первом сообщении
+ * канала: в сессии от 12.08 клиент стартовал в 21:17:17, а первая строка
+ * лога датирована 21:18:34. Поэтому «папки сессии нет» и «сессия есть,
+ * а файла ещё нет» — разные положения, и советовать по ним надо разное.
+ * Второе чаще всего значит «игра в меню», а вовсе не «логирование выключено».
+ */
 export type LiveNotice =
-  | { readonly kind: 'noLog'; readonly logsRoot: string }
+  | { readonly kind: 'noSessions'; readonly logsRoot: string }
+  | { readonly kind: 'noPowerLog'; readonly sessionDir: string }
   | { readonly kind: 'watching'; readonly path: string }
   | { readonly kind: 'switched'; readonly path: string }
   | { readonly kind: 'restarted'; readonly path: string }
@@ -70,6 +83,8 @@ export class LiveWatcher {
   #sessionCheckedAt = 0;
   #stopped = false;
   #ticking = false;
+  /** О каком отсутствии лога уже сказано: повторять каждые пять секунд незачем. */
+  #reportedEmpty: 'noSessions' | 'noPowerLog' | null = null;
 
   constructor(
     handlers: {
@@ -84,15 +99,6 @@ export class LiveWatcher {
   }
 
   start(): void {
-    const path = findLatestPowerLog(this.#options.logsRoot);
-    if (path === null) {
-      this.#onNotice({ kind: 'noLog', logsRoot: this.#options.logsRoot });
-    } else {
-      this.#attach(path);
-      this.#onNotice({ kind: 'watching', path });
-    }
-
-    this.#sessionCheckedAt = Date.now();
     this.#timer = setInterval(() => void this.#tick(), this.#options.pollMs);
     // Первый опрос сразу: ждать четверть секунды впустую незачем.
     void this.#tick();
@@ -134,7 +140,7 @@ export class LiveWatcher {
   }
 
   async #poll(): Promise<void> {
-    this.#checkForNewerSession();
+    this.#pickLog();
 
     const tailer = this.#tailer;
     if (tailer === null) return;
@@ -192,15 +198,45 @@ export class LiveWatcher {
     }
   }
 
-  #checkForNewerSession(): void {
+  /**
+   * Найти лог, за которым следить, — и не перестать искать.
+   *
+   * Три случая, и каждый обязан разрешаться сам, без участия игрока: сессий
+   * нет вовсе; сессия есть, а лога в ней ещё нет (игра в меню); появился
+   * лог новее того, за которым следим (клиент перезапустили).
+   */
+  #pickLog(): void {
     const now = Date.now();
-    if (now - this.#sessionCheckedAt < this.#options.sessionCheckMs) return;
+    if (this.#tailer !== null && now - this.#sessionCheckedAt < this.#options.sessionCheckMs) {
+      return;
+    }
+    // Пока лога нет, искать его стоит на каждом опросе: партия начинается
+    // не по нашему расписанию.
     this.#sessionCheckedAt = now;
 
-    const latest = findLatestPowerLog(this.#options.logsRoot);
-    if (latest === null || latest === this.#tailer?.path) return;
+    const session = findLatestSession(this.#options.logsRoot);
+    if (session === null) {
+      this.#reportEmpty('noSessions', { kind: 'noSessions', logsRoot: this.#options.logsRoot });
+      return;
+    }
 
-    this.#attach(latest);
-    this.#onNotice({ kind: 'switched', path: latest });
+    const path = join(session.dir, POWER_LOG_NAME);
+    if (!existsSync(path)) {
+      this.#reportEmpty('noPowerLog', { kind: 'noPowerLog', sessionDir: session.dir });
+      return;
+    }
+
+    if (path === this.#tailer?.path) return;
+
+    const had = this.#tailer !== null;
+    this.#attach(path);
+    this.#reportedEmpty = null;
+    this.#onNotice(had ? { kind: 'switched', path } : { kind: 'watching', path });
+  }
+
+  #reportEmpty(kind: 'noSessions' | 'noPowerLog', notice: LiveNotice): void {
+    if (this.#reportedEmpty === kind) return;
+    this.#reportedEmpty = kind;
+    this.#onNotice(notice);
   }
 }
