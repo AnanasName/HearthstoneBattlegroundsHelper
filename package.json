@@ -10,7 +10,9 @@
   "scripts": {
     "capture": "tsx src/ui/capture.ts",
     "demo:phase1": "tsx src/ui/demo-phase1.ts",
+    "demo:phase3": "tsx src/ui/demo-phase3.ts",
     "spike:battle": "tsx src/advisors/battle/spike.ts",
+    "spike:position": "tsx src/advisors/position/spike.ts",
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
