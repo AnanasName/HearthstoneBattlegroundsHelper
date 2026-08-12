@@ -4,7 +4,7 @@ import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
 import { createReducer, reduceLog } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
-import { part2Game } from '../fixtures.js';
+import { part2Game, part3Game } from '../fixtures.js';
 
 /** Снимки состояния по ходу партии — иначе видно только финал. */
 function snapshots(): GameState[] {
@@ -153,6 +153,83 @@ describe('энчанты', () => {
       expect(m.scriptData).toHaveLength(6);
       expect(Object.keys(m.tags).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('следующий противник известен заранее', () => {
+  /**
+   * Проверено на обеих полных партиях: объявление NEXT_OPPONENT_PLAYER_ID
+   * в таверне точно называет того, с кем предстоит драться. 18 совпадений
+   * из 18 сопоставимых; несопоставимы только первые бои партий, где
+   * объявления ещё не было.
+   *
+   * Это и есть ответ на вопрос, против кого считать расстановку в таверне.
+   */
+  function announcedVersusActual(text: string): { checks: number; matches: number } {
+    const reducer = createReducer(readPlayers(text));
+    let announced: number | null = null;
+    let lastOpponent: number | null = null;
+    let checks = 0;
+    let matches = 0;
+
+    for (const event of readPowerEvents(text)) {
+      reducer.step(event);
+
+      // Снимок берётся только там, где что-то из интересующего могло
+      // измениться. Сборка состояния перебирает все сущности партии, и звать
+      // её на каждом из 110 тысяч событий — нагрузка, которой в живом режиме
+      // не бывает: там снимок нужен раз в секунду.
+      const c = event.line.content;
+      if (!c.includes('HERO_ENTITY') && !c.includes('NEXT_OPPONENT_PLAYER_ID')) continue;
+
+      const s = reducer.snapshot();
+
+      // Сверять надо не в секунду входа в бой: противник подставляется чуть
+      // позже, и до этого в поле висит соперник прошлого боя. Ловим сам
+      // момент смены.
+      if (s.currentOpponentPlayerId !== null && s.currentOpponentPlayerId !== lastOpponent) {
+        if (announced !== null) {
+          checks += 1;
+          if (s.currentOpponentPlayerId === announced) matches += 1;
+        }
+        lastOpponent = s.currentOpponentPlayerId;
+      }
+
+      if (s.phase === 'tavern' && s.nextOpponentPlayerId !== null) {
+        announced = s.nextOpponentPlayerId;
+      }
+    }
+    return { checks, matches };
+  }
+
+  it('part2: объявленный противник совпадает с фактическим', () => {
+    const { checks, matches } = announcedVersusActual(part2Game());
+    expect(checks).toBeGreaterThan(8);
+    expect(matches).toBe(checks);
+  });
+
+  it('part3: то же самое', () => {
+    const { checks, matches } = announcedVersusActual(part3Game());
+    expect(checks).toBeGreaterThan(5);
+    expect(matches).toBe(checks);
+  });
+
+  it('борды противников накапливаются по итогам боёв', () => {
+    const state = reduceLog(part2Game());
+    const seen = Object.entries(state.lastSeenBoards);
+
+    // За партию мы дрались с семью разными игроками лобби.
+    expect(seen.length).toBeGreaterThanOrEqual(5);
+    for (const [, board] of seen) {
+      expect(board.length).toBeGreaterThan(0);
+      expect(board.length).toBeLessThanOrEqual(7);
+    }
+  });
+
+  it('счётчики globalInfo заполняются осмысленными значениями', () => {
+    const state = reduceLog(part2Game());
+    expect(state.globalInfo.goldSpentThisGame).toBeGreaterThan(100);
+    expect(state.globalInfo.spellsCastThisGame).toBeGreaterThan(0);
   });
 });
 

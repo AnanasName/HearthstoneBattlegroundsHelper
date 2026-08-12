@@ -80,6 +80,45 @@ export interface Hero {
   readonly damage: number;
 }
 
+/**
+ * Накопительные счётчики игрока — то, что симулятор принимает в `globalInfo`.
+ *
+ * Влияют на исход боя напрямую: без них симуляция систематически ошибается
+ * на бордах, завязанных на соответствующие механики.
+ *
+ * Здесь только те поля, для которых в фикстурах найден именованный тег.
+ * Остальные счётчики в логе приходят **безымянными числовыми тегами**
+ * (в эталонной партии их 62 штуки на сущности игрока), и сопоставить их
+ * с полями симулятора без дополнительных данных нельзя — гадать не стали.
+ * См. docs/simulator.md.
+ */
+export interface GlobalInfo {
+  /** `NUM_RESOURCES_SPENT_THIS_GAME` → `GoldSpentThisGame`. */
+  readonly goldSpentThisGame: number | null;
+  /** `NUM_SPELLS_PLAYED_THIS_GAME` → `SpellsCastThisGame`. */
+  readonly spellsCastThisGame: number | null;
+  /** `NUM_CARDS_PLAYED_THIS_TURN` → `CardsPlayedThisTurn`. */
+  readonly cardsPlayedThisTurn: number | null;
+  /** `TAVERN_SPELL_ATTACK_INCREASE` → `TavernSpellAttackBuff`. */
+  readonly tavernSpellAttackBuff: number | null;
+  /** `TAVERN_SPELL_HEALTH_INCREASE` → `TavernSpellHealthBuff`. */
+  readonly tavernSpellHealthBuff: number | null;
+  /** `BACON_ELEMENTAL_BUFFATKVALUE` → `ElementalAttackBuff`. */
+  readonly elementalAttackBuff: number | null;
+  /** `BACON_ELEMENTAL_BUFFHEALTHVALUE` → `ElementalHealthBuff`. */
+  readonly elementalHealthBuff: number | null;
+}
+
+export const EMPTY_GLOBAL_INFO: GlobalInfo = {
+  goldSpentThisGame: null,
+  spellsCastThisGame: null,
+  cardsPlayedThisTurn: null,
+  tavernSpellAttackBuff: null,
+  tavernSpellHealthBuff: null,
+  elementalAttackBuff: null,
+  elementalHealthBuff: null,
+};
+
 export interface GameState {
   readonly phase: Phase;
   /** Номер хода из тега `TURN` на `GameEntity`. */
@@ -120,6 +159,35 @@ export interface GameState {
   readonly opponentBoard: readonly Minion[];
   /** Аномалия партии, `cardId` сущности с `CARDTYPE=BATTLEGROUND_ANOMALY`. */
   readonly anomalyCardId: string | null;
+  /** Накопительные счётчики игрока для симулятора. */
+  readonly globalInfo: GlobalInfo;
+  /**
+   * `PlayerID` следующего противника — тег `NEXT_OPPONENT_PLAYER_ID`.
+   *
+   * Известен уже в таверне, до боя. Это и есть ответ на вопрос, против кого
+   * считать расстановку: не «против типичного борда», а против конкретного
+   * игрока, чей борд мы, возможно, уже видели в предыдущих боях.
+   */
+  readonly nextOpponentPlayerId: number | null;
+  /**
+   * `PlayerID` противника текущего боя.
+   *
+   * Берётся не из тега с подходящим именем, а через героя: в бою чужому слоту
+   * подставляют `HERO_ENTITY` противника, а у самого героя есть тег `PLAYER_ID`.
+   * Тег `BACON_CURRENT_COMBAT_PLAYER_ID` для этого не годится — в фикстурах
+   * он равен идентификатору самого игрока.
+   */
+  readonly currentOpponentPlayerId: number | null;
+  /** Выигран ли прошлый бой — тег `BACON_WON_LAST_COMBAT`. */
+  readonly wonLastCombat: boolean | null;
+  /**
+   * Последний увиденный борд каждого противника, по его `PlayerID`.
+   *
+   * Требование ТЗ к `GameState`. Заполняется по итогам боёв: борд противника
+   * виден только когда с ним дерёшься. Вместе с `nextOpponentPlayerId` это
+   * даёт ответ на вопрос, против кого считать расстановку в таверне.
+   */
+  readonly lastSeenBoards: Readonly<Record<number, readonly Minion[]>>;
   /** Финальное место, появляется на `FINAL_GAMEOVER`. */
   readonly finalPlace: number | null;
   /** BattleTag игрока — самый надёжный якорь «кто я». */
@@ -141,6 +209,11 @@ export const EMPTY_STATE: GameState = {
   shop: [],
   opponentBoard: [],
   anomalyCardId: null,
+  globalInfo: EMPTY_GLOBAL_INFO,
+  nextOpponentPlayerId: null,
+  currentOpponentPlayerId: null,
+  wonLastCombat: null,
+  lastSeenBoards: {},
   finalPlace: null,
   playerBattleTag: null,
   playerId: null,

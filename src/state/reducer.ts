@@ -1,12 +1,14 @@
-import { readPowerEvents, type PowerEvent } from '../parser/blocks.js';
+import { insideBlock, readPowerEvents, type PowerEvent } from '../parser/blocks.js';
 import { parseEntityDescriptor } from '../parser/entity.js';
 import { readPlayers, type Players } from './players.js';
 import {
   BOARD_VISUAL_STATE_COMBAT,
   BOARD_VISUAL_STATE_TAVERN,
+  EMPTY_GLOBAL_INFO,
   EMPTY_STATE,
   type Enchantment,
   type GameState,
+  type GlobalInfo,
   type Minion,
   type Phase,
 } from './types.js';
@@ -120,6 +122,35 @@ export function createReducer(players: Players): Reducer {
   let anomalyCardId: string | null = null;
   let finalPlace: number | null = null;
   let heroEntityId: number | null = null;
+  let nextOpponentPlayerId: number | null = null;
+  let currentOpponentPlayerId: number | null = null;
+  let wonLastCombat: boolean | null = null;
+
+  /**
+   * Счётчики игрока: тег лога → поле GlobalInfo.
+   *
+   * Только те, для которых в фикстурах нашёлся именованный тег. Остальные
+   * счётчики симулятора приходят безымянными числовыми тегами (62 штуки
+   * на сущности игрока за партию), сопоставить их не по чему.
+   */
+  const GLOBAL_INFO_TAGS: Readonly<Record<string, keyof GlobalInfo>> = {
+    NUM_RESOURCES_SPENT_THIS_GAME: 'goldSpentThisGame',
+    NUM_SPELLS_PLAYED_THIS_GAME: 'spellsCastThisGame',
+    NUM_CARDS_PLAYED_THIS_TURN: 'cardsPlayedThisTurn',
+    TAVERN_SPELL_ATTACK_INCREASE: 'tavernSpellAttackBuff',
+    TAVERN_SPELL_HEALTH_INCREASE: 'tavernSpellHealthBuff',
+    BACON_ELEMENTAL_BUFFATKVALUE: 'elementalAttackBuff',
+    BACON_ELEMENTAL_BUFFHEALTHVALUE: 'elementalHealthBuff',
+  };
+
+  const globalInfo: Record<keyof GlobalInfo, number | null> = { ...EMPTY_GLOBAL_INFO };
+
+  /** id сущности героя → `PlayerID` его владельца. */
+  const heroOwner = new Map<number, number>();
+  /** Последний увиденный борд каждого противника. */
+  const lastSeenBoards = new Map<number, Minion[]>();
+  /** Снят ли уже борд противника в текущем бою. */
+  let opponentBoardCaptured = false;
 
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
@@ -150,6 +181,16 @@ export function createReducer(players: Players): Reducer {
 
   const applyToEntity = (e: Entity, tag: string, value: string): void => {
     const n = numeric(value);
+
+    // Кэш группировки энчантов зависит только от типа, носителя и зоны.
+    if (
+      tag === 'ZONE' ||
+      tag === 'ATTACHED' ||
+      tag === 'CARDTYPE' ||
+      e.cardType === 'ENCHANTMENT'
+    ) {
+      enchantmentsCache = null;
+    }
 
     switch (tag) {
       case 'ZONE':
@@ -195,7 +236,10 @@ export function createReducer(players: Players): Reducer {
       case 'BOARD_VISUAL_STATE':
         if (subject.kind !== 'game') return;
         if (n === BOARD_VISUAL_STATE_TAVERN) phase = 'tavern';
-        else if (n === BOARD_VISUAL_STATE_COMBAT) phase = 'combat';
+        else if (n === BOARD_VISUAL_STATE_COMBAT) {
+          phase = 'combat';
+          opponentBoardCaptured = false;
+        }
         return;
       case 'TURN':
         if (subject.kind === 'game' && n !== null) turn = n;
@@ -215,8 +259,25 @@ export function createReducer(players: Players): Reducer {
       case 'PLAYER_LEADERBOARD_PLACE':
         if (subject.kind === 'entity' && subject.id === heroEntityId) finalPlace = n;
         return;
-      default:
+      case 'NEXT_OPPONENT_PLAYER_ID':
+        if (subject.kind === 'self' && n !== null) nextOpponentPlayerId = n;
         return;
+      case 'PLAYER_ID':
+        // У героя каждого участника лобби есть его PlayerID. Это единственный
+        // способ понять, кто скрыт за чужим слотом во время боя.
+        if (subject.kind === 'entity' && n !== null) heroOwner.set(subject.id, n);
+        return;
+      case 'BACON_WON_LAST_COMBAT':
+        if (subject.kind === 'self' && n !== null) wonLastCombat = n > 0;
+        return;
+      default: {
+        // Счётчики принимаются только от своего игрока: те же имена приходят
+        // и на сущность соперника, где значат его показатели.
+        if (subject.kind !== 'self' || n === null) return;
+        const field = GLOBAL_INFO_TAGS[tag];
+        if (field !== undefined) globalInfo[field] = n;
+        return;
+      }
     }
   };
 
@@ -237,8 +298,81 @@ export function createReducer(players: Players): Reducer {
   const isSelf = (entityName: string): boolean =>
     players.selfName !== null && entityName === players.selfName;
 
+  /**
+   * Энчанты, сгруппированные по носителю.
+   *
+   * Результат кэшируется: за партию энчантов больше тысячи, а снимок состояния
+   * в живом режиме берётся часто. Без кэша полный проход по всем сущностям
+   * на каждый снимок делает работу квадратичной — на прогоне фикстуры это
+   * стоило пятикратного замедления.
+   */
+  let enchantmentsCache: Map<number, Enchantment[]> | null = null;
+
+  const groupEnchantments = (): Map<number, Enchantment[]> => {
+    if (enchantmentsCache !== null) return enchantmentsCache;
+
+    const byHost = new Map<number, Enchantment[]>();
+    for (const e of entities.values()) {
+      if (e.cardType !== 'ENCHANTMENT' || e.attached === null) continue;
+      if (DEAD_ZONES.has(e.zone)) continue;
+      const list = byHost.get(e.attached) ?? [];
+      list.push(toEnchantment(e));
+      byHost.set(e.attached, list);
+    }
+    for (const list of byHost.values()) list.sort((a, b) => a.timing - b.timing);
+
+    enchantmentsCache = byHost;
+    return byHost;
+  };
+
+  /**
+   * Миньоны в зоне.
+   *
+   * Белый список, а не чёрный: у части сущностей `CARDTYPE` в логе не
+   * встречается вовсе, и при фильтрации «всё кроме» на борду оказывалось
+   * 455 штук вместо максимум семи.
+   */
+  const collectMinions = (
+    zone: string,
+    ownedBySelf: boolean,
+    enchantments: Map<number, Enchantment[]>,
+  ): Minion[] => {
+    const self = players.selfPlayerId;
+    if (self === null) return [];
+    return [...entities.values()]
+      .filter(
+        (e) =>
+          e.cardType === 'MINION' &&
+          e.zone === zone &&
+          (ownedBySelf ? e.controller === self : e.controller !== self),
+      )
+      .sort((a, b) => a.zonePos - b.zonePos)
+      .map((e) => toMinion(e, enchantments.get(e.id) ?? []));
+  };
+
+  /**
+   * Борд противника виден только во время боя, и снимать его надо в НАЧАЛЕ:
+   * к моменту выхода в таверну чужие миньоны уже убраны из PLAY, а к концу боя
+   * половина из них мертва. Момент ловится по первому блоку `ATTACK` — тогда
+   * обе стороны уже расставлены, но размены ещё не начались.
+   *
+   * Это и есть «последний увиденный борд противника» из ТЗ.
+   */
+  const rememberOpponentBoard = (): void => {
+    if (currentOpponentPlayerId === null || opponentBoardCaptured) return;
+    const board = collectMinions('PLAY', false, groupEnchantments());
+    if (board.length === 0) return;
+    lastSeenBoards.set(currentOpponentPlayerId, board);
+    opponentBoardCaptured = true;
+  };
+
   const step = (event: PowerEvent): void => {
     const { content } = event.line;
+
+    // Первый размен боя — момент, когда оба борда уже расставлены.
+    if (phase === 'combat' && !opponentBoardCaptured && insideBlock(event, 'ATTACK')) {
+      rememberOpponentBoard();
+    }
 
     const descriptorHere = content.includes('[entityName=')
       ? parseEntityDescriptor(content)
@@ -307,9 +441,18 @@ export function createReducer(players: Players): Reducer {
     const [, entityRef, tag, value] = change;
     if (entityRef === undefined || tag === undefined || value === undefined) return;
 
-    // Свой герой объявляется именно так: HERO_ENTITY у сущности со своим именем.
-    if (tag === 'HERO_ENTITY' && isSelf(entityRef)) {
-      heroEntityId = numeric(value);
+    if (tag === 'HERO_ENTITY') {
+      if (isSelf(entityRef)) {
+        // Свой герой объявляется именно так, и меняется при выборе героя.
+        heroEntityId = numeric(value);
+      } else {
+        // Чужой слот переиспользуется: в таверне там Бармен Боб, на бой
+        // подставляется герой очередного противника. Кто именно — видно
+        // по тегу PLAYER_ID самого героя, а не по подписи слота: в поздних
+        // боях подпись остаётся «Бармен Боб», хотя дерёмся с игроком.
+        const owner = heroOwner.get(numeric(value) ?? -1);
+        if (owner !== undefined) currentOpponentPlayerId = owner;
+      }
     }
 
     let subject: Subject = subjectOf(entityRef);
@@ -340,40 +483,15 @@ export function createReducer(players: Players): Reducer {
     const self = players.selfPlayerId;
     const heroEntity = heroEntityId === null ? null : entities.get(heroEntityId);
 
-    // Энчанты сгруппированы по носителю один раз на снимок: миньонов на борду
-    // единицы, а энчантов за партию больше тысячи, и перебирать их для каждого
-    // миньона отдельно было бы квадратично.
-    const enchantmentsByHost = new Map<number, Enchantment[]>();
-    for (const e of entities.values()) {
-      if (e.cardType !== 'ENCHANTMENT' || e.attached === null) continue;
-      if (DEAD_ZONES.has(e.zone)) continue;
-      const list = enchantmentsByHost.get(e.attached) ?? [];
-      list.push(toEnchantment(e));
-      enchantmentsByHost.set(e.attached, list);
-    }
-    for (const list of enchantmentsByHost.values()) list.sort((a, b) => a.timing - b.timing);
+    // Энчанты группируются один раз на снимок: миньонов единицы, а энчантов
+    // за партию больше тысячи, и перебор для каждого был бы квадратичным.
+    const enchantmentsByHost = groupEnchantments();
 
-    // Белый список, а не чёрный: у части сущностей CARDTYPE в логе не встречается
-    // вовсе, и при фильтрации «всё кроме» они молча оказывались на борду —
-    // 455 штук вместо максимум семи. Берём только явные MINION.
-    const minionsIn = (zone: string, ownedBySelf: boolean): Minion[] =>
-      self === null
-        ? []
-        : [...entities.values()]
-            .filter(
-              (e) =>
-                e.cardType === 'MINION' &&
-                e.zone === zone &&
-                (ownedBySelf ? e.controller === self : e.controller !== self),
-            )
-            .sort((a, b) => a.zonePos - b.zonePos)
-            .map((e) => toMinion(e, enchantmentsByHost.get(e.id) ?? []));
-
-    const mine = (zone: string): Minion[] => minionsIn(zone, true);
+    const mine = (zone: string): Minion[] => collectMinions(zone, true, enchantmentsByHost);
 
     // Чужие миньоны в PLAY — это магазин в таверне и борд противника в бою.
     // Различает их только фаза: сама зона и контроллер одинаковые.
-    const theirs = phase === 'gameOver' ? [] : minionsIn('PLAY', false);
+    const theirs = phase === 'gameOver' ? [] : collectMinions('PLAY', false, enchantmentsByHost);
 
     return {
       ...EMPTY_STATE,
@@ -385,6 +503,11 @@ export function createReducer(players: Players): Reducer {
       goldTotal,
       goldSpent,
       anomalyCardId,
+      globalInfo: { ...globalInfo },
+      nextOpponentPlayerId,
+      currentOpponentPlayerId,
+      wonLastCombat,
+      lastSeenBoards: Object.fromEntries(lastSeenBoards),
       finalPlace,
       playerBattleTag: players.selfName,
       playerId: self,
