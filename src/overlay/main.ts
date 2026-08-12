@@ -3,9 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 
 import { loadCardIndex } from '../data/cards.js';
-import { LiveAdvisor } from '../live/advisor.js';
 import { PositionWorker } from '../live/position/client.js';
-import { LiveWatcher, type LiveNotice } from '../live/watcher.js';
+import { startLiveSession, type LiveSession } from '../live/session.js';
+import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
 import { ensureLogSizeLimit, inspectClientConfig } from '../watcher/clientConfig.js';
@@ -39,7 +39,7 @@ const MARGIN = 24;
 
 let window: BrowserWindow | null = null;
 let position: PositionWorker | null = null;
-let watcher: LiveWatcher | null = null;
+let session: LiveSession | null = null;
 
 /**
  * Последний показанный вид.
@@ -85,18 +85,26 @@ function createWindow(): BrowserWindow {
   // forward: события мыши всё равно доходят до игры, а окно их не перехватывает.
   created.setIgnoreMouseEvents(true, { forward: true });
 
-  // Путь абсолютный, и это не придирка: относительный `loadFile` считается
-  // не от рабочего каталога, а от каталога точки входа (`app.getAppPath()`,
-  // то есть dist/overlay), и разметка искалась в dist/overlay/src/overlay.
-  // Поэтому она кладётся в сборку рядом с main.js — см. npm run build.
   created.webContents.on('did-finish-load', () => {
     created.webContents.send('overlay:view', lastView);
   });
 
+  // Путь абсолютный, и это не придирка: относительный `loadFile` считается
+  // не от рабочего каталога, а от каталога точки входа (`app.getAppPath()`,
+  // то есть dist/overlay), и разметка искалась в dist/overlay/src/overlay.
+  // Поэтому она кладётся в сборку рядом с main.js — см. npm run build.
   void created.loadFile(fileURLToPath(new URL('index.html', import.meta.url)));
   return created;
 }
 
+/**
+ * Что из событий слежения показать в окне.
+ *
+ * `null` означает «оставить как есть». Это не мелочь: заглушка вместо
+ * собранного состояния стирает борд и советы, а состояние вернётся только
+ * следующим обновлением. О начале партии и о догоне окну знать незачем —
+ * оба и так видны по тому, что в нём появляется.
+ */
 function describeNotice(notice: LiveNotice): OverlayView | null {
   switch (notice.kind) {
     case 'noLog':
@@ -108,7 +116,6 @@ function describeNotice(notice: LiveNotice): OverlayView | null {
     case 'restarted':
       return { ...EMPTY_VIEW, header: 'лог обрезан, собираю состояние заново' };
     case 'newGame':
-      return { ...EMPTY_VIEW, header: 'новая партия' };
     case 'caughtUp':
       return null;
   }
@@ -152,7 +159,7 @@ function start(): void {
     send(buildView({ state: latest, tavern, thinking, position: last }, cards));
   };
 
-  const advisor = new LiveAdvisor(
+  session = startLiveSession(
     { cards, position: worker },
     {
       onTavern: (advice, state) => {
@@ -184,19 +191,12 @@ function start(): void {
         thinking = false;
         send({ ...lastView, header: `сбой советника: ${error.message}` });
       },
+      onNotice: (notice) => {
+        const view = describeNotice(notice);
+        if (view !== null) send(view);
+      },
     },
   );
-
-  watcher = new LiveWatcher({
-    onUpdate: ({ state, catchingUp }) => {
-      if (!catchingUp) advisor.update(state);
-    },
-    onNotice: (notice) => {
-      const view = describeNotice(notice);
-      if (view !== null) send(view);
-    },
-  });
-  watcher.start();
 }
 
 /**
@@ -226,6 +226,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  watcher?.stop();
+  session?.stop();
   void position?.close();
 });

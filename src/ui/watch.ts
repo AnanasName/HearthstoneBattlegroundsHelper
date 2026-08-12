@@ -20,10 +20,11 @@ import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { ResolvedOpponent } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
-import { LiveAdvisor } from '../live/advisor.js';
+import { LiveAdvisor, type LiveAdvisorHandlers } from '../live/advisor.js';
 import { PositionWorker } from '../live/position/client.js';
 import { replayLog } from '../live/replay.js';
-import { LiveWatcher, type LiveNotice } from '../live/watcher.js';
+import { startLiveSession } from '../live/session.js';
+import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import {
   minionLabel,
@@ -153,32 +154,25 @@ async function main(): Promise<void> {
   const loadMs = await position.ready();
   console.log(`справочник: ${cards.size.toLocaleString('ru-RU')} карт; воркер готов за ${String(loadMs)} мс`);
 
-  let thinkingFor: GameState | null = null;
-
-  const advisor = new LiveAdvisor(
-    { cards, position },
-    {
-      onTavern: (advice, state) => {
-        printSituation(state, advice, cards);
-      },
-      onThinking: (state) => {
-        thinkingFor = state;
-      },
-      onPosition: (advice, opponent, state) => {
-        if (thinkingFor === state) thinkingFor = null;
-        printPosition(advice, opponent, cards);
-      },
-      onNoOpponent: (opponent) => {
-        console.log(`   расстановка: ${noOpponentReason(opponent)}`);
-      },
-      onError: (error) => {
-        console.error(`советник расстановки: ${error.message}`);
-      },
+  const handlers: LiveAdvisorHandlers = {
+    onTavern: (advice, state) => {
+      printSituation(state, advice, cards);
     },
-    { search: searchOptions(args) },
-  );
+    onPosition: (advice, opponent) => {
+      printPosition(advice, opponent, cards);
+    },
+    onNoOpponent: (opponent) => {
+      console.log(`   расстановка: ${noOpponentReason(opponent)}`);
+    },
+    onError: (error) => {
+      console.error(`советник расстановки: ${error.message}`);
+    },
+  };
 
   if (args.replay !== null) {
+    const advisor = new LiveAdvisor({ cards, position }, handlers, {
+      search: searchOptions(args),
+    });
     console.log(`проигрываю ${args.replay} со скоростью ×${String(args.speed)}`);
     await replayLog(
       readFileSync(args.replay, 'utf8'),
@@ -213,26 +207,17 @@ async function main(): Promise<void> {
     );
   }
 
-  const watcher = new LiveWatcher(
-    {
-      onUpdate: ({ state, catchingUp }) => {
-        // На догоне советовать нечего: события уже сыграны. Состояние копится,
-        // а советник просыпается на первом же свежем изменении.
-        if (!catchingUp) advisor.update(state);
-      },
-      onNotice: printNotice,
-    },
-    { logsRoot: args.logsRoot },
-  );
+  const session = startLiveSession({ cards, position }, { ...handlers, onNotice: printNotice }, {
+    watcher: { logsRoot: args.logsRoot },
+    advisor: { search: searchOptions(args) },
+  });
 
-  const stop = (): void => {
-    watcher.stop();
-    advisor.reset();
-    void position.close().then(() => process.exit(0));
-  };
-  process.on('SIGINT', stop);
-
-  watcher.start();
+  process.on('SIGINT', () => {
+    session.stop();
+    void position.close().then(() => {
+      process.exit(0);
+    });
+  });
 }
 
 void main();
