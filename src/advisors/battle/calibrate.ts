@@ -23,10 +23,19 @@ import { readBattleEpisodes, type BattleEpisode, type Outcome } from './episodes
 import { toBattleInfo } from './mapper.js';
 import { createBattleSimulator } from './simulator.js';
 
-const FIXTURES = [
-  'data/fixtures/part2/game.log',
-  'data/fixtures/part3/game.log',
-] as const;
+/**
+ * На чём калибруемся.
+ *
+ * По умолчанию — партии текущего патча: карты и правила меняются, а записанный
+ * исход относится к тому билду, при котором партия сыграна. Проверено 13.08:
+ * после обновления карт и симулятора расхождение на партиях билда 246003
+ * выросло с 3.9 до 9.0 п.п., хотя ни парсер, ни маппер не менялись.
+ * Старые партии остаются годными для проверки разбора лога, но не для
+ * калибровки предсказаний.
+ *
+ * Аргументом можно передать другой лог: `npm run calibrate -- <путь>`.
+ */
+const FIXTURES = ['data/fixtures/part4/game.log'] as const;
 
 const SIMULATIONS = 3000;
 /** Порог, ниже которого исход считаем выбросом. */
@@ -53,7 +62,8 @@ function main(): void {
     p: number;
   }[] = [];
 
-  for (const path of FIXTURES) {
+  const fixtures = process.argv.slice(2).length > 0 ? process.argv.slice(2) : FIXTURES;
+  for (const path of fixtures) {
     const episodes = readBattleEpisodes(readFileSync(path, 'utf8'));
     const short = path.split('/')[2] ?? path;
     console.log(`\n═══ ${short}: боёв ${String(episodes.length)} ═══`);

@@ -19,6 +19,7 @@
     "spike:position": "tsx src/advisors/position/spike.ts",
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "validate:tavern": "tsx src/advisors/tavern/validate.ts",
+    "update:cards": "tsx src/data/updateCards.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -36,6 +37,6 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@firestone-hs/simulate-bgs-battle": "^1.1.726"
+    "@firestone-hs/simulate-bgs-battle": "^1.1.737"
   }
 }

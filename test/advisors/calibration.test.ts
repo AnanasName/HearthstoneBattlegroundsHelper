@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { readBattleEpisodes, type BattleEpisode } from '../../src/advisors/battle/episodes.js';
 import { toBattleInfo } from '../../src/advisors/battle/mapper.js';
 import { createBattleSimulator } from '../../src/advisors/battle/simulator.js';
-import { part2Game, part3Game } from '../fixtures.js';
+import { part4Game } from '../fixtures.js';
 
 /**
  * Регрессия на качество предсказаний.
@@ -13,6 +13,15 @@ import { part2Game, part3Game } from '../fixtures.js';
  *
  * Симуляций здесь меньше, чем в боевом режиме: 500 хватает, чтобы поймать
  * систематическую ошибку, и не превращает прогон тестов в минутный.
+ *
+ * ## Почему только партия текущего патча
+ *
+ * Раньше здесь были обе полные фикстуры, и это стало неверным 13.08, когда
+ * обновились карты и симулятор: на партиях билда 246003 расхождение выросло
+ * с 3.9 до 9.0 п.п., хотя ни парсер, ни маппер не менялись. Игра поменялась,
+ * а записанный исход относится к тому билду, при котором партия сыграна.
+ * Старые фикстуры остаются годными для проверки РАЗБОРА лога — и там они
+ * и работают, — но калибровать по ним предсказания больше нельзя.
  */
 const SIMULATIONS = 500;
 
@@ -29,7 +38,7 @@ describe('калибровка симулятора на боях с извес�
     const simulator = createBattleSimulator();
 
     rows = [];
-    for (const text of [part2Game(), part3Game()]) {
+    for (const text of [part4Game()]) {
       for (const episode of readBattleEpisodes(text)) {
         const r = simulator.run(toBattleInfo(episode, SIMULATIONS));
 
@@ -45,8 +54,11 @@ describe('калибровка симулятора на боях с извес�
     }
   }, 120_000);
 
-  it('из фикстур извлекается достаточно боёв с известным исходом', () => {
-    expect(rows.length).toBeGreaterThanOrEqual(15);
+  it('из фикстуры извлекается достаточно боёв с известным исходом', () => {
+    // Партия оборвалась на восьмом бою — игрок выбыл. Это не мало
+    // для проверки на грубую ошибку, но мало для точных чисел, и порог
+    // тут именно про «бои вообще извлекаются».
+    expect(rows.length).toBeGreaterThanOrEqual(8);
   });
 
   it('у каждого боя есть оба борда', () => {
@@ -59,7 +71,7 @@ describe('калибровка симулятора на боях с извес�
   it('предсказания калиброваны: средняя вероятность победы близка к фактической доле', () => {
     const actual = rows.filter((r) => r.episode.outcome === 'won').length / rows.length;
     const mean = rows.reduce((s, r) => s + r.wonPercent, 0) / rows.length;
-    // Фактически около 4 п.п.; порог с большим запасом.
+    // Фактически 0.2 п.п. на партии своего патча; порог с большим запасом.
     expect(Math.abs(mean - actual)).toBeLessThan(0.15);
   });
 
@@ -69,7 +81,7 @@ describe('калибровка симулятора на боях с извес�
         const actual = r.episode.outcome === 'won' ? 1 : 0;
         return s + (r.wonPercent - actual) ** 2;
       }, 0) / rows.length;
-    // Фактически около 0.02, «всегда 50%» дало бы 0.25.
+    // Фактически около 0.001, «всегда 50%» дало бы 0.25.
     expect(brier).toBeLessThan(0.15);
   });
 
