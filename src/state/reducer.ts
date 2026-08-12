@@ -5,6 +5,7 @@ import {
   BOARD_VISUAL_STATE_COMBAT,
   BOARD_VISUAL_STATE_TAVERN,
   EMPTY_STATE,
+  type Enchantment,
   type GameState,
   type Minion,
   type Phase,
@@ -28,6 +29,17 @@ const TAG_RE = /^tag=(\w+) value=(-?\w+)$/;
 const TAG_CHANGE_RE = /^TAG_CHANGE Entity=(.+?) tag=(\w+) value=(-?\w+)\s*$/;
 const FULL_ENTITY_CREATING_RE = /^FULL_ENTITY - Creating ID=(\d+) CardID=(\S*)/;
 
+/**
+ * SHOW_ENTITY раскрывает ранее скрытую карту и называет сущность через
+ * `Entity=`, а не `ID=`, как FULL_ENTITY. Из 1349 таких строк за партию
+ * 1262 идут с голым id, и все несут непустой CardID.
+ *
+ * Пока разбор искал только форму FULL_ENTITY, теги после SHOW_ENTITY уходили
+ * в никуда, а раскрытые карты оставались без cardId — именно поэтому энчанты
+ * выглядели безымянными.
+ */
+const SHOW_ENTITY_RE = /^SHOW_ENTITY - Updating Entity=(\d+) CardID=(\S*)/;
+
 /** Теги-признаки, которые нас интересуют у миньона. */
 interface Entity {
   id: number;
@@ -36,6 +48,8 @@ interface Entity {
   zonePos: number;
   controller: number | null;
   cardType: string | null;
+  /** Носитель энчанта — тег `ATTACHED`. Заполнен только у энчантов. */
+  attached: number | null;
   tags: Map<string, number>;
 }
 
@@ -48,7 +62,22 @@ function flag(e: Entity, tag: string): boolean {
   return (e.tags.get(tag) ?? 0) > 0;
 }
 
-function toMinion(e: Entity): Minion {
+/** Зоны, в которых энчант считается снятым и в состояние не идёт. */
+const DEAD_ZONES = new Set(['GRAVEYARD', 'REMOVEDFROMGAME', 'SETASIDE']);
+
+function toEnchantment(e: Entity): Enchantment {
+  return {
+    entityId: e.id,
+    cardId: e.cardId,
+    // Идентификаторы растут монотонно по времени создания, поэтому сами по себе
+    // задают порядок наложения — ровно то, чего симулятор ждёт от timing.
+    timing: e.id,
+    scriptDataNum1: e.tags.get('TAG_SCRIPT_DATA_NUM_1') ?? null,
+    scriptDataNum2: e.tags.get('TAG_SCRIPT_DATA_NUM_2') ?? null,
+  };
+}
+
+function toMinion(e: Entity, enchantments: readonly Enchantment[]): Minion {
   const health = e.tags.get('HEALTH') ?? null;
   const damage = e.tags.get('DAMAGE') ?? 0;
   return {
@@ -57,6 +86,11 @@ function toMinion(e: Entity): Minion {
     zonePos: e.zonePos,
     attack: e.tags.get('ATK') ?? null,
     health: health === null ? null : health - damage,
+    enchantments,
+    scriptData: [1, 2, 3, 4, 5, 6].map(
+      (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
+    ),
+    tags: Object.fromEntries(e.tags),
     taunt: flag(e, 'TAUNT'),
     divineShield: flag(e, 'DIVINE_SHIELD'),
     poisonous: flag(e, 'POISONOUS'),
@@ -90,10 +124,14 @@ export function createReducer(players: Players): Reducer {
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
 
-  const touch = (id: number, cardId?: string): Entity => {
+  const touch = (id: number, cardId?: string, authoritative = false): Entity => {
     const found = entities.get(id);
     if (found !== undefined) {
-      if (cardId !== undefined && cardId !== '' && found.cardId === '') found.cardId = cardId;
+      // Обычные упоминания лишь дополняют пустой cardId. SHOW_ENTITY — другое
+      // дело: это раскрытие карты, оно авторитетнее того, что было известно.
+      if (cardId !== undefined && cardId !== '' && (authoritative || found.cardId === '')) {
+        found.cardId = cardId;
+      }
       return found;
     }
     const created: Entity = {
@@ -103,6 +141,7 @@ export function createReducer(players: Players): Reducer {
       zonePos: 0,
       controller: null,
       cardType: null,
+      attached: null,
       tags: new Map(),
     };
     entities.set(id, created);
@@ -121,6 +160,9 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'CONTROLLER':
         if (n !== null) e.controller = n;
+        return;
+      case 'ATTACHED':
+        if (n !== null) e.attached = n;
         return;
       case 'CARDTYPE':
         e.cardType = value;
@@ -203,14 +245,26 @@ export function createReducer(players: Players): Reducer {
       : null;
 
     if (content.startsWith('FULL_ENTITY') || content.startsWith('SHOW_ENTITY')) {
+      const revealing = content.startsWith('SHOW_ENTITY');
+
       if (descriptorHere !== null) {
-        const e = touch(descriptorHere.id, descriptorHere.cardId);
+        // У SHOW_ENTITY с дескриптором cardId стоит в хвосте, после `CardID=`,
+        // а внутри самого дескриптора он ещё пустой — карта же была скрыта.
+        const revealed = /\bCardID=(\S+)\s*$/.exec(content)?.[1];
+        const e = touch(descriptorHere.id, revealed ?? descriptorHere.cardId, revealing);
         e.zone = descriptorHere.zone;
         e.zonePos = descriptorHere.zonePos;
         e.controller ??= descriptorHere.player;
         current = e;
         return;
       }
+
+      const shown = SHOW_ENTITY_RE.exec(content);
+      if (shown?.[1] !== undefined) {
+        current = touch(Number(shown[1]), shown[2] ?? '', true);
+        return;
+      }
+
       const m = FULL_ENTITY_CREATING_RE.exec(content);
       current = m?.[1] === undefined ? null : touch(Number(m[1]), m[2] ?? '');
       return;
@@ -286,6 +340,19 @@ export function createReducer(players: Players): Reducer {
     const self = players.selfPlayerId;
     const heroEntity = heroEntityId === null ? null : entities.get(heroEntityId);
 
+    // Энчанты сгруппированы по носителю один раз на снимок: миньонов на борду
+    // единицы, а энчантов за партию больше тысячи, и перебирать их для каждого
+    // миньона отдельно было бы квадратично.
+    const enchantmentsByHost = new Map<number, Enchantment[]>();
+    for (const e of entities.values()) {
+      if (e.cardType !== 'ENCHANTMENT' || e.attached === null) continue;
+      if (DEAD_ZONES.has(e.zone)) continue;
+      const list = enchantmentsByHost.get(e.attached) ?? [];
+      list.push(toEnchantment(e));
+      enchantmentsByHost.set(e.attached, list);
+    }
+    for (const list of enchantmentsByHost.values()) list.sort((a, b) => a.timing - b.timing);
+
     // Белый список, а не чёрный: у части сущностей CARDTYPE в логе не встречается
     // вовсе, и при фильтрации «всё кроме» они молча оказывались на борду —
     // 455 штук вместо максимум семи. Берём только явные MINION.
@@ -300,7 +367,7 @@ export function createReducer(players: Players): Reducer {
                 (ownedBySelf ? e.controller === self : e.controller !== self),
             )
             .sort((a, b) => a.zonePos - b.zonePos)
-            .map(toMinion);
+            .map((e) => toMinion(e, enchantmentsByHost.get(e.id) ?? []));
 
     const mine = (zone: string): Minion[] => minionsIn(zone, true);
 

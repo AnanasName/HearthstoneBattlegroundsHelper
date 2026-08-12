@@ -18,6 +18,28 @@ export type Phase = 'tavern' | 'combat' | 'gameOver';
 export const BOARD_VISUAL_STATE_TAVERN = 1;
 export const BOARD_VISUAL_STATE_COMBAT = 2;
 
+/**
+ * Энчант, наложенный на миньона.
+ *
+ * Симулятору их нужно передавать списком: итоговых статов миньона ему
+ * недостаточно, см. docs/simulator.md. В логе энчант — это отдельная сущность
+ * с `CARDTYPE=ENCHANTMENT` и тегом `ATTACHED`, указывающим на носителя.
+ */
+export interface Enchantment {
+  readonly entityId: number;
+  readonly cardId: string;
+  /**
+   * Порядок наложения. Берётся из `entityId`: идентификаторы растут монотонно
+   * по времени создания, а сам симулятор при пустом поле подставляет
+   * производную от entityId (`enchantment.timing || entity.entityId + index + 1`).
+   */
+  readonly timing: number;
+  /** Тег `TAG_SCRIPT_DATA_NUM_1`, у симулятора это `tagScriptDataNum1`. */
+  readonly scriptDataNum1: number | null;
+  /** Тег `TAG_SCRIPT_DATA_NUM_2`. */
+  readonly scriptDataNum2: number | null;
+}
+
 /** Миньон на борду или в магазине. */
 export interface Minion {
   readonly entityId: number;
@@ -36,6 +58,18 @@ export interface Minion {
   readonly golden: boolean;
   /** Тир миньона из тега `TECH_LEVEL`. */
   readonly techLevel: number | null;
+  /** Наложенные энчанты, в порядке наложения. */
+  readonly enchantments: readonly Enchantment[];
+  /** Теги `TAG_SCRIPT_DATA_NUM_1…6` — симулятору они нужны как есть. */
+  readonly scriptData: readonly (number | null)[];
+  /**
+   * Сырые числовые теги сущности.
+   *
+   * Симулятор принимает их в поле `tags` и опирается на них в механиках,
+   * которые мы не разбираем по именам. Отдавать всё, что удалось прочитать,
+   * дешевле и надёжнее, чем угадывать нужное подмножество.
+   */
+  readonly tags: Readonly<Record<string, number>>;
 }
 
 export interface Hero {

@@ -97,6 +97,65 @@ describe('reduceLog на эталонной партии', () => {
   });
 });
 
+describe('SHOW_ENTITY раскрывает карту', () => {
+  // Формат отличается от FULL_ENTITY ключом: там ID=, здесь Entity=.
+  // Пока разбор искал только первую форму, теги после SHOW_ENTITY терялись,
+  // а раскрытые карты оставались без cardId — из 1084 энчантов партии
+  // виден был 21.
+  const log = [
+    'D 00:00:01.0000000 GameState.DebugPrintGame() - PlayerID=4, PlayerName=Me#1',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() - CREATE_GAME',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     Player EntityID=11 PlayerID=4 GameAccountId=[hi=1 lo=2]',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=500 CardID=',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     tag=CARDTYPE value=MINION',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     tag=CONTROLLER value=4',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     tag=ZONE value=PLAY',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     tag=ZONE_POSITION value=1',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() - SHOW_ENTITY - Updating Entity=500 CardID=BG31_815',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     tag=ATK value=7',
+    'D 00:00:01.0000000 GameState.DebugPrintPower() -     tag=HEALTH value=9',
+  ].join('\r\n');
+
+  it('подставляет cardId скрытой ранее карте', () => {
+    const state = reduceLog(log);
+    expect(state.board).toHaveLength(1);
+    expect(state.board[0]?.cardId).toBe('BG31_815');
+  });
+
+  it('теги после SHOW_ENTITY доходят до состояния', () => {
+    const state = reduceLog(log);
+    expect(state.board[0]?.attack).toBe(7);
+    expect(state.board[0]?.health).toBe(9);
+  });
+});
+
+describe('энчанты', () => {
+  const state = reduceLog(part2Game());
+
+  it('на эталонной партии энчанты доезжают до миньонов', () => {
+    const withEnchantments = state.board.filter((m) => m.enchantments.length > 0);
+    expect(withEnchantments.length).toBeGreaterThan(0);
+  });
+
+  it('у энчантов есть cardId и они отсортированы по порядку наложения', () => {
+    for (const m of state.board) {
+      const timings = m.enchantments.map((e) => e.timing);
+      expect([...timings].sort((a, b) => a - b)).toEqual(timings);
+      for (const e of m.enchantments) {
+        expect(e.cardId).not.toBe('');
+        expect(e.timing).toBe(e.entityId);
+      }
+    }
+  });
+
+  it('сырые теги и scriptData доезжают', () => {
+    for (const m of state.board) {
+      expect(m.scriptData).toHaveLength(6);
+      expect(Object.keys(m.tags).length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('магазин и борд противника по ходу партии', () => {
   const shots = snapshots();
 

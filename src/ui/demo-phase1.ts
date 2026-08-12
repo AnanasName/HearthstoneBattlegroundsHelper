@@ -28,7 +28,9 @@ function describeMinion(m: Minion): string {
     m.windfury ? 'вихрь' : '',
   ].filter((x) => x !== '');
   const tail = marks.length > 0 ? ` [${marks.join(',')}]` : '';
-  return `${m.cardId} ${stats}${tail}`;
+  const ench =
+    m.enchantments.length > 0 ? `  +${String(m.enchantments.length)} энч` : '';
+  return `${m.cardId} ${stats}${tail}${ench}`;
 }
 
 function printState(state: GameState): void {
