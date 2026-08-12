@@ -151,6 +151,8 @@ export function createReducer(players: Players): Reducer {
   const heroOwner = new Map<number, number>();
   /** Последний увиденный борд каждого противника. */
   const lastSeenBoards = new Map<number, Minion[]>();
+  /** Ход, на котором этот борд был увиден, — мера устаревания картинки. */
+  const lastSeenBoardTurns = new Map<number, number>();
   /** Снят ли уже борд противника в текущем бою. */
   let opponentBoardCaptured = false;
 
@@ -365,6 +367,7 @@ export function createReducer(players: Players): Reducer {
     const board = collectMinions('PLAY', false, groupEnchantments());
     if (board.length === 0) return;
     lastSeenBoards.set(currentOpponentPlayerId, board);
+    lastSeenBoardTurns.set(currentOpponentPlayerId, turn);
     opponentBoardCaptured = true;
   };
 
@@ -523,6 +526,7 @@ export function createReducer(players: Players): Reducer {
       currentOpponentPlayerId,
       wonLastCombat,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
+      lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
       finalPlace,
       playerBattleTag: players.selfName,
       playerId: self,

@@ -199,6 +199,15 @@ export interface GameState {
    * даёт ответ на вопрос, против кого считать расстановку в таверне.
    */
   readonly lastSeenBoards: Readonly<Record<number, readonly Minion[]>>;
+  /**
+   * На каком ходу этот борд был увиден, по тому же `PlayerID`.
+   *
+   * Без этого числа `lastSeenBoards` вводит в заблуждение: борд, снятый шесть
+   * ходов назад, к следующему бою успевает смениться целиком, а выглядит
+   * в состоянии так же достоверно, как снятый только что. Советник расстановки
+   * обязан говорить, насколько его картинка устарела.
+   */
+  readonly lastSeenBoardTurns: Readonly<Record<number, number>>;
   /** Финальное место, появляется на `FINAL_GAMEOVER`. */
   readonly finalPlace: number | null;
   /** BattleTag игрока — самый надёжный якорь «кто я». */
@@ -225,6 +234,7 @@ export const EMPTY_STATE: GameState = {
   currentOpponentPlayerId: null,
   wonLastCombat: null,
   lastSeenBoards: {},
+  lastSeenBoardTurns: {},
   finalPlace: null,
   playerBattleTag: null,
   playerId: null,
