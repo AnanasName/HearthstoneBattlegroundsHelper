@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 
 import { loadCardIndex } from '../data/cards.js';
 import { LiveAdvisor } from '../live/advisor.js';
@@ -41,7 +41,18 @@ let window: BrowserWindow | null = null;
 let position: PositionWorker | null = null;
 let watcher: LiveWatcher | null = null;
 
+/**
+ * Последний показанный вид.
+ *
+ * Разметка грузится дольше, чем поднимается живой цикл, а сообщения,
+ * отправленные до её готовности, пропадают молча. Поэтому вид хранится
+ * и отправляется заново, когда окно готово: иначе оверлей до первой перемены
+ * в игре показывал бы «жду партию» посреди уже идущей партии.
+ */
+let lastView: OverlayView = EMPTY_VIEW;
+
 function send(view: OverlayView): void {
+  lastView = view;
   window?.webContents.send('overlay:view', view);
 }
 
@@ -74,9 +85,15 @@ function createWindow(): BrowserWindow {
   // forward: события мыши всё равно доходят до игры, а окно их не перехватывает.
   created.setIgnoreMouseEvents(true, { forward: true });
 
-  // Разметка берётся из исходников, а не из сборки: копировать её незачем,
-  // а рабочий каталог у проекта и так один — оттуда же читается снапшот карт.
-  void created.loadFile('src/overlay/index.html');
+  // Путь абсолютный, и это не придирка: относительный `loadFile` считается
+  // не от рабочего каталога, а от каталога точки входа (`app.getAppPath()`,
+  // то есть dist/overlay), и разметка искалась в dist/overlay/src/overlay.
+  // Поэтому она кладётся в сборку рядом с main.js — см. npm run build.
+  created.webContents.on('did-finish-load', () => {
+    created.webContents.send('overlay:view', lastView);
+  });
+
+  void created.loadFile(fileURLToPath(new URL('index.html', import.meta.url)));
   return created;
 }
 
@@ -97,15 +114,33 @@ function describeNotice(notice: LiveNotice): OverlayView | null {
   }
 }
 
+/**
+ * Проверка предела размера логов при каждом запуске.
+ *
+ * Файл лежит в каталоге игры, и обновление Hearthstone его сносит. Запись туда
+ * требует прав на Program Files, поэтому отказ ожидаем и падением приложения
+ * быть не должен: без починки помощник работает, просто лог оборвётся
+ * на десяти мегабайтах.
+ */
+function checkLogLimit(): string | null {
+  const installDir = DEFAULT_LOGS_ROOT.replace(/[\\/]Logs$/, '');
+  try {
+    if (inspectClientConfig(installDir).sufficient) return null;
+    return ensureLogSizeLimit(installDir)
+      ? 'предел размера логов поправлен — перезапустите Hearthstone'
+      : 'предел размера логов мал, поправить не вышло';
+  } catch {
+    return 'не хватило прав поправить client.config — запустите от администратора';
+  }
+}
+
 function start(): void {
   const cards = loadCardIndex();
   const worker = new PositionWorker();
   position = worker;
 
-  // Предел размера логов проверяется при каждом запуске: файл лежит в каталоге
-  // игры, и обновление Hearthstone его сносит.
-  const installDir = DEFAULT_LOGS_ROOT.replace(/[\\/]Logs$/, '');
-  if (!inspectClientConfig(installDir).sufficient) ensureLogSizeLimit(installDir);
+  const warning = checkLogLimit();
+  if (warning !== null) send({ ...EMPTY_VIEW, header: warning });
 
   let latest: GameState | null = null;
   let tavern: ViewInput['tavern'] = null;
@@ -143,7 +178,11 @@ function start(): void {
         show();
       },
       onError: (error) => {
-        console.error(`советник расстановки: ${error.message}`);
+        // В окно, а не в консоль: у GUI-сборки Electron на Windows стандартный
+        // вывод к терминалу не подключён вовсе, и console.error никто
+        // не увидит — ошибка выглядела бы как молчание советника.
+        thinking = false;
+        send({ ...lastView, header: `сбой советника: ${error.message}` });
       },
     },
   );
@@ -160,9 +199,26 @@ function start(): void {
   watcher.start();
 }
 
+/**
+ * Как закрыть оверлей.
+ *
+ * Окно намеренно без рамки, без кнопок и не принимает фокус — закрыть его
+ * мышью нельзя по построению. Терминал не всегда под рукой: помощник
+ * запускают и ярлыком. Поэтому горячая клавиша, общесистемная — окно
+ * ведь фокуса не получает.
+ */
+const QUIT_SHORTCUT = 'Control+Shift+Q';
+
 void app.whenReady().then(() => {
   window = createWindow();
+  globalShortcut.register(QUIT_SHORTCUT, () => {
+    app.quit();
+  });
   start();
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('window-all-closed', () => {

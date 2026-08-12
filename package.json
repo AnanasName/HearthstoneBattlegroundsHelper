@@ -11,7 +11,7 @@
     "capture": "tsx src/ui/capture.ts",
     "watch": "tsx src/ui/watch.ts",
     "overlay": "npm run build && electron dist/overlay/main.js",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/overlay/index.html','dist/overlay/index.html')\"",
     "demo:phase1": "tsx src/ui/demo-phase1.ts",
     "demo:phase3": "tsx src/ui/demo-phase3.ts",
     "demo:phase4": "tsx src/ui/demo-phase4.ts",
