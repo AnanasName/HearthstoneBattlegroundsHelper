@@ -41,43 +41,66 @@ export interface Players {
   readonly selfName: string | null;
 }
 
-/** Собирает сведения об игроках. Дёшево: один проход, только нужные строки. */
-export function readPlayers(text: string): Players {
-  const names = new Map<number, string>();
-  const decls: PlayerDecl[] = [];
+/**
+ * Накопление сведений об игроках по строкам.
+ *
+ * В живом режиме «кто я» становится известно не сразу: объявления `Player`
+ * идут в дампе CREATE_GAME, а имена — двумя сотнями строк ниже, уже в другом
+ * канале. Редьюсер же требует готовых `Players` при создании, поэтому кто-то
+ * должен уметь ответить «уже знаю» — это и есть задача накопителя.
+ */
+export class PlayersCollector {
+  readonly #names = new Map<number, string>();
+  readonly #decls: PlayerDecl[] = [];
 
-  for (const raw of splitLogLines(text)) {
+  push(raw: string): void {
     const line = parseLogLine(raw);
-    if (line === null) continue;
+    if (line === null) return;
 
     if (line.source === PLAYER_NAME_SOURCE) {
       const m = PLAYER_NAME_RE.exec(line.content);
       if (m?.[1] !== undefined && m[2] !== undefined) {
-        names.set(Number(m[1]), m[2]);
+        this.#names.set(Number(m[1]), m[2]);
       }
-      continue;
+      return;
     }
 
     const m = PLAYER_DECL_RE.exec(line.content);
-    if (m?.[1] === undefined) continue;
+    if (m?.[1] === undefined) return;
     const [, entityId, playerId, hi, lo] = m;
-    if (playerId === undefined || hi === undefined || lo === undefined) continue;
+    if (playerId === undefined || hi === undefined || lo === undefined) return;
 
     const decl: PlayerDecl = {
       entityId: Number(entityId),
       playerId: Number(playerId),
       hasAccount: hi !== '0' || lo !== '0',
     };
-    if (!decls.some((d) => d.entityId === decl.entityId)) decls.push(decl);
+    if (!this.#decls.some((d) => d.entityId === decl.entityId)) this.#decls.push(decl);
   }
 
-  const self = decls.find((d) => d.hasAccount) ?? null;
-  const selfPlayerId = self?.playerId ?? null;
+  /** Снимок независим от накопителя: редьюсер держит его у себя всю партию. */
+  snapshot(): Players {
+    const self = this.#decls.find((d) => d.hasAccount) ?? null;
+    const selfPlayerId = self?.playerId ?? null;
 
-  return {
-    names,
-    decls,
-    selfPlayerId,
-    selfName: selfPlayerId === null ? null : (names.get(selfPlayerId) ?? null),
-  };
+    return {
+      names: new Map(this.#names),
+      decls: [...this.#decls],
+      selfPlayerId,
+      selfName: selfPlayerId === null ? null : (this.#names.get(selfPlayerId) ?? null),
+    };
+  }
+
+  /** Известно ли всё, на чём стоит определение «кто я». */
+  get resolved(): boolean {
+    const self = this.#decls.find((d) => d.hasAccount);
+    return self !== undefined && this.#names.has(self.playerId);
+  }
+}
+
+/** Собирает сведения об игроках. Дёшево: один проход, только нужные строки. */
+export function readPlayers(text: string): Players {
+  const collector = new PlayersCollector();
+  for (const raw of splitLogLines(text)) collector.push(raw);
+  return collector.snapshot();
 }

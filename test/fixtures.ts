@@ -39,3 +39,14 @@ export function part2Game(): string {
 export function part3Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part3', 'game.log'), 'utf8');
 }
+
+/**
+ * Та же фикстура байтами, без разбора в строку.
+ *
+ * Нужна живому режиму: он читает файл порциями произвольной границы, и порция
+ * может разрезать многобайтовый символ. Проверять склейку на уже разобранном
+ * тексте бессмысленно — там резать нечего.
+ */
+export function fixtureBytes(part: 'part2' | 'part3'): Buffer {
+  return readFileSync(join(FIXTURES_DIR, part, 'game.log'));
+}

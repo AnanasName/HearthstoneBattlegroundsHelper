@@ -72,6 +72,50 @@ function parseBlockStart(line: LogLine): BlockContext | null {
 }
 
 /**
+ * Сборка событий из строк по одной, со стеком блоков между вызовами.
+ *
+ * Живому режиму лог приходит порциями произвольной границы, и стек обязан
+ * переживать порцию: блок открывается в одной, а его содержимое приходит
+ * в следующей. Пакетный `readPowerEvents` построен на этом же классе, чтобы
+ * оба пути не разъехались.
+ */
+export class PowerEventAssembler {
+  #stack: BlockContext[] = [];
+
+  /** Событие, если строка его несёт; null для чужих каналов и границ блоков. */
+  push(raw: string): PowerEvent | null {
+    const line = parseLogLine(raw);
+    if (line === null || line.source !== SOURCE_OF_TRUTH) return null;
+
+    // Блок живёт, пока идут строки с отступом строго больше его собственного.
+    while (this.#stack.length > 0) {
+      const top = this.#stack[this.#stack.length - 1];
+      if (top === undefined || line.indent > top.indent) break;
+      this.#stack.pop();
+    }
+
+    const started = parseBlockStart(line);
+    if (started !== null) {
+      this.#stack.push(started);
+      return null;
+    }
+
+    if (line.content === 'BLOCK_END') return null;
+
+    return { line, blocks: [...this.#stack] };
+  }
+
+  /** Забыть открытые блоки — на новой партии их досчитывать не по чему. */
+  reset(): void {
+    this.#stack = [];
+  }
+
+  get depth(): number {
+    return this.#stack.length;
+  }
+}
+
+/**
  * Проходит по строкам канала-источника и отдаёт каждое событие вместе со стеком
  * блоков, внутри которых оно произошло.
  *
@@ -79,28 +123,11 @@ function parseBlockStart(line: LogLine): BlockContext | null {
  * представлена в стеке, вторая только закрывает блок.
  */
 export function* readPowerEvents(text: string): Generator<PowerEvent> {
-  const stack: BlockContext[] = [];
+  const assembler = new PowerEventAssembler();
 
   for (const raw of splitLogLines(text)) {
-    const line = parseLogLine(raw);
-    if (line === null || line.source !== SOURCE_OF_TRUTH) continue;
-
-    // Блок живёт, пока идут строки с отступом строго больше его собственного.
-    while (stack.length > 0) {
-      const top = stack[stack.length - 1];
-      if (top === undefined || line.indent > top.indent) break;
-      stack.pop();
-    }
-
-    const started = parseBlockStart(line);
-    if (started !== null) {
-      stack.push(started);
-      continue;
-    }
-
-    if (line.content === 'BLOCK_END') continue;
-
-    yield { line, blocks: [...stack] };
+    const event = assembler.push(raw);
+    if (event !== null) yield event;
   }
 }
 
