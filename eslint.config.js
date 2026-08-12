@@ -20,4 +20,12 @@ export default tseslint.config(
     files: ['**/*.js'],
     ...tseslint.configs.disableTypeChecked,
   },
+  {
+    // Preload для Electron обязан быть CommonJS: он грузится раньше всего
+    // остального и модульной системы проекта не разделяет. Под
+    // verbatimModuleSyntax в CommonJS-файле пишут `import =`, и запрет
+    // на require здесь означал бы запрет на сам файл.
+    files: ['**/*.cts'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
 );

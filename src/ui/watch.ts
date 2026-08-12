@@ -18,24 +18,23 @@ import { dirname } from 'node:path';
 
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { ResolvedOpponent } from '../advisors/position/opponent.js';
-import type { Recommendation, TavernAdvice } from '../advisors/tavern/advisor.js';
+import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
 import { LiveAdvisor } from '../live/advisor.js';
 import { PositionWorker } from '../live/position/client.js';
 import { replayLog } from '../live/replay.js';
 import { LiveWatcher, type LiveNotice } from '../live/watcher.js';
-import type { GameState, Minion } from '../state/types.js';
+import type { GameState } from '../state/types.js';
+import {
+  minionLabel,
+  noOpponentReason,
+  opponentStale,
+  positionLine,
+  recommendationLine,
+  situationLine,
+} from './format.js';
 import { ensureLogSizeLimit, inspectClientConfig } from '../watcher/clientConfig.js';
 import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
-
-const ACTION_LABEL: Readonly<Record<Recommendation['action'], string>> = {
-  levelUp: 'ПОДНЯТЬ ТАВЕРНУ',
-  buy: 'КУПИТЬ',
-  sell: 'ПРОДАТЬ',
-  reroll: 'ОБНОВИТЬ',
-  freeze: 'ЗАМОРОЗИТЬ',
-  pass: 'НИЧЕГО',
-};
 
 interface Args {
   readonly logsRoot: string;
@@ -78,56 +77,25 @@ function searchOptions(args: Args): { budgetMs?: number; screenBudgetMs?: number
   return { budgetMs: args.budgetMs, screenBudgetMs: args.budgetMs / 3 };
 }
 
-function shortName(m: Minion, cards: CardIndex): string {
-  const info = cards.info(m.cardId);
-  const marks = [
-    m.golden ? 'зол' : '',
-    m.taunt ? 'провок' : '',
-    m.divineShield ? 'щит' : '',
-    m.poisonous || m.venomous ? 'яд' : '',
-    m.reborn ? 'перерожд' : '',
-    m.windfury ? 'вихрь' : '',
-  ].filter((x) => x !== '');
-
-  return (
-    `${info?.name ?? m.cardId} ${String(m.attack ?? '?')}/${String(m.health ?? '?')}` +
-    (marks.length > 0 ? ` (${marks.join(',')})` : '')
-  );
-}
-
-function heroHp(state: GameState): string {
-  const hero = state.hero;
-  if (hero === null) return '?';
-  const hp = (hero.health ?? 0) - hero.damage;
-  return hero.armor > 0 ? `${String(hp)}+${String(hero.armor)}` : String(hp);
-}
-
 function printSituation(state: GameState, advice: TavernAdvice | null, cards: CardIndex): void {
   // До выбора героя советовать нечего, а печатать пустую шапку — шум.
   if (state.hero === null) return;
 
-  console.log(
-    `\n══ ход ${String(state.turn)} · ${state.phase === 'tavern' ? 'таверна' : 'бой'}` +
-      ` · тир ${String(state.techLevel)} · золото ${String(state.gold)}/${String(state.goldTotal)}` +
-      ` · hp ${heroHp(state)}`,
-  );
+  console.log(`\n══ ${situationLine(state)}`);
 
   if (state.board.length > 0) {
     console.log(
-      `   борд:    ${state.board.map((m, i) => `${String(i + 1)}.${shortName(m, cards)}`).join('  ')}`,
+      `   борд:    ${state.board.map((m, i) => `${String(i + 1)}.${minionLabel(m, cards)}`).join('  ')}`,
     );
   }
   if (advice === null) return;
 
   if (state.shop.length > 0) {
-    console.log(`   витрина: ${state.shop.map((m) => shortName(m, cards)).join('  |  ')}`);
+    console.log(`   витрина: ${state.shop.map((m) => minionLabel(m, cards)).join('  |  ')}`);
   }
 
   for (const r of advice.recommendations.slice(0, 2)) {
-    const what = r.minion === null ? '' : ` ${shortName(r.minion, cards)}`;
-    const price = r.cost > 0 ? ` за ${String(r.cost)}` : '';
-    const victim = r.sellFirst === null ? '' : `, продав ${shortName(r.sellFirst, cards)}`;
-    console.log(`   ▸ ${ACTION_LABEL[r.action]}${what}${price}${victim} — ${r.reason}`);
+    console.log(`   ▸ ${recommendationLine(r, cards)} — ${r.reason}`);
   }
 }
 
@@ -141,38 +109,11 @@ function printPosition(
     return;
   }
 
-  const best = advice.top[0];
-  if (best === undefined) return;
+  console.log(`   расстановка: ${positionLine(advice, opponent, cards)}`);
 
-  const against =
-    opponent.source === 'lastSeen'
-      ? `по борду ${String(opponent.staleTurns)} ходов давности`
-      : 'по текущему бою';
-
-  const odds = `${winPercent(advice.report.current.estimate).toFixed(0)}% побед`;
-  const spent = `${against}, ${String(advice.elapsedMs)} мс`;
-
-  if (!advice.improves) {
-    console.log(`   расстановка: менять нечего (${odds}, ${spent})`);
-  } else {
-    console.log(
-      `   расстановка: ${best.board.map((m) => shortName(m, cards)).join(' → ')}` +
-        `  +${advice.gain.toFixed(1)} п.п. к ${odds} (${spent})`,
-    );
-  }
-
-  // Порог показной, а не замеренный: за столько ходов противник успевает
-  // дважды сходить в таверну, и картинка перестаёт что-либо значить. В обеих
-  // фикстурах устаревание доходит до 17 ходов, и там счёт даёт 100% побед
-  // против борда, которого давно нет.
-  if (opponent.source === 'lastSeen' && opponent.staleTurns > 4) {
+  if (opponentStale(opponent)) {
     console.log('                картинка противника устарела, полагаться на числа нельзя');
   }
-}
-
-/** Доля побед оценки, в процентах. */
-function winPercent(estimate: { readonly sims: number; readonly won: number }): number {
-  return estimate.sims === 0 ? 0 : (estimate.won / estimate.sims) * 100;
 }
 
 function printNotice(notice: LiveNotice): void {
@@ -228,11 +169,7 @@ async function main(): Promise<void> {
         printPosition(advice, opponent, cards);
       },
       onNoOpponent: (opponent) => {
-        console.log(
-          opponent.source === 'unseen'
-            ? '   расстановка: следующего противника ещё не видели — считать не против кого'
-            : '   расстановка: противник неизвестен',
-        );
+        console.log(`   расстановка: ${noOpponentReason(opponent)}`);
       },
       onError: (error) => {
         console.error(`советник расстановки: ${error.message}`);

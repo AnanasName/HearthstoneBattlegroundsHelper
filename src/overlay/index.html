@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>HS BG Assistant</title>
+    <style>
+      /*
+        Оверлей лежит поверх игры, поэтому читаемость важнее вида: тёмная
+        подложка под текстом, а не под всем окном, и никакого фона там,
+        где текста нет.
+      */
+      :root {
+        color-scheme: dark;
+        --good: #7ee08a;
+        --warn: #f0c674;
+        --muted: #9aa0a6;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        font: 13px/1.45 'Segoe UI', system-ui, sans-serif;
+        color: #eceff1;
+      }
+
+      #card {
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(16, 18, 22, 0.78);
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(2px);
+      }
+
+      #card.idle {
+        background: rgba(16, 18, 22, 0.5);
+      }
+
+      #header {
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        margin-bottom: 6px;
+      }
+
+      .row {
+        margin: 2px 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .label {
+        color: var(--muted);
+        margin-right: 4px;
+      }
+
+      .good {
+        color: var(--good);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      #actions {
+        margin-top: 6px;
+      }
+
+      #position {
+        margin-top: 6px;
+        white-space: normal;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card" class="idle">
+      <div id="header">жду партию</div>
+      <div id="board"></div>
+      <div id="shop"></div>
+      <div id="actions"></div>
+      <div id="position"></div>
+    </div>
+
+    <script>
+      // Разметка ничего не решает: приходит готовый вид, она его рисует.
+      const el = (id) => document.getElementById(id);
+
+      function row(text, cls) {
+        const div = document.createElement('div');
+        div.className = cls ? `row ${cls}` : 'row';
+        div.textContent = text;
+        return div;
+      }
+
+      function list(node, label, items) {
+        node.replaceChildren();
+        if (!items || items.length === 0) return;
+        node.appendChild(row(`${label} ${items.join('  ·  ')}`, 'muted'));
+      }
+
+      window.overlay.onView((view) => {
+        el('card').className = view.active ? '' : 'idle';
+        el('header').textContent = view.header;
+
+        list(el('board'), 'борд:', view.board);
+        list(el('shop'), 'витрина:', view.shop);
+
+        const actions = el('actions');
+        actions.replaceChildren();
+        for (const line of view.actions || []) {
+          actions.appendChild(row(`▸ ${line.text}`, line.tone));
+        }
+
+        const position = el('position');
+        position.replaceChildren();
+        if (view.position) {
+          position.appendChild(row(`расстановка: ${view.position.text}`, view.position.tone));
+        }
+      });
+    </script>
+  </body>
+</html>
