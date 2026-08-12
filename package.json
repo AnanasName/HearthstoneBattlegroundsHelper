@@ -9,6 +9,7 @@
   },
   "scripts": {
     "capture": "tsx src/ui/capture.ts",
+    "watch": "tsx src/ui/watch.ts",
     "demo:phase1": "tsx src/ui/demo-phase1.ts",
     "demo:phase3": "tsx src/ui/demo-phase3.ts",
     "demo:phase4": "tsx src/ui/demo-phase4.ts",
