@@ -48,8 +48,30 @@ export interface PositionAdvice {
   readonly elapsedMs: number;
 }
 
+/**
+ * Счёт брошен, потому что состояние успело измениться.
+ *
+ * Отдельный класс, а не флаг в ответе: прерванный поиск ответа не имеет,
+ * и отличать его от «посчитали и ничего не нашли» обязан сам тип.
+ */
+export class SearchAborted extends Error {
+  constructor() {
+    super('поиск расстановки прерван');
+    this.name = 'SearchAborted';
+  }
+}
+
 export interface PositionAdvisorDeps {
   readonly simulator: BattleSimulator;
+  /**
+   * Пора ли бросить счёт. Спрашивается перед оценкой каждого кандидата.
+   *
+   * Живому режиму это необходимо: совет считается секунды, а игрок за это
+   * время успевает купить миньона, и досчитанный ответ относится уже
+   * к несуществующему борду. Прерывание кооперативное — поиск синхронный,
+   * извне его не остановить.
+   */
+  readonly aborted?: () => boolean;
 }
 
 /**
@@ -61,7 +83,7 @@ export interface PositionAdvisorDeps {
  */
 export function advisePosition(
   setup: BattleSetup,
-  { simulator }: PositionAdvisorDeps,
+  { simulator, aborted }: PositionAdvisorDeps,
   overrides: Partial<SearchOptions> = {},
 ): PositionAdvice {
   const started = Date.now();
@@ -71,7 +93,11 @@ export function advisePosition(
 
   const report = searchArrangement(
     setup.playerBoard,
-    (board, sims, seed) =>
+    (board, sims, seed) => {
+      // Проверка перед оценкой, а не внутри неё: одна оценка — это от 27
+      // до 150 мс, и такой задержки прерыванию довольно.
+      if (aborted?.() === true) throw new SearchAborted();
+
       // Зерно фиксируется не ради точности — замер показал, что общие
       // случайные числа разброс не уменьшают, — а ради воспроизводимости.
       // Оговорка тут существенная: воспроизводимость полная, только пока
@@ -79,7 +105,10 @@ export function advisePosition(
       // число просмотренных кандидатов зависит от загрузки машины, и совет
       // может отличаться. Чтобы разобрать конкретный случай до последней
       // симуляции, бюджет надо снять — тогда вход определяет ответ целиком.
-      toEstimate(withSeededRandom(seed, () => simulator.run(withPlayerBoard(base, board), sims))),
+      return toEstimate(
+        withSeededRandom(seed, () => simulator.run(withPlayerBoard(base, board), sims)),
+      );
+    },
     overrides,
   );
 
@@ -111,6 +140,36 @@ export interface StateAdvice extends PositionAdvice {
   readonly opponent: ResolvedOpponent;
 }
 
+export interface PositionQuestion {
+  readonly setup: BattleSetup;
+  readonly opponent: ResolvedOpponent;
+}
+
+/**
+ * Кого против кого считать — или `null`, если считать нечего.
+ *
+ * Вынесено отдельно, потому что спрашивают из двух мест: пакетный
+ * `advisePositionForState` считает тут же, а живой режим отправляет тот же
+ * `setup` в воркер. Собирать его дважды — верный способ разойтись.
+ */
+export function positionQuestion(state: GameState): PositionQuestion | null {
+  const opponent = resolveOpponent(state);
+  if (!opponent.usable || state.hero === null || state.board.length === 0) return null;
+
+  return {
+    opponent,
+    setup: {
+      turn: state.turn,
+      playerBoard: state.board,
+      opponentBoard: opponent.board,
+      playerHero: state.hero,
+      techLevel: state.techLevel,
+      anomalyCardId: state.anomalyCardId,
+      globalInfo: state.globalInfo,
+    },
+  };
+}
+
 /**
  * Совет по расстановке прямо из состояния партии.
  *
@@ -123,18 +182,8 @@ export function advisePositionForState(
   deps: PositionAdvisorDeps,
   overrides: Partial<SearchOptions> = {},
 ): StateAdvice | null {
-  const opponent = resolveOpponent(state);
-  if (!opponent.usable || state.hero === null || state.board.length === 0) return null;
+  const question = positionQuestion(state);
+  if (question === null) return null;
 
-  const setup: BattleSetup = {
-    turn: state.turn,
-    playerBoard: state.board,
-    opponentBoard: opponent.board,
-    playerHero: state.hero,
-    techLevel: state.techLevel,
-    anomalyCardId: state.anomalyCardId,
-    globalInfo: state.globalInfo,
-  };
-
-  return { ...advisePosition(setup, deps, overrides), opponent };
+  return { ...advisePosition(question.setup, deps, overrides), opponent: question.opponent };
 }
