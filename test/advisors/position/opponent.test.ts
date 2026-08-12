@@ -1,34 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveOpponent } from '../../../src/advisors/position/opponent.js';
-import { EMPTY_STATE, type GameState, type Minion } from '../../../src/state/types.js';
+import { EMPTY_STATE, type GameState } from '../../../src/state/types.js';
+import { minion } from '../../minions.js';
 import { part3Game } from '../../fixtures.js';
 import { readPowerEvents } from '../../../src/parser/blocks.js';
 import { readPlayers } from '../../../src/state/players.js';
 import { createReducer } from '../../../src/state/reducer.js';
-
-function minion(entityId: number): Minion {
-  return {
-    entityId,
-    cardId: `CARD_${String(entityId)}`,
-    zonePos: entityId,
-    attack: 3,
-    health: 4,
-    taunt: false,
-    divineShield: false,
-    poisonous: false,
-    venomous: false,
-    reborn: false,
-    windfury: false,
-    stealth: false,
-    golden: false,
-    maxHealth: 4,
-    techLevel: 3,
-    enchantments: [],
-    scriptData: [null, null, null, null, null, null],
-    tags: {},
-  };
-}
 
 const state = (patch: Partial<GameState>): GameState => ({ ...EMPTY_STATE, ...patch });
 

@@ -42,6 +42,9 @@ const FULL_ENTITY_CREATING_RE = /^FULL_ENTITY - Creating ID=(\d+) CardID=(\S*)/;
  */
 const SHOW_ENTITY_RE = /^SHOW_ENTITY - Updating Entity=(\d+) CardID=(\S*)/;
 
+/** Кнопка подъёма таверны — по одной на каждый достижимый тир. */
+const TECH_UP_BUTTON_RE = /^TB_BaconShopTechUp\d+_Button$/;
+
 /** Теги-признаки, которые нас интересуют у миньона. */
 interface Entity {
   id: number;
@@ -103,6 +106,7 @@ function toMinion(e: Entity, enchantments: readonly Enchantment[]): Minion {
     // Тег PREMIUM, а не суффикс _G: 25 золотых миньонов эталонной партии
     // такого суффикса не имеют, обратных случаев нет.
     golden: flag(e, 'PREMIUM'),
+    frozen: flag(e, 'FROZEN'),
     maxHealth: health,
     techLevel: e.tags.get('TECH_LEVEL') ?? null,
   };
@@ -127,6 +131,7 @@ export function createReducer(players: Players): Reducer {
   let nextOpponentPlayerId: number | null = null;
   let currentOpponentPlayerId: number | null = null;
   let wonLastCombat: boolean | null = null;
+  let maxTechLevel: number | null = null;
 
   /**
    * Счётчики игрока: тег лога → поле GlobalInfo.
@@ -273,6 +278,16 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'BACON_WON_LAST_COMBAT':
         if (subject.kind === 'self' && n !== null) wonLastCombat = n > 0;
+        return;
+      case 'BACON_MAX_PLAYER_TECH_LEVEL':
+        // Тег висит на героях всех участников лобби, а предел тира — свойство
+        // героя, не партии. Берём только со своего, иначе чужой герой с иным
+        // пределом молча подменит наш. Ноль приходит при сбросе сущности
+        // и пределом быть не может.
+        if (n === null || n <= 0) return;
+        if (subject.kind === 'self' || (subject.kind === 'entity' && subject.id === heroEntityId)) {
+          maxTechLevel = n;
+        }
         return;
       default: {
         // Счётчики принимаются только от своего игрока: те же имена приходят
@@ -484,6 +499,32 @@ export function createReducer(players: Players): Reducer {
     applyGlobal(tag, value, subject);
   };
 
+  /**
+   * Кнопка апгрейда таверны — она же цена подъёма.
+   *
+   * Сущность `TB_BaconShopTechUp0N_Button` в `PLAY` под своим контроллером.
+   * Её `COST` — это ровно та цена, что показана в игре: базовая для тира
+   * минус единица за каждый ход, когда таверну не подняли. Пересоздаётся
+   * при каждом подъёме, поэтому ищется каждый раз заново.
+   *
+   * Нулевой `COST` не отдаём: он приходит на миг при сбросе сущности внутри
+   * блока, и снимок, взятый в этот момент, обещал бы бесплатный апгрейд.
+   */
+  const upgradeButton = (): { cost: number | null; target: number | null } => {
+    const self = players.selfPlayerId;
+    if (self === null) return { cost: null, target: null };
+
+    for (const e of entities.values()) {
+      if (e.controller !== self || e.zone !== 'PLAY') continue;
+      if (!TECH_UP_BUTTON_RE.test(e.cardId)) continue;
+      const cost = e.tags.get('COST') ?? 0;
+      const target = e.tags.get('TECH_LEVEL') ?? 0;
+      if (cost <= 0 || target <= 0) continue;
+      return { cost, target };
+    }
+    return { cost: null, target: null };
+  };
+
   /** Своя сила героя: живая сущность HERO_POWER под своим контроллером. */
   const heroPower = (): { heroPowerCardId: string | null; heroPowerEntityId: number | null } => {
     const self = players.selfPlayerId;
@@ -506,6 +547,7 @@ export function createReducer(players: Players): Reducer {
     const enchantmentsByHost = groupEnchantments();
 
     const mine = (zone: string): Minion[] => collectMinions(zone, true, enchantmentsByHost);
+    const upgrade = upgradeButton();
 
     // Чужие миньоны в PLAY — это магазин в таверне и борд противника в бою.
     // Различает их только фаза: сама зона и контроллер одинаковые.
@@ -516,6 +558,9 @@ export function createReducer(players: Players): Reducer {
       phase,
       turn,
       techLevel,
+      tavernUpgradeCost: upgrade.cost,
+      tavernUpgradeTarget: upgrade.target,
+      maxTechLevel,
       // Остаток, а не выданное на ход: в игре слева от дроби показан именно он.
       gold: Math.max(0, goldTotal - goldSpent),
       goldTotal,

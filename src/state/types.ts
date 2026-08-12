@@ -62,6 +62,14 @@ export interface Minion {
    * суффикса не имеют, тогда как обратных случаев нет ни одного.
    */
   readonly golden: boolean;
+  /**
+   * Заморожен ли — тег `FROZEN`.
+   *
+   * Осмыслен только у миньонов магазина: заморозка держит витрину до
+   * следующего хода. В part2 таких 11 сущностей, в part3 ни одной —
+   * игрок там не морозил ни разу.
+   */
+  readonly frozen: boolean;
   /** Здоровье без учёта полученного урона — тег `HEALTH`. */
   readonly maxHealth: number | null;
   /** Тир миньона из тега `TECH_LEVEL`. */
@@ -136,6 +144,23 @@ export interface GameState {
   readonly turn: number;
   /** Тир таверны из `PLAYER_TECH_LEVEL`. */
   readonly techLevel: number;
+  /**
+   * Сколько сейчас стоит поднять таверну.
+   *
+   * Читается из кнопки апгрейда — сущности `TB_BaconShopTechUp0N_Button`
+   * в зоне `PLAY` под своим контроллером, тег `COST`. Считать по таблице
+   * нельзя: цена падает на единицу за каждый ход, когда таверну не подняли,
+   * и к моменту совета зависит от всей истории партии. В фикстурах базовые
+   * цены 5, 7, 8, 11, 11 для тиров 2–6, и падение на единицу за ход видно
+   * прямо в логе.
+   *
+   * `null` на максимальном тире — кнопки там нет.
+   */
+  readonly tavernUpgradeCost: number | null;
+  /** Какой тир дала бы кнопка апгрейда — её тег `TECH_LEVEL`. */
+  readonly tavernUpgradeTarget: number | null;
+  /** Предел тира в этой партии — тег `BACON_MAX_PLAYER_TECH_LEVEL`, в фикстурах 6. */
+  readonly maxTechLevel: number | null;
   /**
    * Доступное золото — именно оно показано в игре слева от дроби.
    *
@@ -220,6 +245,9 @@ export const EMPTY_STATE: GameState = {
   phase: 'tavern',
   turn: 0,
   techLevel: 1,
+  tavernUpgradeCost: null,
+  tavernUpgradeTarget: null,
+  maxTechLevel: null,
   gold: 0,
   goldTotal: 0,
   goldSpent: 0,

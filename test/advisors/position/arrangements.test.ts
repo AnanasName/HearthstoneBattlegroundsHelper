@@ -5,30 +5,14 @@ import {
   minionSignature,
 } from '../../../src/advisors/position/arrangements.js';
 import type { Minion } from '../../../src/state/types.js';
+import { minion as base } from '../../minions.js';
 
-function minion(entityId: number, patch: Partial<Minion> = {}): Minion {
-  return {
-    entityId,
-    cardId: 'BG31_815',
-    zonePos: entityId,
-    attack: 3,
-    health: 4,
-    taunt: false,
-    divineShield: false,
-    poisonous: false,
-    venomous: false,
-    reborn: false,
-    windfury: false,
-    stealth: false,
-    golden: false,
-    maxHealth: 4,
-    techLevel: 3,
-    enchantments: [],
-    scriptData: [null, null, null, null, null, null],
-    tags: {},
-    ...patch,
-  };
-}
+/**
+ * Здесь миньоны намеренно одинаковы по умолчанию: предмет теста — склейка
+ * неразличимых, и различать их должно только то, что тест задал явно.
+ */
+const minion = (entityId: number, patch: Partial<Minion> = {}): Minion =>
+  base(entityId, { cardId: 'BG31_815', ...patch });
 
 /** Мультимножество entityId — расстановка обязана состоять из тех же миньонов. */
 function ids(board: readonly Minion[]): number[] {
@@ -43,7 +27,7 @@ describe('сигнатура миньона', () => {
   });
 
   it('различает всё, что видит симулятор', () => {
-    const base = minion(1);
+    const plain = minion(1);
     for (const patch of [
       { cardId: 'BG26_529' },
       { attack: 4 },
@@ -61,7 +45,7 @@ describe('сигнатура миньона', () => {
       { scriptData: [2, null, null, null, null, null] },
       { tags: { ATK: 3 } },
     ] satisfies Partial<Minion>[]) {
-      expect(minionSignature(minion(1, patch))).not.toBe(minionSignature(base));
+      expect(minionSignature(minion(1, patch))).not.toBe(minionSignature(plain));
     }
   });
 

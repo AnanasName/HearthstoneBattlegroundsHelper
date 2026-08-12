@@ -5,6 +5,7 @@ import type { Estimate } from '../../../src/advisors/position/score.js';
 import { winRate } from '../../../src/advisors/position/score.js';
 import { searchArrangement, type Evaluate } from '../../../src/advisors/position/search.js';
 import type { Minion } from '../../../src/state/types.js';
+import { board } from '../../minions.js';
 
 /**
  * Поиск проверяется на подставном оценщике с заранее известным оптимумом.
@@ -14,30 +15,7 @@ import type { Minion } from '../../../src/state/types.js';
  * Здесь ландшафт задан руками — лучшая расстановка известна до запуска.
  */
 
-function minion(entityId: number): Minion {
-  return {
-    entityId,
-    cardId: `CARD_${String(entityId)}`,
-    zonePos: entityId,
-    attack: entityId,
-    health: 4,
-    taunt: false,
-    divineShield: false,
-    poisonous: false,
-    venomous: false,
-    reborn: false,
-    windfury: false,
-    stealth: false,
-    golden: false,
-    maxHealth: 4,
-    techLevel: 3,
-    enchantments: [],
-    scriptData: [null, null, null, null, null, null],
-    tags: {},
-  };
-}
 
-const board = (ids: readonly number[]): Minion[] => ids.map(minion);
 
 /**
  * Ландшафт: чем ближе порядок к возрастанию entityId, тем выше доля побед.
