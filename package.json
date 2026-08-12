@@ -11,6 +11,7 @@
     "capture": "tsx src/ui/capture.ts",
     "demo:phase1": "tsx src/ui/demo-phase1.ts",
     "spike:battle": "tsx src/advisors/battle/spike.ts",
+    "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
