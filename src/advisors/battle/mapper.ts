@@ -12,7 +12,6 @@ import {
   type Hero,
   type Minion,
 } from '../../state/types.js';
-import type { BattleEpisode } from './episodes.js';
 
 /**
  * Перевод нашего состояния во входной формат симулятора.
@@ -123,6 +122,23 @@ export function toPlayerEntity(
 }
 
 /**
+ * Всё, что нужно знать о положении дел перед боем.
+ *
+ * Выделено из `BattleEpisode` затем, что эпизод — это бой из лога с уже
+ * известным исходом, а советнику расстановки надо считать бой, которого ещё
+ * не было. Набор полей тот же, `BattleEpisode` подходит сюда как есть.
+ */
+export interface BattleSetup {
+  readonly turn: number;
+  readonly playerBoard: readonly Minion[];
+  readonly opponentBoard: readonly Minion[];
+  readonly playerHero: Hero;
+  readonly techLevel: number;
+  readonly anomalyCardId: string | null;
+  readonly globalInfo: GlobalInfo;
+}
+
+/**
  * Собирает вход симулятора для одного боя.
  *
  * Герой противника нам неизвестен: в логе видно его борд, но не карточку героя
@@ -130,7 +146,7 @@ export function toPlayerEntity(
  * через силу, а её мы всё равно не извлекаем.
  */
 export function toBattleInfo(
-  episode: BattleEpisode,
+  episode: BattleSetup,
   numberOfSimulations: number,
 ): BgsBattleInfo {
   const opponentHero: BgsPlayerEntity = {
@@ -156,5 +172,23 @@ export function toBattleInfo(
       currentTurn: episode.turn,
       ...(episode.anomalyCardId === null ? {} : { anomalies: [episode.anomalyCardId] }),
     },
+  };
+}
+
+/**
+ * Тот же бой, но со своим бордом в другом порядке.
+ *
+ * Позиция миньона для симулятора — это индекс в массиве, отдельного поля под
+ * неё нет. Поэтому советник расстановки меняет ровно одно: порядок элементов
+ * `playerBoard.board`. Всё прочее — герой, счётчики, борд противника, ход —
+ * обязано остаться тем же, иначе кандидаты сравниваются в разных условиях.
+ */
+export function withPlayerBoard(
+  input: BgsBattleInfo,
+  board: readonly Minion[],
+): BgsBattleInfo {
+  return {
+    ...input,
+    playerBoard: { ...input.playerBoard, board: board.map(toBoardEntity) },
   };
 }
