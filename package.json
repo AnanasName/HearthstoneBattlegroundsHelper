@@ -15,6 +15,7 @@
     "spike:battle": "tsx src/advisors/battle/spike.ts",
     "spike:position": "tsx src/advisors/position/spike.ts",
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
+    "validate:tavern": "tsx src/advisors/tavern/validate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
