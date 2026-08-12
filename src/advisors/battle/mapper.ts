@@ -101,7 +101,7 @@ export function toPlayerEntity(
     cardId: hero.cardId,
     hpLeft: (hero.health ?? 0) - hero.damage + hero.armor,
     tavernTier,
-    globalInfo: toGlobalInfo(globalInfo) as BgsPlayerEntity['globalInfo'],
+    globalInfo: toGlobalInfo(globalInfo),
     heroPowers:
       hero.heroPowerCardId === null
         ? []
@@ -139,7 +139,7 @@ export function toBattleInfo(
     tavernTier: episode.techLevel,
     heroPowers: [],
     questEntities: [],
-    globalInfo: toGlobalInfo(EMPTY_GLOBAL_INFO) as BgsPlayerEntity['globalInfo'],
+    globalInfo: toGlobalInfo(EMPTY_GLOBAL_INFO),
   };
 
   return {
