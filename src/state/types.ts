@@ -103,6 +103,22 @@ export interface Hero {
   /** Сила героя — сущность `CARDTYPE=HERO_POWER` под своим контроллером. */
   readonly heroPowerCardId: string | null;
   readonly heroPowerEntityId: number | null;
+  /**
+   * Цена силы — тег `COST` на её сущности. `null` у пассивных сил.
+   *
+   * Проверено на part8 (Скаббс, «I Spy»): COST=2 при создании силы.
+   */
+  readonly heroPowerCost: number | null;
+  /**
+   * Нажата ли сила в этом ходу.
+   *
+   * `EXHAUSTED` на силах в фикстурах не встречается ни разу; применение
+   * видно иначе — блоком `BlockType=PLAY` на сущности силы (part8:
+   * 10 нажатий, 10 таких блоков). Сбрасывается со сменой хода.
+   */
+  readonly heroPowerUsedThisTurn: boolean;
+  /** Тег `LITERALLY_UNPLAYABLE`: сила есть, но жать её сейчас нельзя. */
+  readonly heroPowerUnplayable: boolean;
 }
 
 /**
@@ -240,6 +256,17 @@ export interface GameState {
    */
   readonly lastSeenBoardTurns: Readonly<Record<number, number>>;
   /**
+   * Цена нажатия тёмного дара — тег `COST` кнопки `BG36_Button_DarkGift`.
+   *
+   * `null`, когда кнопки нет (партия без даров или кнопка убрана). Кнопка —
+   * `CARDTYPE=GAME_MODE_BUTTON` в `PLAY` под своим контроллером, как кнопка
+   * подъёма таверны; цена меняется, читать её надо из тега, не из таблицы.
+   */
+  readonly darkGiftCost: number | null;
+  /** Нажат ли дар в этом ходу — блок `BlockType=PLAY` на кнопке. */
+  readonly darkGiftUsedThisTurn: boolean;
+
+  /**
    * Открытое сейчас предложение тринкетов.
    *
    * Сущности `CARDTYPE=BATTLEGROUND_TRINKET` под своим контроллером
@@ -286,6 +313,8 @@ export const EMPTY_STATE: GameState = {
   wonLastCombat: null,
   lastSeenBoards: {},
   lastSeenBoardTurns: {},
+  darkGiftCost: null,
+  darkGiftUsedThisTurn: false,
   trinketOffer: [],
   trinketsByPlayer: {},
   finalPlace: null,

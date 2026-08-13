@@ -130,8 +130,45 @@ export interface TavernRules {
    */
   readonly trinketTribeWords: Readonly<Record<string, string>>;
 
-  /** Ниже этой ценности покупка считается пустой, и лучше обновить витрину. */
-  readonly rerollWhenBestBelow: number;
+  /**
+   * Признаки «сила даёт миньона» в тексте силы героя.
+   *
+   * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
+   * opponent's warband») — типовой случай: сила за золото приносит существо,
+   * и это выгоднее третьей покупки. Про силы вне этих шаблонов — урон, баффы —
+   * совет не берётся судить, как и с тринкетами.
+   */
+  readonly heroPowerMinionWords: readonly string[];
+
+  /**
+   * Очков ценности в одном золотом.
+   *
+   * Курс выводится из самих правил, а не выдуман: покупка за 3 золота даёт
+   * миньона на ~9 очков к середине партии, то есть золото ≈ 3 очка. Нужен,
+   * когда действия стоят по-разному: сила героя за 2 против покупки за 3.
+   */
+  readonly goldPointValue: number;
+
+  /**
+   * Ценность нажатия тёмного дара.
+   *
+   * Дар — усиление миньона, которого не купить в витрине. Вес задан данными
+   * и, как у экономики, не проверяется ближайшим боем: дар выбирается
+   * из трёх позже, и что выпадет — неизвестно.
+   */
+  readonly darkGift: {
+    readonly value: number;
+  };
+
+  /**
+   * Порог «покупать нечего» для обновления витрины, ОТНОСИТЕЛЬНО тира.
+   *
+   * Порог = perTechLevel × тир + этот запас. Прежний плоский порог (6) был
+   * калиброван под ранние тиры и к пятому переставал срабатывать вовсе:
+   * любой миньон пятого тира стоит больше шести очков уже одним тиром,
+   * и реролл не советовался никогда — на что игрок и указал.
+   */
+  readonly rerollMarginOverTier: number;
   /**
    * Заморозка.
    *
@@ -194,6 +231,19 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],
 
+  heroPowerMinionWords: [
+    'discover[^.]*minion',
+    'add[^.]*minion',
+    'get[^.]*minion',
+    'copy of a minion',
+  ],
+
+  goldPointValue: 3,
+
+  darkGift: {
+    value: 8,
+  },
+
   trinketTribeWords: {
     MURLOC: 'murlocs?',
     DEMON: 'demons?',
@@ -207,7 +257,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     UNDEAD: 'undead',
   },
 
-  rerollWhenBestBelow: 6,
+  rerollMarginOverTier: 2,
   freeze: {
     minValue: 10,
     minTribeMates: 2,

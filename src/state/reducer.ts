@@ -45,6 +45,9 @@ const SHOW_ENTITY_RE = /^SHOW_ENTITY - Updating Entity=(\d+) CardID=(\S*)/;
 /** Кнопка подъёма таверны — по одной на каждый достижимый тир. */
 const TECH_UP_BUTTON_RE = /^TB_BaconShopTechUp\d+_Button$/;
 
+/** Кнопка тёмного дара — `CARDTYPE=GAME_MODE_BUTTON`, цена в теге `COST`. */
+const DARK_GIFT_BUTTON = 'BG36_Button_DarkGift';
+
 /** Теги-признаки, которые нас интересуют у миньона. */
 interface Entity {
   id: number;
@@ -160,6 +163,16 @@ export function createReducer(players: Players): Reducer {
   const lastSeenBoardTurns = new Map<number, number>();
   /** Снят ли уже борд противника в текущем бою. */
   let opponentBoardCaptured = false;
+  /**
+   * Нажаты ли в этом ходу сила героя и тёмный дар.
+   *
+   * `EXHAUSTED` на этих сущностях в фикстурах не встречается ни разу;
+   * применение видно только блоком `BlockType=PLAY` на самой сущности
+   * (part8: 10 нажатий силы — 10 блоков, 3 нажатия дара — 3 блока).
+   * Сбрасываются со сменой хода партии.
+   */
+  let heroPowerUsedThisTurn = false;
+  let darkGiftUsedThisTurn = false;
 
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
@@ -251,7 +264,11 @@ export function createReducer(players: Players): Reducer {
         }
         return;
       case 'TURN':
-        if (subject.kind === 'game' && n !== null) turn = n;
+        if (subject.kind === 'game' && n !== null && n !== turn) {
+          turn = n;
+          heroPowerUsedThisTurn = false;
+          darkGiftUsedThisTurn = false;
+        }
         return;
       case 'STEP':
         if (subject.kind === 'game' && value === 'FINAL_GAMEOVER') phase = 'gameOver';
@@ -394,6 +411,17 @@ export function createReducer(players: Players): Reducer {
       rememberOpponentBoard();
     }
 
+    // Нажатия силы героя и тёмного дара видны только по блокам PLAY на их
+    // сущностях — тега-расхода у них нет. Смотрим стек каждого события:
+    // блок открылся раньше, чем пришло его содержимое.
+    for (const block of event.blocks) {
+      if (block.blockType !== 'PLAY' || block.entityId === null) continue;
+      const pressed = entities.get(block.entityId);
+      if (pressed === undefined || pressed.controller !== players.selfPlayerId) continue;
+      if (pressed.cardType === 'HERO_POWER') heroPowerUsedThisTurn = true;
+      else if (pressed.cardId === DARK_GIFT_BUTTON) darkGiftUsedThisTurn = true;
+    }
+
     const descriptorHere = content.includes('[entityName=')
       ? parseEntityDescriptor(content)
       : null;
@@ -525,17 +553,52 @@ export function createReducer(players: Players): Reducer {
     return { cost: null, target: null };
   };
 
+  interface HeroPowerInfo {
+    heroPowerCardId: string | null;
+    heroPowerEntityId: number | null;
+    heroPowerCost: number | null;
+    heroPowerUsedThisTurn: boolean;
+    heroPowerUnplayable: boolean;
+  }
+
   /** Своя сила героя: живая сущность HERO_POWER под своим контроллером. */
-  const heroPower = (): { heroPowerCardId: string | null; heroPowerEntityId: number | null } => {
+  const heroPower = (): HeroPowerInfo => {
     const self = players.selfPlayerId;
-    if (self === null) return { heroPowerCardId: null, heroPowerEntityId: null };
+    const none: HeroPowerInfo = {
+      heroPowerCardId: null,
+      heroPowerEntityId: null,
+      heroPowerCost: null,
+      heroPowerUsedThisTurn: false,
+      heroPowerUnplayable: false,
+    };
+    if (self === null) return none;
 
     for (const e of entities.values()) {
       if (e.cardType !== 'HERO_POWER' || e.controller !== self) continue;
       if (DEAD_ZONES.has(e.zone) || e.cardId === '') continue;
-      return { heroPowerCardId: e.cardId, heroPowerEntityId: e.id };
+      return {
+        heroPowerCardId: e.cardId,
+        heroPowerEntityId: e.id,
+        heroPowerCost: e.tags.get('COST') ?? null,
+        heroPowerUsedThisTurn,
+        heroPowerUnplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
+      };
     }
-    return { heroPowerCardId: null, heroPowerEntityId: null };
+    return none;
+  };
+
+  /** Кнопка тёмного дара, если она сейчас есть. */
+  const darkGiftButton = (): number | null => {
+    const self = players.selfPlayerId;
+    if (self === null) return null;
+
+    for (const e of entities.values()) {
+      if (e.controller !== self || e.zone !== 'PLAY') continue;
+      if (e.cardId !== DARK_GIFT_BUTTON) continue;
+      const cost = e.tags.get('COST') ?? 0;
+      return cost > 0 ? cost : null;
+    }
+    return null;
   };
 
   const snapshot = (): GameState => {
@@ -605,6 +668,8 @@ export function createReducer(players: Players): Reducer {
       wonLastCombat,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
       lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
+      darkGiftCost: darkGiftButton(),
+      darkGiftUsedThisTurn,
       trinketOffer,
       trinketsByPlayer,
       finalPlace,

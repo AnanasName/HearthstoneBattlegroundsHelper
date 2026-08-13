@@ -48,6 +48,9 @@ const HERO: GameState['hero'] = {
   armor: 0,
   heroPowerCardId: null,
   heroPowerEntityId: null,
+  heroPowerCost: null,
+  heroPowerUsedThisTurn: false,
+  heroPowerUnplayable: false,
 };
 
 function tavernState(patch: Partial<GameState> = {}): GameState {

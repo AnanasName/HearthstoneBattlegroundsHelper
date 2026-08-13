@@ -4,7 +4,9 @@ import {
   adviseTavern,
   buyRules,
   copiesOwned,
+  darkGiftRule,
   freezeRule,
+  heroPowerRule,
   levelUpRule,
   minionValue,
   playRules,
@@ -52,6 +54,9 @@ const hero = (health: number, damage = 0, armor = 0): Hero => ({
   damage,
   heroPowerCardId: null,
   heroPowerEntityId: null,
+  heroPowerCost: null,
+  heroPowerUsedThisTurn: false,
+  heroPowerUnplayable: false,
 });
 
 function state(patch: Partial<GameState> = {}): GameState {
@@ -363,6 +368,124 @@ describe('правило обновления витрины', () => {
   it('молчит без золота', () => {
     expect(rerollRule(state({ gold: 0, shop: [shopMinion(9, 'MURLOC_1')] }), deps)).toBeNull();
   });
+
+  it('порог растёт с тиром: на пятом тире средняя витрина — повод обновить', () => {
+    // Плоский порог тут молчал: миньон пятого тира дороже шести очков
+    // одним тиром, и реролл не советовался никогда.
+    const s = state({
+      techLevel: 5,
+      gold: 4,
+      shop: [shopMinion(9, 'MURLOC_1', { attack: 2, health: 2 })],
+    });
+    expect(rerollRule(s, deps)).not.toBeNull();
+  });
+});
+
+describe('правило силы героя', () => {
+  const powerCards = createCardIndex([
+    {
+      id: 'POWER_SPY',
+      name: 'Я всё вижу',
+      text: "Discover a plain copy of a minion from your next opponent's warband.",
+    },
+    { id: 'POWER_DMG', name: 'Огонь', text: 'Deal 3 damage to a random enemy minion.' },
+  ]);
+  const powerDeps = { cards: powerCards };
+
+  const withPower = (cardId: string, patch: Partial<GameState> = {}): GameState =>
+    state({
+      hero: {
+        ...hero(40),
+        heroPowerCardId: cardId,
+        heroPowerEntityId: 900,
+        heroPowerCost: 2,
+      },
+      ...patch,
+    });
+
+  it('сила, дающая миньона, советуется как дешёвая покупка', () => {
+    const s = withPower('POWER_SPY');
+    const rec = heroPowerRule(s, powerDeps);
+    expect(rec?.action).toBe('heroPower');
+    expect(rec?.cost).toBe(2);
+    expect(rec?.reason).toContain('даёт миньона');
+  });
+
+  it('нажатая в этом ходу сила не советуется', () => {
+    const s = withPower('POWER_SPY');
+    const used = {
+      ...s,
+      hero: s.hero === null ? null : { ...s.hero, heroPowerUsedThisTurn: true },
+    };
+    expect(heroPowerRule(used, powerDeps)).toBeNull();
+  });
+
+  it('заблокированная сила не советуется', () => {
+    const s = withPower('POWER_SPY');
+    const locked = {
+      ...s,
+      hero: s.hero === null ? null : { ...s.hero, heroPowerUnplayable: true },
+    };
+    expect(heroPowerRule(locked, powerDeps)).toBeNull();
+  });
+
+  it('про силу вне «даёт миньона» совет не берётся судить', () => {
+    expect(heroPowerRule(withPower('POWER_DMG'), powerDeps)).toBeNull();
+  });
+
+  it('пассивная сила и нехватка золота — молчание', () => {
+    const passive = withPower('POWER_SPY');
+    const noCost = {
+      ...passive,
+      hero: passive.hero === null ? null : { ...passive.hero, heroPowerCost: null },
+    };
+    expect(heroPowerRule(noCost, powerDeps)).toBeNull();
+    expect(heroPowerRule(withPower('POWER_SPY', { gold: 1 }), powerDeps)).toBeNull();
+  });
+});
+
+describe('правило тёмного дара', () => {
+  const giftable = (patch: Partial<GameState> = {}): GameState =>
+    state({ darkGiftCost: 3, board: [shopMinion(1, 'MURLOC_1')], ...patch });
+
+  it('дар по карману советуется', () => {
+    const rec = darkGiftRule(giftable());
+    expect(rec?.action).toBe('darkGift');
+    expect(rec?.cost).toBe(3);
+  });
+
+  it('нажатый в этом ходу дар не советуется', () => {
+    expect(darkGiftRule(giftable({ darkGiftUsedThisTurn: true }))).toBeNull();
+  });
+
+  it('без кнопки и без золота — молчание', () => {
+    expect(darkGiftRule(state({ darkGiftCost: null }))).toBeNull();
+    expect(darkGiftRule(giftable({ gold: 2 }))).toBeNull();
+  });
+
+  it('при отставании от графика золото уступается подъёму', () => {
+    // Ход 9 требует тира 5, тир 2 — отставание; золота ровно на подъём.
+    const s = giftable({
+      turn: 9,
+      techLevel: 2,
+      gold: 5,
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 3,
+    });
+    expect(darkGiftRule(s)).toBeNull();
+  });
+
+  it('по графику дар не блокируется доступным подъёмом', () => {
+    // Тир 3 к ходу 5 — по графику; подъём доступен, но не срочен.
+    const s = giftable({
+      turn: 5,
+      techLevel: 3,
+      gold: 5,
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 4,
+    });
+    expect(darkGiftRule(s)).not.toBeNull();
+  });
 });
 
 describe('правило заморозки', () => {
@@ -467,6 +590,25 @@ describe('правило розыгрыша из руки', () => {
     const play = playRules(s, deps)[0];
     expect(play?.requiresSlot).toBe(true);
     expect(play?.sellFirst).not.toBeNull();
+  });
+
+  it('заблокированная карта из руки не советуется', () => {
+    // part8: тринкет выдал Polarizing Beatboxer 5/10 с замком на два хода.
+    // Совет «разыграть» по заблокированной карте — тихо неверный.
+    const s = state({
+      hand: [
+        shopMinion(9, 'AMALGAM', { attack: 5, health: 10, tags: { LITERALLY_UNPLAYABLE: 1 } }),
+      ],
+    });
+    expect(playRules(s, deps)).toHaveLength(0);
+
+    // Замок снят — совет вернулся.
+    const unlocked = state({
+      hand: [
+        shopMinion(9, 'AMALGAM', { attack: 5, health: 10, tags: { LITERALLY_UNPLAYABLE: 0 } }),
+      ],
+    });
+    expect(playRules(unlocked, deps)).toHaveLength(1);
   });
 
   it('слабее слабейшего своего из руки не разыгрывается', () => {

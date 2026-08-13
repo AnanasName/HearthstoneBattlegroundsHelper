@@ -24,7 +24,16 @@ import { DEFAULT_TAVERN_RULES, targetTier, type TavernRules } from './rules.js';
  * но там своя цена в секундах. Эвристики остаются быстрым первым словом.
  */
 
-export type TavernAction = 'levelUp' | 'buy' | 'play' | 'sell' | 'reroll' | 'freeze' | 'pass';
+export type TavernAction =
+  | 'levelUp'
+  | 'buy'
+  | 'play'
+  | 'sell'
+  | 'reroll'
+  | 'freeze'
+  | 'heroPower'
+  | 'darkGift'
+  | 'pass';
 
 export interface Recommendation {
   readonly action: TavernAction;
@@ -386,6 +395,11 @@ export function playRules(
   const victim = full ? weakestOwn(state, deps, rules) : null;
 
   return state.hand.flatMap((minion) => {
+    // Заблокированную карту разыграть нельзя, и советовать её — тихо неверно.
+    // Пример из part8: Polarizing Beatboxer 5/10, выданный тринкетом
+    // с замком на два хода, — тег LITERALLY_UNPLAYABLE, тикает и снимается.
+    if ((minion.tags['LITERALLY_UNPLAYABLE'] ?? 0) > 0) return [];
+
     const value = minionValue(minion, state, deps, rules);
 
     // На полном борде розыгрыш идёт через продажу, и жертва обязана быть
@@ -480,7 +494,10 @@ export function rerollRule(
       ? 0
       : Math.max(...state.shop.map((m) => minionValue(m, state, deps, rules).total));
 
-  if (best >= rules.rerollWhenBestBelow) return null;
+  // Порог относителен тиру: плоский порог к пятому тиру не срабатывал
+  // никогда — любой миньон там дороже шести очков одним тиром.
+  const threshold = rules.value.perTechLevel * state.techLevel + rules.rerollMarginOverTier;
+  if (best >= threshold) return null;
 
   // Копим на подъём: если после реролла на него уже не хватит, а сейчас
   // хватает — реролл дороже, чем кажется.
@@ -492,13 +509,13 @@ export function rerollRule(
   return {
     action: 'reroll',
     minion: null,
-    score: rules.rerollWhenBestBelow - best,
+    score: threshold - best,
     cost: rules.rerollCost,
     requiresSlot: false,
     sellFirst: null,
     reason:
-      `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${String(rules.rerollWhenBestBelow)} — ` +
-      `покупать нечего, обновление стоит ${String(rules.rerollCost)}`,
+      `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
+      `${String(state.techLevel)} — покупать нечего, обновление стоит ${String(rules.rerollCost)}`,
   };
 }
 
@@ -557,6 +574,97 @@ export function freezeRule(
     reason:
       `${name} — ${why}, а золота ${String(state.gold)} хватает лишь на ` +
       `${String(affordable)} покупок; свежая витрина такого не обещает`,
+  };
+}
+
+/**
+ * Правило силы героя.
+ *
+ * Советуется только сила, которая ДАЁТ МИНЬОНА, — это видно по тексту
+ * (`heroPowerMinionWords`). Скаббс: покупка за 3 плюс сила за 2 — два
+ * существа за 5 золота. Про урон, баффы и прочее совет не берётся судить.
+ *
+ * Ценность — как у среднего миньона витрины: сила приносит существо того же
+ * разбора, а стоит дешевле покупки. Нажатая в этом ходу или заблокированная
+ * сила не советуется: и то и другое читается из лога (блок PLAY на сущности
+ * силы, тег LITERALLY_UNPLAYABLE).
+ */
+export function heroPowerRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+
+  const cost = hero.heroPowerCost;
+  if (cost === null || cost <= 0) return null;
+  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (cost > state.gold) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  if (!rules.heroPowerMinionWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  const shopValues = state.shop.map((m) => minionValue(m, state, deps, rules).total);
+  const average =
+    shopValues.length > 0
+      ? shopValues.reduce((a, b) => a + b, 0) / shopValues.length
+      : rules.value.perTechLevel * state.techLevel;
+  // Сила дешевле покупки, и разница в золоте — это тоже очки: золото
+  // конвертируется по курсу goldPointValue, выведенному из цены покупки.
+  const cheaper = Math.max(0, rules.minionCost - cost) * rules.goldPointValue;
+  const score = average + cheaper;
+
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} даёт миньона — ` +
+      `как средний из витрины (${average.toFixed(1)}), но на ` +
+      `${String(rules.minionCost - cost)} золота дешевле покупки`,
+  };
+}
+
+/**
+ * Правило тёмного дара.
+ *
+ * Дар — усиление миньона, которого не купить в витрине; игрок жмёт кнопку
+ * и выбирает один дар из трёх. Цена читается из тега COST кнопки, нажатие
+ * в этом ходу — из блока PLAY на ней. Совет не ворует золото у подъёма
+ * таверны, как и обновление витрины.
+ */
+export function darkGiftRule(
+  state: GameState,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const cost = state.darkGiftCost;
+  if (cost === null || state.darkGiftUsedThisTurn) return null;
+  if (cost > state.gold) return null;
+  if (state.board.length === 0) return null;
+
+  // Золото дара уступается подъёму только при настоящем отставании от
+  // графика. Первая версия блокировала дар всякий раз, когда подъём был
+  // «по карману», — а по карману он при нетронутом золоте почти всегда,
+  // и на part8 дар не был посоветован ни разу за партию.
+  const behind = targetTier(state.turn, rules) > state.techLevel;
+  const upgrade = state.tavernUpgradeCost;
+  if (behind && upgrade !== null && state.gold >= upgrade && state.gold - cost < upgrade) {
+    return null;
+  }
+
+  return {
+    action: 'darkGift',
+    minion: null,
+    score: rules.darkGift.value,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    reason: `тёмный дар за ${String(cost)} — усиление миньона, которого не купить в витрине`,
   };
 }
 
@@ -627,6 +735,8 @@ export function adviseTavern(
     ...buys,
     ...playRules(state, deps, rules),
     levelUpRule(state, rules, buys),
+    heroPowerRule(state, deps, rules),
+    darkGiftRule(state, rules),
     sellRule(state, deps, rules),
     rerollRule(state, deps, rules),
     freezeRule(state, deps, rules),

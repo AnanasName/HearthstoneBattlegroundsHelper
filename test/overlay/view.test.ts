@@ -24,6 +24,9 @@ const HERO: GameState['hero'] = {
   armor: 2,
   heroPowerCardId: null,
   heroPowerEntityId: null,
+  heroPowerCost: null,
+  heroPowerUsedThisTurn: false,
+  heroPowerUnplayable: false,
 };
 
 const state: GameState = {
