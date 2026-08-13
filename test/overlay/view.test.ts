@@ -2,7 +2,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { PositionAdvice } from '../../src/advisors/position/advisor.js';
 import type { ResolvedOpponent } from '../../src/advisors/position/opponent.js';
-import type { TavernAdvice } from '../../src/advisors/tavern/advisor.js';
+import type {
+  Recommendation,
+  TavernAdvice,
+  ValueBreakdown,
+} from '../../src/advisors/tavern/advisor.js';
 import { buildView, type ViewInput } from '../../src/overlay/view.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { EMPTY_STATE, type GameState } from '../../src/state/types.js';
@@ -46,6 +50,8 @@ const tavern: TavernAdvice = {
   targetTier: 4,
   shopValues: [],
   trinkets: [],
+  choice: [],
+  playPlan: [],
   recommendations: [
     {
       action: 'buy',
@@ -161,6 +167,88 @@ describe('вид оверлея', () => {
   it('покупка на полном борде называет, кого продать', () => {
     const view = buildView(input(), cards);
     expect(view.actions[0]?.text).toContain('продав');
+  });
+
+  it('открытый выбор карт вытесняет советы, лучший помечен', () => {
+    const breakdown = (total: number): ValueBreakdown => ({
+      techLevel: 0,
+      stats: 0,
+      tribe: 0,
+      keywords: 0,
+      copies: 0,
+      golden: 0,
+      economy: 0,
+      textTribe: 0,
+      total,
+      tribeMates: 0,
+      textTribeMates: 0,
+      copiesOwned: 0,
+    });
+    const withChoice: TavernAdvice = {
+      ...tavern,
+      choice: [
+        {
+          option: { entityId: 1, cardId: 'A' },
+          name: 'Часовой',
+          value: breakdown(18),
+          reason: 'тир 4, ценность 18.0',
+        },
+        {
+          option: { entityId: 2, cardId: 'B' },
+          name: 'Дар',
+          value: null,
+          reason: 'не миньон — оценить не берёмся',
+        },
+      ],
+    };
+    const view = buildView(input({ tavern: withChoice }), cards);
+
+    expect(view.actions[0]?.text).toContain('ВЫБРАТЬ?');
+    expect(view.actions[0]?.text).toContain('Часовой');
+    expect(view.actions[0]?.tone).toBe('good');
+    expect(view.actions).toHaveLength(2);
+  });
+
+  it('выбор из одних не-миньонов советы не вытесняет', () => {
+    const withSpells: TavernAdvice = {
+      ...tavern,
+      choice: [
+        {
+          option: { entityId: 1, cardId: 'A' },
+          name: 'Дар',
+          value: null,
+          reason: 'не миньон — оценить не берёмся',
+        },
+      ],
+    };
+    const view = buildView(input({ tavern: withSpells }), cards);
+    expect(view.actions[0]?.text).not.toContain('ВЫБРАТЬ?');
+  });
+
+  it('план на несколько розыгрышей заменяет отдельные строки «разыграть»', () => {
+    const playRec = (id: number, score: number): Recommendation => ({
+      action: 'play',
+      minion: minion(id),
+      score,
+      cost: 0,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'из руки',
+    });
+    const withPlan: TavernAdvice = {
+      ...tavern,
+      recommendations: [playRec(11, 20), playRec(12, 15), ...tavern.recommendations.slice(1)],
+      playPlan: [
+        { minion: minion(11), magnetizeTo: null, sellFirst: null, score: 20 },
+        { minion: minion(12), magnetizeTo: minion(101), sellFirst: null, score: 15 },
+      ],
+    };
+    const view = buildView(input({ tavern: withPlan }), cards);
+
+    expect(view.actions[0]?.text).toContain('ПО ПОРЯДКУ');
+    expect(view.actions[0]?.text).toContain('примагнитить к');
+    // Отдельные «разыграть» свёрнуты в одну строку плана.
+    expect(view.actions.filter((a) => a.text.includes('РАЗЫГРАТЬ'))).toHaveLength(1);
   });
 
   it('идущий счёт показывается вместо прошлого совета', () => {

@@ -4,9 +4,11 @@ import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState } from '../state/types.js';
 import {
+  choiceLine,
   minionLabel,
   noOpponentReason,
   opponentStale,
+  planLine,
   positionLine,
   recommendationLine,
   situationLine,
@@ -75,27 +77,59 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   const { state } = input;
   if (state.hero === null) return EMPTY_VIEW;
 
-  // Открытый выбор тринкета вытесняет обычные советы: в игре это модальный
-  // экран, и пока он открыт, игрок решает именно его.
-  const trinkets = input.tavern?.trinkets ?? [];
-  const actions: OverlayLine[] =
-    trinkets.length > 0
-      ? trinkets.map((t, i) => ({
-          text: `ВЗЯТЬ? ${trinketLine(t)}`,
-          tone: i === 0 && t.tribeMinions > 0 ? 'good' : 'normal',
-        }))
-      : (input.tavern?.recommendations ?? [])
-          .slice(0, MAX_ACTIONS)
-          .map((r, i) => ({ text: recommendationLine(r, cards), tone: i === 0 ? 'good' : 'normal' }));
-
   return {
     active: true,
     header: situationLine(state),
     board: state.board.map((m) => minionLabel(m, cards)),
     shop: state.shop.map((m) => minionLabel(m, cards)),
-    actions,
+    actions: actionLines(input, cards),
     position: positionView(input, cards),
   };
+}
+
+function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
+  // Открытый выбор тринкета вытесняет обычные советы: в игре это модальный
+  // экран, и пока он открыт, игрок решает именно его.
+  const trinkets = input.tavern?.trinkets ?? [];
+  if (trinkets.length > 0) {
+    return trinkets.map((t, i) => ({
+      text: `ВЗЯТЬ? ${trinketLine(t)}`,
+      tone: i === 0 && t.tribeMinions > 0 ? 'good' : 'normal',
+    }));
+  }
+
+  // Открытый выбор карт — награда за тройку, раскопка — такой же модальный
+  // экран. Показывается только когда среди вариантов есть миньоны: выбор
+  // из одних заклинаний совет оценить не берётся, и прятать за ним обычные
+  // советы незачем.
+  const choice = input.tavern?.choice ?? [];
+  if (choice.some((c) => c.value !== null)) {
+    return choice.map((c, i) => ({
+      text: `ВЫБРАТЬ? ${choiceLine(c)}`,
+      tone: i === 0 && c.value !== null ? 'good' : 'normal',
+    }));
+  }
+
+  // План на несколько розыгрышей заменяет отдельные строки «разыграть»:
+  // игрок читает верхнюю строку, и она должна описывать весь ход.
+  const recommendations = input.tavern?.recommendations ?? [];
+  const plan = input.tavern?.playPlan ?? [];
+  const lines: string[] = [];
+  let planShown = false;
+  for (const r of recommendations) {
+    if (plan.length >= 2 && r.action === 'play') {
+      if (!planShown) {
+        lines.push(planLine(plan, cards));
+        planShown = true;
+      }
+      continue;
+    }
+    lines.push(recommendationLine(r, cards));
+  }
+
+  return lines
+    .slice(0, MAX_ACTIONS)
+    .map((text, i) => ({ text, tone: i === 0 ? 'good' : 'normal' }));
 }
 
 function positionView(input: ViewInput, cards: CardIndex): OverlayLine | null {

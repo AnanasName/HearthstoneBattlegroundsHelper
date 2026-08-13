@@ -46,11 +46,26 @@
         margin-bottom: 6px;
       }
 
+      /*
+        Борд и витрина — контекст, им можно обрезаться в одну строку.
+        Советы и расстановка — то, ради чего оверлей существует: они
+        переносятся целиком, обрезанный совет игрок прочитать не смог
+        (part9, лавка аксессуаров — «оценить не берё…»).
+      */
       .row {
         margin: 2px 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      #actions .row,
+      #position .row {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        padding-left: 12px;
+        text-indent: -12px; /* висячий отступ: перенос виден как продолжение */
       }
 
       .label {

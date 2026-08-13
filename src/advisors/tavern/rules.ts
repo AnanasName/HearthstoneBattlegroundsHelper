@@ -98,6 +98,21 @@ export interface TavernRules {
      * боем — экономика окупается через ходы, и это сказано в docs/tavern.md.
      */
     readonly economy: number;
+    /**
+     * За каждого своего миньона племени, которое карта называет СЛОВАМИ
+     * в тексте, не входя в него сама.
+     *
+     * Случай part9, ход 19: Kangor's Apprentice 3/6 — без племени, тир 5,
+     * текст «Summon plain copies of your first 2 Mechs that died». По статам
+     * и тиру она слабейшая на борде из мехов, и советник предложил продать
+     * её ради Turbo Hogrider — свинобраза, чужого этой композиции. Связь
+     * с племенем написана в опубликованном тексте карты, как у тринкетов,
+     * — это данные, а не выдуманная таблица ключевых карт.
+     *
+     * Вес ниже perTribeMate: упоминание слабее принадлежности — племенные
+     * баффы на такого миньона не действуют.
+     */
+    readonly perTextTribeMate: number;
   };
 
   /**
@@ -120,15 +135,25 @@ export interface TavernRules {
   readonly copiesBonus: readonly number[];
 
   /**
-   * Слово, которым текст тринкета называет племя.
+   * Слово, которым текст карты называет племя. Ключ — имя племени в поле
+   * `races` снапшота Firestone.
    *
    * У тринкетов в снапшоте нет поля `races` — племя написано словами
    * в тексте карты («give a friendly Dragon +X/+Y»). Это данные из
    * опубликованного текста, а не выдуманная таблица ценности: совет по
    * тринкетам ранжирует их по числу своих миньонов упомянутых племён
-   * и честно отказывается оценивать эффекты вне племён.
+   * и честно отказывается оценивать эффекты вне племён. Той же таблицей
+   * ценность миньона учитывает племя, названное в тексте карты
+   * (`perTextTribeMate`).
+   *
+   * Ключи обязаны совпадать со строками `races` снапшота: там племя
+   * механизмов называется `MECH`, и ключ MECHANICAL не совпадал ни с чем —
+   * на part9 при пяти мехах на борде тринкет про мехов получал «своих таких
+   * нет». Все ключи сверены со списком рас пула:
+   * ALL, BEAST, DEMON, DRAGON, ELEMENTAL, MECH, MURLOC, NAGA, PIRATE,
+   * QUILBOAR, UNDEAD.
    */
-  readonly trinketTribeWords: Readonly<Record<string, string>>;
+  readonly tribeTextWords: Readonly<Record<string, string>>;
 
   /**
    * Признаки «сила даёт миньона» в тексте силы героя.
@@ -137,6 +162,12 @@ export interface TavernRules {
    * opponent's warband») — типовой случай: сила за золото приносит существо,
    * и это выгоднее третьей покупки. Про силы вне этих шаблонов — урон, баффы —
    * совет не берётся судить, как и с тринкетами.
+   *
+   * Порядок слов в шаблоне не гарантирован: у Зиреллы («See the Light»,
+   * part9: «Choose a minion in the Tavern. Set its stats to 2 and add it
+   * to your hand») объект глагола — местоимение, «minion» стоит в другом
+   * предложении. Шаблоны «глагол…minion» такую силу не видели, и советник
+   * молчал при золоте ровно на неё — на что игрок и указал.
    */
   readonly heroPowerMinionWords: readonly string[];
 
@@ -224,6 +255,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     windfury: 2,
     reborn: 2,
     economy: 2.5,
+    perTextTribeMate: 1,
   },
 
   economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],
@@ -236,6 +268,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     'add[^.]*minion',
     'get[^.]*minion',
     'copy of a minion',
+    // «Choose a minion … add it to your hand» — Зирелла, part9. Миньон и
+    // глагол здесь в разных предложениях, поэтому [\s\S], а не [^.].
+    'minion[\\s\\S]*add (?:it|them) to your hand',
   ],
 
   goldPointValue: 3,
@@ -244,10 +279,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     value: 8,
   },
 
-  trinketTribeWords: {
+  tribeTextWords: {
     MURLOC: 'murlocs?',
     DEMON: 'demons?',
-    MECHANICAL: 'mechs?',
+    MECH: 'mechs?',
     ELEMENTAL: 'elementals?',
     BEAST: 'beasts?',
     PIRATE: 'pirates?',

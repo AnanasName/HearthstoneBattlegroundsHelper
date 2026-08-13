@@ -1,6 +1,11 @@
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { ResolvedOpponent } from '../advisors/position/opponent.js';
-import type { Recommendation, TrinketAdvice } from '../advisors/tavern/advisor.js';
+import type {
+  ChoiceAdvice,
+  PlanStep,
+  Recommendation,
+  TrinketAdvice,
+} from '../advisors/tavern/advisor.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState, Minion } from '../state/types.js';
 
@@ -62,12 +67,30 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   const what = r.minion === null ? '' : ` ${minionLabel(r.minion, cards)}`;
   const price = r.cost > 0 ? ` за ${String(r.cost)}` : '';
   const victim = r.sellFirst === null ? '' : `, продав ${minionLabel(r.sellFirst, cards)}`;
-  return `${ACTION_LABEL[r.action]}${what}${price}${victim}`;
+  const magnet =
+    r.magnetizeTo == null ? '' : `, примагнитив к ${minionLabel(r.magnetizeTo, cards)}`;
+  return `${ACTION_LABEL[r.action]}${what}${price}${victim}${magnet}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */
 export function trinketLine(t: TrinketAdvice): string {
   return `${t.name} — ${t.reason}`;
+}
+
+/** Вариант открытого выбора одной строкой. */
+export function choiceLine(c: ChoiceAdvice): string {
+  return `${c.name} — ${c.reason}`;
+}
+
+/** План розыгрыша одной строкой: тела по порядку, магниты с целью. */
+export function planLine(steps: readonly PlanStep[], cards: CardIndex): string {
+  const parts = steps.map((s) => {
+    const sold = s.sellFirst === null ? '' : ` (продав ${minionLabel(s.sellFirst, cards)})`;
+    return s.magnetizeTo === null
+      ? `${minionLabel(s.minion, cards)}${sold}`
+      : `${minionLabel(s.minion, cards)} примагнитить к ${minionLabel(s.magnetizeTo, cards)}`;
+  });
+  return `РАЗЫГРАТЬ ПО ПОРЯДКУ: ${parts.join(', затем ')}`;
 }
 
 /** Доля побед оценки, в процентах. */

@@ -34,7 +34,10 @@ import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.
  */
 
 const WIDTH = 460;
-const HEIGHT = 300;
+// Советы теперь переносятся, а не обрезаются, и им нужно место в высоту:
+// четыре варианта лавки аксессуаров по две строки плюс шапка и расстановка.
+// Лишняя высота ничего не стоит — окно прозрачно и сквозное для мыши.
+const HEIGHT = 520;
 const MARGIN = 24;
 
 let window: BrowserWindow | null = null;

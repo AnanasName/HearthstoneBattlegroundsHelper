@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   adviseTavern,
   buyRules,
+  choiceAdvice,
   copiesOwned,
   darkGiftRule,
   freezeRule,
   heroPowerRule,
   levelUpRule,
+  magnetizeTarget,
   minionValue,
+  playPlan,
   playRules,
   rerollRule,
   sellRule,
@@ -411,6 +414,24 @@ describe('правило силы героя', () => {
     expect(rec?.reason).toContain('даёт миньона');
   });
 
+  it('сила Зиреллы даёт миньона местоимением — и всё равно советуется', () => {
+    // Дословный текст из снапшота (part9): «minion» и глагол «add» стоят
+    // в разных предложениях, объект глагола — «it». Шаблоны «глагол…minion»
+    // эту силу не видели, и при золоте ровно на неё советник говорил НИЧЕГО —
+    // ровно жалоба игрока со скриншота хода 3.
+    const seeTheLight = createCardIndex([
+      {
+        id: 'BG20_HERO_101p',
+        name: 'See the Light',
+        text: '[x]Choose a minion in the\nTavern. Set its stats to 2\nand add it to your hand.',
+      },
+    ]);
+    const s = withPower('BG20_HERO_101p', { gold: 2 });
+    const rec = heroPowerRule(s, { cards: seeTheLight });
+    expect(rec?.action).toBe('heroPower');
+    expect(rec?.cost).toBe(2);
+  });
+
   it('нажатая в этом ходу сила не советуется', () => {
     const s = withPower('POWER_SPY');
     const used = {
@@ -681,6 +702,308 @@ describe('совет по выбору тринкета', () => {
     const s = state({ board: [minion(1, { cardId: 'DRAGON_1' })], ...offer('TR_MURLOC') });
     expect(trinketAdvice(s, trinketDeps)[0]?.tribeMinions).toBe(0);
     expect(trinketAdvice(s, trinketDeps)[0]?.reason).toContain('своих таких нет');
+  });
+
+  it('племя механизмов называется MECH, как в снапшоте — регрессия part9', () => {
+    // Ключ таблицы обязан совпадать со строкой races снапшота. Ключ
+    // MECHANICAL не совпадал ни с чем, и Scraper Sticker при пяти мехах
+    // на борде получал «своих таких нет» — скриншот хода 11.
+    const mechCards = createCardIndex([
+      { id: 'MECH_M', name: 'Мех', techLevel: 2, races: ['MECH'], isBaconPool: true },
+      {
+        id: 'TR_MECH',
+        dbfId: 1010,
+        name: 'Наклейка с металлоискателем',
+        text: 'Get a random <b>Magnetic</b> Mech. At the start of each turn, get another.',
+      },
+    ]);
+    const s = state({
+      board: [minion(1, { cardId: 'MECH_M' }), minion(2, { cardId: 'MECH_M' })],
+      trinketOffer: [{ entityId: 9000, cardId: 'TR_MECH' }],
+    });
+    const advice = trinketAdvice(s, { cards: mechCards });
+    expect(advice[0]?.tribeMinions).toBe(2);
+    expect(advice[0]?.reason).not.toContain('своих таких нет');
+  });
+});
+
+describe('племя, названное в тексте карты', () => {
+  const textCards = createCardIndex([
+    { id: 'MECH_M', name: 'Мех', techLevel: 2, races: ['MECH'], isBaconPool: true },
+    {
+      id: 'KANGOR',
+      name: 'Ученица Кангора',
+      techLevel: 5,
+      races: [],
+      isBaconPool: true,
+      text: '[x]<b>Deathrattle:</b> Summon plain\ncopies of your first 2 Mechs\nthat died this combat.',
+    },
+    {
+      id: 'HOG',
+      name: 'Свиногонщик',
+      techLevel: 6,
+      races: ['QUILBOAR'],
+      isBaconPool: true,
+      text: '[x]After you play <b>Choose One</b>\ncard, this plays a <b>Blood Gem</b>\n on all your other Quilboar.',
+    },
+  ]);
+  const textDeps = { cards: textCards };
+
+  it('миньон без племени с текстом про племя получает синергию', () => {
+    const s = state({
+      board: [minion(1, { cardId: 'MECH_M' }), minion(2, { cardId: 'MECH_M' })],
+    });
+    const v = minionValue(minion(9, { cardId: 'KANGOR', techLevel: 5, attack: 3, health: 6 }), s, textDeps);
+    expect(v.textTribeMates).toBe(2);
+    expect(v.textTribe).toBeGreaterThan(0);
+  });
+
+  it('собственное племя в тексте не считается дважды', () => {
+    const s = state({ board: [minion(1, { cardId: 'HOG' })] });
+    const v = minionValue(minion(9, { cardId: 'HOG', techLevel: 6 }), s, textDeps);
+    expect(v.tribeMates).toBe(1);
+    expect(v.textTribeMates).toBe(0);
+  });
+
+  it('part9, ход 19: Свиногонщик больше не вытесняет Ученицу Кангора', () => {
+    // Шесть мехов 7/7 и Ученица 3/6 на полном борде, в руке свинобраз
+    // 5/7 шестого тира. Без текстового племени Ученица — слабейшая по голым
+    // статам, и советник предлагал продать её; с ним она держит своё место.
+    const s = state({
+      board: [
+        ...Array.from({ length: 6 }, (_, i) =>
+          minion(i + 1, { cardId: 'MECH_M', techLevel: 2, attack: 7, health: 7 }),
+        ),
+        minion(7, { cardId: 'KANGOR', techLevel: 5, attack: 3, health: 6 }),
+      ],
+      hand: [minion(9, { cardId: 'HOG', techLevel: 6, attack: 5, health: 7 })],
+    });
+
+    // Как было: без веса текстового племени жертвой выбиралась Ученица.
+    const noText = {
+      ...DEFAULT_TAVERN_RULES,
+      value: { ...DEFAULT_TAVERN_RULES.value, perTextTribeMate: 0 },
+    };
+    expect(playRules(s, textDeps, noText)[0]?.sellFirst?.cardId).toBe('KANGOR');
+
+    // Как стало: розыгрыш чужого племени через продажу не советуется вовсе.
+    expect(playRules(s, textDeps)).toHaveLength(0);
+  });
+});
+
+describe('магнетизм', () => {
+  const magCards = createCardIndex([
+    { id: 'MECH_SMALL', name: 'Мелкий мех', techLevel: 2, races: ['MECH'], isBaconPool: true },
+    { id: 'MECH_BIG', name: 'Большой мех', techLevel: 4, races: ['MECH'], isBaconPool: true },
+    {
+      id: 'MAGNET',
+      name: 'Магнитный мех',
+      techLevel: 3,
+      races: ['MECH'],
+      isBaconPool: true,
+      mechanics: ['MODULAR'],
+      text: '<b>Magnetic</b>',
+    },
+    { id: 'BEAST_1', name: 'Зверь', techLevel: 2, races: ['BEAST'], isBaconPool: true },
+  ]);
+  const magDeps = { cards: magCards };
+
+  const fullMechBoard = [
+    minion(1, { cardId: 'MECH_BIG', attack: 10, health: 10 }),
+    ...Array.from({ length: 6 }, (_, i) =>
+      minion(i + 2, { cardId: 'MECH_SMALL', attack: 2, health: 2 }),
+    ),
+  ];
+
+  it('цель примагничивания — самый крупный свой мех', () => {
+    expect(magnetizeTarget(fullMechBoard, magCards)?.cardId).toBe('MECH_BIG');
+    expect(magnetizeTarget([minion(1, { cardId: 'BEAST_1' })], magCards)).toBeNull();
+  });
+
+  it('магнитный мех на полном борде идёт через примагничивание, не через продажу', () => {
+    // Жалоба игрока со скриншота хода 13: «разыграть Accord-o-Tron, продав
+    // Molten Rock», хотя магнитный мех места не занимает.
+    const s = state({
+      board: fullMechBoard,
+      hand: [minion(9, { cardId: 'MAGNET', techLevel: 3 })],
+    });
+    const play = playRules(s, magDeps)[0];
+    expect(play).toBeDefined();
+    expect(play?.sellFirst).toBeNull();
+    expect(play?.requiresSlot).toBe(false);
+    expect(play?.magnetizeTo?.cardId).toBe('MECH_BIG');
+    expect(play?.reason).toContain('магнит');
+  });
+
+  it('покупка магнитного при полном борде тоже без продажи', () => {
+    const s = state({
+      board: fullMechBoard,
+      shop: [minion(9, { cardId: 'MAGNET', techLevel: 3 })],
+    });
+    const buy = buyRules(s, magDeps).find((r) => r.minion?.cardId === 'MAGNET');
+    expect(buy?.sellFirst).toBeNull();
+    expect(buy?.requiresSlot).toBe(false);
+    expect(buy?.magnetizeTo?.cardId).toBe('MECH_BIG');
+  });
+
+  it('без своих мехов магнит идёт обычным путём — через продажу слабейшего', () => {
+    const s = state({
+      board: Array.from({ length: 7 }, (_, i) =>
+        minion(i + 1, { cardId: 'BEAST_1', attack: 1, health: 1 }),
+      ),
+      hand: [minion(9, { cardId: 'MAGNET', techLevel: 3, attack: 5, health: 5 })],
+    });
+    const play = playRules(s, magDeps)[0];
+    expect(play?.magnetizeTo ?? null).toBeNull();
+    expect(play?.sellFirst).not.toBeNull();
+  });
+});
+
+describe('совет по открытому выбору', () => {
+  const choiceCards = createCardIndex([
+    { id: 'MECH_M', name: 'Мех', techLevel: 2, races: ['MECH'], isBaconPool: true, type: 'Minion' },
+    {
+      id: 'PICK_MECH',
+      name: 'Зачарованный часовой',
+      type: 'Minion',
+      techLevel: 4,
+      races: ['MECH'],
+      isBaconPool: true,
+      attack: 3,
+      health: 5,
+      mechanics: ['MODULAR'],
+    },
+    {
+      id: 'PICK_QUIL',
+      name: 'Шипастый проходчик',
+      type: 'Minion',
+      techLevel: 4,
+      races: ['QUILBOAR'],
+      isBaconPool: true,
+      attack: 3,
+      health: 6,
+    },
+    { id: 'PICK_SPELL', name: 'Дар', type: 'Spell' },
+  ]);
+  const choiceDeps = { cards: choiceCards };
+
+  const withChoice = (
+    boardIds: readonly string[],
+    ...optionIds: string[]
+  ): GameState =>
+    state({
+      board: boardIds.map((cardId, i) => minion(i + 1, { cardId })),
+      openChoice: {
+        id: 3,
+        sourceCardId: 'SRC',
+        options: optionIds.map((cardId, i) => ({ entityId: 100 + i, cardId })),
+      },
+    });
+
+  it('без открытого выбора совет пуст', () => {
+    expect(choiceAdvice(state(), choiceDeps)).toEqual([]);
+  });
+
+  it('варианты-миньоны ранжируются той же ценностью, племя решает', () => {
+    const advice = choiceAdvice(
+      withChoice(['MECH_M', 'MECH_M'], 'PICK_QUIL', 'PICK_MECH'),
+      choiceDeps,
+    );
+    expect(advice[0]?.name).toBe('Зачарованный часовой');
+    expect(advice[0]?.value).not.toBeNull();
+    expect(advice[0]?.reason).toContain('магнитный');
+  });
+
+  it('копия под тройку перевешивает статы и племя', () => {
+    const advice = choiceAdvice(
+      withChoice(['PICK_QUIL', 'PICK_QUIL'], 'PICK_QUIL', 'PICK_MECH'),
+      choiceDeps,
+    );
+    expect(advice[0]?.name).toBe('Шипастый проходчик');
+    expect(advice[0]?.reason).toContain('собирает тройку');
+  });
+
+  it('не-миньон честно не оценивается и идёт в конец', () => {
+    const advice = choiceAdvice(
+      withChoice(['MECH_M'], 'PICK_SPELL', 'PICK_MECH'),
+      choiceDeps,
+    );
+    expect(advice[0]?.name).toBe('Зачарованный часовой');
+    expect(advice.at(-1)?.value).toBeNull();
+    expect(advice.at(-1)?.reason).toContain('не берёмся');
+  });
+});
+
+describe('план розыгрыша на ход', () => {
+  const planCards = createCardIndex([
+    { id: 'MECH_FILLER', name: 'Мех борда', techLevel: 1, races: ['MECH'], isBaconPool: true },
+    { id: 'MECH_SMALL', name: 'Мелкий мех', techLevel: 1, races: ['MECH'], isBaconPool: true },
+    { id: 'MECH_BIG', name: 'Большой мех', techLevel: 4, races: ['MECH'], isBaconPool: true },
+    {
+      id: 'MAGNET',
+      name: 'Магнитный мех',
+      techLevel: 3,
+      races: ['MECH'],
+      isBaconPool: true,
+      mechanics: ['MODULAR'],
+    },
+  ]);
+  const planDeps = { cards: planCards };
+
+  it('одно место и три карты: лучшее тело в слот, магнит — к цели', () => {
+    // part9, ход 25: на борде одно место, в руке Glambot, Ученица и магнитный
+    // Созвучатор. Отдельные советы «разыграть» игрок читает как «поставь одну».
+    const s = state({
+      board: Array.from({ length: 6 }, (_, i) =>
+        minion(i + 1, { cardId: 'MECH_FILLER', attack: 2, health: 2 }),
+      ),
+      hand: [
+        minion(11, { cardId: 'MECH_BIG', techLevel: 4, attack: 6, health: 6 }),
+        minion(12, { cardId: 'MECH_SMALL', techLevel: 1, attack: 2, health: 2 }),
+        minion(13, { cardId: 'MAGNET', techLevel: 3, attack: 3, health: 3 }),
+      ],
+    });
+    const plays = playRules(s, planDeps);
+    const plan = playPlan(s, planDeps, plays);
+
+    expect(plan).toHaveLength(2);
+    // Тело в свободный слот — лучшее по ценности.
+    expect(plan[0]?.minion.cardId).toBe('MECH_BIG');
+    expect(plan[0]?.magnetizeTo).toBeNull();
+    // Магнит после тел: свежеразыгранный мех — тоже кандидат в носители.
+    expect(plan[1]?.minion.cardId).toBe('MAGNET');
+    expect(plan[1]?.magnetizeTo?.cardId).toBe('MECH_BIG');
+  });
+
+  it('меньше двух розыгрышей — плана нет, хватает обычной строки', () => {
+    const s = state({
+      hand: [minion(11, { cardId: 'MECH_BIG', techLevel: 4, attack: 6, health: 6 })],
+    });
+    const plays = playRules(s, planDeps);
+    expect(playPlan(s, planDeps, plays)).toHaveLength(0);
+  });
+
+  it('на полном борде тело сильнее слабейшего идёт через продажу, магнит — даром', () => {
+    // part9, ход 25 после доработки: Glambot заслуживал места через продажу,
+    // а первый вариант плана его молча терял, оставляя одни магниты.
+    const s = state({
+      board: Array.from({ length: 7 }, (_, i) =>
+        minion(i + 1, { cardId: 'MECH_FILLER', attack: 2, health: 2 }),
+      ),
+      hand: [
+        minion(11, { cardId: 'MECH_BIG', techLevel: 4, attack: 6, health: 6 }),
+        minion(12, { cardId: 'MAGNET', techLevel: 3, attack: 3, health: 3 }),
+      ],
+    });
+    const plays = playRules(s, planDeps);
+    const plan = playPlan(s, planDeps, plays);
+
+    expect(plan).toHaveLength(2);
+    expect(plan[0]?.minion.cardId).toBe('MECH_BIG');
+    expect(plan[0]?.sellFirst).not.toBeNull();
+    expect(plan[1]?.minion.cardId).toBe('MAGNET');
+    expect(plan[1]?.magnetizeTo).not.toBeNull();
+    expect(plan[1]?.sellFirst).toBeNull();
   });
 });
 

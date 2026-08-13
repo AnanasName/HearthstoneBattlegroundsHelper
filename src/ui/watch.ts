@@ -26,9 +26,11 @@ import { startLiveSession } from '../live/session.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import {
+  choiceLine,
   minionLabel,
   noOpponentReason,
   opponentStale,
+  planLine,
   positionLine,
   recommendationLine,
   situationLine,
@@ -95,8 +97,28 @@ function printSituation(state: GameState, advice: TavernAdvice | null, cards: Ca
     console.log(`   витрина: ${state.shop.map((m) => minionLabel(m, cards)).join('  |  ')}`);
   }
 
-  for (const r of advice.recommendations.slice(0, 2)) {
+  // План на несколько розыгрышей заменяет отдельные строки «разыграть» —
+  // то же правило, что в оверлее: верхняя строка описывает весь ход.
+  const plan = advice.playPlan;
+  let planShown = false;
+  let shown = 0;
+  for (const r of advice.recommendations) {
+    if (shown >= 2) break;
+    if (plan.length >= 2 && r.action === 'play') {
+      if (!planShown) {
+        console.log(`   ▸ ${planLine(plan, cards)}`);
+        planShown = true;
+        shown += 1;
+      }
+      continue;
+    }
     console.log(`   ▸ ${recommendationLine(r, cards)} — ${r.reason}`);
+    shown += 1;
+  }
+
+  if (advice.choice.some((c) => c.value !== null)) {
+    console.log('   открытый выбор:');
+    for (const c of advice.choice) console.log(`     ◆ ${choiceLine(c)}`);
   }
 
   if (advice.trinkets.length > 0) {

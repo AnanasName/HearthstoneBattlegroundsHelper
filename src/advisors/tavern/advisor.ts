@@ -1,5 +1,5 @@
 import { RACE_ALL, type CardIndex } from '../../data/cards.js';
-import type { GameState, Minion, TrinketOffer } from '../../state/types.js';
+import type { ChoiceOption, GameState, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, type TavernRules } from './rules.js';
 
 /**
@@ -54,6 +54,15 @@ export interface Recommendation {
    * в списке ниже трёх покупок и на глаза не попадается.
    */
   readonly sellFirst: Minion | null;
+  /**
+   * К кому примагнитить магнитного миньона.
+   *
+   * Заполняется у магнитных механизмов при полном борде: примагничивание
+   * не занимает места, и продавать ради него никого не нужно — на что
+   * игрок и указал. Цель — самый крупный свой мех: усиление достаётся
+   * тому, кто дольше живёт в бою.
+   */
+  readonly magnetizeTo?: Minion | null;
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -68,9 +77,13 @@ export interface ValueBreakdown {
   readonly golden: number;
   /** Экономический эффект, распознанный по тексту карты. */
   readonly economy: number;
+  /** Синергия с племенем, которое карта называет словами, не входя в него. */
+  readonly textTribe: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
+  /** Сколько своих миньонов племён, названных в тексте карты. */
+  readonly textTribeMates: number;
   /** Сколько таких же карт уже есть на борде и в руке. */
   readonly copiesOwned: number;
 }
@@ -99,6 +112,16 @@ export interface TavernAdvice {
    * выбор со своим экраном, он не соревнуется с покупками за золото.
    */
   readonly trinkets: readonly TrinketAdvice[];
+  /**
+   * Открытый выбор «возьмите одно из» с оценками, лучший первым.
+   * Пусто, когда выбора на экране нет.
+   */
+  readonly choice: readonly ChoiceAdvice[];
+  /**
+   * План розыгрыша на ход, когда разыграть стоит больше одной карты.
+   * Пусто, когда карт меньше двух — там хватает обычной рекомендации.
+   */
+  readonly playPlan: readonly PlanStep[];
 }
 
 export interface TavernAdvisorDeps {
@@ -108,6 +131,37 @@ export interface TavernAdvisorDeps {
 /** Племена миньона по справочнику. Пустой список у нейтральных. */
 function racesOf(minion: Minion, cards: CardIndex): readonly string[] {
   return cards.info(minion.cardId)?.races ?? [];
+}
+
+/**
+ * Племена, которые текст карты называет словами, БЕЗ собственных племён карты.
+ *
+ * Собственные исключаются, чтобы не считать одну синергию дважды: Turbo
+ * Hogrider — свинобраз, называющий в тексте свинобразов же. А вот Kangor's
+ * Apprentice — миньон без племени с текстом про мехов, и эта связь видна
+ * только отсюда.
+ */
+function textTribesOf(cardId: string, cards: CardIndex, rules: TavernRules): string[] {
+  const info = cards.info(cardId);
+  const text = info?.text ?? '';
+  if (text === '') return [];
+  const own = new Set(info?.races ?? []);
+  return Object.entries(rules.tribeTextWords)
+    .filter(([race, word]) => !own.has(race) && new RegExp(`\\b(?:${word})\\b`, 'i').test(text))
+    .map(([race]) => race);
+}
+
+/** Сколько своих миньонов принадлежит хотя бы одному из племён. */
+function boardMatesOfTribes(
+  tribes: readonly string[],
+  board: readonly Minion[],
+  cards: CardIndex,
+): number {
+  if (tribes.length === 0) return 0;
+  return board.filter((m) => {
+    const races = racesOf(m, cards);
+    return races.includes(RACE_ALL) || races.some((r) => tribes.includes(r));
+  }).length;
 }
 
 /**
@@ -183,6 +237,17 @@ export function minionValue(
       ? w.economy
       : 0;
 
+  // Племя, названное словами в тексте, — та же связь с композицией, что
+  // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
+  // 2 Mechs that died») на борде из мехов была слабейшей по голым статам,
+  // и советник предлагал продать её ради чужого племени (part9, ход 19).
+  const textMates = boardMatesOfTribes(
+    textTribesOf(candidate.cardId, cards, rules),
+    state.board.filter((m) => m.entityId !== candidate.entityId),
+    cards,
+  );
+  const textTribe = textMates * w.perTextTribeMate;
+
   return {
     techLevel: tech,
     stats,
@@ -191,10 +256,40 @@ export function minionValue(
     copies,
     golden,
     economy,
-    total: tech + stats + tribe + keywords + copies + golden + economy,
+    textTribe,
+    total: tech + stats + tribe + keywords + copies + golden + economy + textTribe,
     tribeMates: mates,
+    textTribeMates: textMates,
     copiesOwned: owned,
   };
+}
+
+/**
+ * Лучший носитель для магнитного механизма — самый крупный свой мех.
+ *
+ * Магнитный миньон можно не ставить в отдельный слот, а присоединить к меху
+ * на борде: статы и способности перейдут носителю. Цель — мех с наибольшей
+ * суммой статов: усиление достаётся тому, кто дольше всех живёт в бою.
+ * Тонкости вроде «щит лучше на быстром» правилам не известны, и это сказано
+ * в docs/tavern.md.
+ */
+export function magnetizeTarget(
+  board: readonly Minion[],
+  cards: CardIndex,
+): Minion | null {
+  const mechs = board.filter((m) => {
+    const races = racesOf(m, cards);
+    return races.includes(RACE_ALL) || races.includes('MECH');
+  });
+  if (mechs.length === 0) return null;
+  return mechs.reduce((a, b) =>
+    (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+  );
+}
+
+/** Магнитный ли миньон — механика MODULAR в справочнике. */
+function isMagnetic(minion: Minion, cards: CardIndex): boolean {
+  return cards.info(minion.cardId)?.magnetic === true;
 }
 
 /** Здоровье с бронёй — то, чем игрок реально расплачивается за слабый ход. */
@@ -342,13 +437,25 @@ export function buyRules(
       const value = minionValue(minion, state, deps, rules);
       const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
 
+      // Магнитный мех на полном борде места не требует: его примагничивают
+      // к своему меху, и продавать ради него никого не нужно.
+      const host = full && isMagnetic(minion, deps.cards)
+        ? magnetizeTarget(state.board, deps.cards)
+        : null;
+
       const notes: string[] = [];
       if (value.copiesOwned >= 2) notes.push('собирает тройку');
       else if (value.copiesOwned === 1) notes.push('вторая копия');
       if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
+      if (value.textTribeMates > 0) {
+        notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
+      }
       if (value.economy > 0) notes.push('вернёт часть цены при продаже');
       if (minion.golden) notes.push('золотой');
-      if (victim !== null) {
+      if (host !== null) {
+        const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
+        notes.push(`борд полон, но магнитится — примагнитить к ${hostName}`);
+      } else if (victim !== null) {
         const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
         notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
       } else if (full) {
@@ -365,8 +472,9 @@ export function buyRules(
         minion,
         score: value.total,
         cost: rules.minionCost,
-        requiresSlot: full,
-        sellFirst: victim?.minion ?? null,
+        requiresSlot: full && host === null,
+        sellFirst: host === null ? (victim?.minion ?? null) : null,
+        magnetizeTo: host,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
           `тир ${tier === null ? '?' : String(tier)}, ценность ${value.total.toFixed(1)}` +
@@ -402,9 +510,17 @@ export function playRules(
 
     const value = minionValue(minion, state, deps, rules);
 
+    // Магнитный мех при полном борде идёт не через продажу, а через
+    // примагничивание: слот ему не нужен. Случай part9, ход 13: советник
+    // предлагал продать Molten Rock ради Accord-o-Tron, хотя того можно
+    // было присоединить к меху даром.
+    const host = full && isMagnetic(minion, deps.cards)
+      ? magnetizeTarget(state.board, deps.cards)
+      : null;
+
     // На полном борде розыгрыш идёт через продажу, и жертва обязана быть
     // слабее — менять равного на равного с доплатой хода смысла нет.
-    if (full && (victim === null || victim.value >= value.total)) return [];
+    if (full && host === null && (victim === null || victim.value >= value.total)) return [];
 
     const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
     const notes: string[] = [];
@@ -412,7 +528,13 @@ export function playRules(
     else if (value.copiesOwned === 1) notes.push('вторая копия');
     if (minion.golden) notes.push('золотой');
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
-    if (victim !== null) {
+    if (value.textTribeMates > 0) {
+      notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
+    }
+    if (host !== null) {
+      const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
+      notes.push(`борд полон, но магнитится — к ${hostName}`);
+    } else if (victim !== null) {
       const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
       notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
     }
@@ -423,8 +545,9 @@ export function playRules(
         minion,
         score: value.total,
         cost: 0,
-        requiresSlot: full,
-        sellFirst: victim?.minion ?? null,
+        requiresSlot: full && host === null,
+        sellFirst: host === null ? (victim?.minion ?? null) : null,
+        magnetizeTo: host,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
           `ценность ${value.total.toFixed(1)}` +
@@ -689,7 +812,7 @@ export function trinketAdvice(
     const name = info?.name ?? offer.cardId;
     const text = info?.text ?? '';
 
-    const tribes = Object.entries(rules.trinketTribeWords)
+    const tribes = Object.entries(rules.tribeTextWords)
       .filter(([, word]) => new RegExp(`\\b(?:${word})\\b`, 'i').test(text))
       .map(([race]) => race);
 
@@ -717,6 +840,172 @@ export function trinketAdvice(
   return scored.sort((a, b) => b.tribeMinions - a.tribeMinions);
 }
 
+/** Один вариант открытого выбора «возьмите одно из» с оценкой. */
+export interface ChoiceAdvice {
+  readonly option: ChoiceOption;
+  readonly name: string;
+  /** Оценка той же функцией, что у витрины. `null` у не-миньонов. */
+  readonly value: ValueBreakdown | null;
+  readonly reason: string;
+}
+
+/**
+ * Совет по открытому выбору: награда за тройку, раскопка карт.
+ *
+ * Варианты-миньоны оцениваются той же функцией, что и витрина, — тир, статы,
+ * племя, копии. Именно здесь копии решают: выбор, собирающий тройку, стоит
+ * выше любых статов. Про варианты не-миньоны (заклинания, дары) совет
+ * честно говорит, что оценить их не берётся: у них нет ни статов, ни тира.
+ *
+ * Тринкеты сюда не попадают: их выбор идёт отдельным полем `trinkets`
+ * со своим ранжированием по племенам из текста.
+ */
+export function choiceAdvice(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): ChoiceAdvice[] {
+  const choice = state.openChoice;
+  if (choice === null || choice.options.length === 0) return [];
+
+  const scored = choice.options.map((option) => {
+    const info = deps.cards.info(option.cardId);
+    const name = info?.name ?? option.cardId;
+
+    if (info === null || info.type !== 'MINION') {
+      return { option, name, value: null, reason: 'не миньон — оценить не берёмся' };
+    }
+
+    // Псевдо-миньон из справочника: у варианта выбора нет сущности с тегами,
+    // есть только карта. Ключевые слова (щит, яд) при этом не видны —
+    // тир, статы, племя и копии дают основную часть различий.
+    const candidate: Minion = {
+      entityId: option.entityId,
+      cardId: option.cardId,
+      zonePos: 0,
+      attack: info.attack,
+      health: info.health,
+      taunt: false,
+      divineShield: false,
+      poisonous: false,
+      venomous: false,
+      reborn: false,
+      windfury: false,
+      stealth: false,
+      golden: false,
+      frozen: false,
+      maxHealth: info.health,
+      techLevel: info.techLevel,
+      enchantments: [],
+      scriptData: [],
+      tags: {},
+    };
+    const value = minionValue(candidate, state, deps, rules);
+
+    const notes: string[] = [];
+    if (value.copiesOwned >= 2) notes.push('собирает тройку');
+    else if (value.copiesOwned === 1) notes.push('вторая копия');
+    if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
+    if (value.textTribeMates > 0) {
+      notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
+    }
+    if (info.magnetic) notes.push('магнитный');
+
+    return {
+      option,
+      name,
+      value,
+      reason:
+        `тир ${info.techLevel === null ? '?' : String(info.techLevel)}, ` +
+        `ценность ${value.total.toFixed(1)}` +
+        (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
+    };
+  });
+
+  // Миньоны по убыванию ценности, не-миньоны в конце в исходном порядке.
+  return scored.sort((a, b) => (b.value?.total ?? -1) - (a.value?.total ?? -1));
+}
+
+/** Шаг плана розыгрыша. */
+export interface PlanStep {
+  readonly minion: Minion;
+  /** К кому примагнитить; `null` — поставить в свободный слот. */
+  readonly magnetizeTo: Minion | null;
+  /** Кого продать ради места. Не больше одного такого шага на план. */
+  readonly sellFirst: Minion | null;
+  readonly score: number;
+}
+
+/**
+ * План розыгрыша, когда разыграть стоит несколько карт за ход.
+ *
+ * Отдельные советы «разыграть X» этого не выражают: игрок читает верхнюю
+ * строку и ставит одну карту, хотя мог разыграть больше (part9, ход 25 —
+ * на борде одно место, а в руке Glambot, Kangor's Apprentice и магнитный
+ * Accord-o-Tron). План раскладывает розыгрыши по слотам сам: обычные миньоны
+ * по убыванию ценности занимают свободные места, магнитные примагничиваются
+ * и мест не тратят. Порядок в плане — сначала тела, потом магниты: свежий
+ * мех тоже кандидат в носители.
+ */
+export function playPlan(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  plays: readonly Recommendation[],
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): PlanStep[] {
+  const candidates = [...plays]
+    .filter((r) => r.action === 'play' && r.minion !== null)
+    .sort((a, b) => b.score - a.score);
+  if (candidates.length < 2) return [];
+
+  let slots = Math.max(0, rules.boardSize - state.board.length);
+  const boardAfter: Minion[] = [...state.board];
+  const bodies: PlanStep[] = [];
+  const magnets: { rec: Recommendation; minion: Minion }[] = [];
+  // Розыгрыш через продажу в плане один: жертву каждый совет считал против
+  // исходного борда, и второй такой шаг продавал бы того же миньона дважды.
+  let displaced = false;
+
+  for (const rec of candidates) {
+    const minion = rec.minion;
+    if (minion === null) continue;
+    if (isMagnetic(minion, deps.cards)) {
+      magnets.push({ rec, minion });
+      continue;
+    }
+    if (slots > 0) {
+      slots -= 1;
+      boardAfter.push(minion);
+      bodies.push({ minion, magnetizeTo: null, sellFirst: null, score: rec.score });
+      continue;
+    }
+    if (rec.sellFirst !== null && !displaced) {
+      displaced = true;
+      boardAfter.push(minion);
+      bodies.push({ minion, magnetizeTo: null, sellFirst: rec.sellFirst, score: rec.score });
+    }
+  }
+
+  // Магниты после тел: только что разыгранный мех — тоже кандидат в носители.
+  const magnetSteps: PlanStep[] = [];
+  for (const { rec, minion } of magnets) {
+    const host = magnetizeTarget(
+      boardAfter.filter((m) => m.entityId !== minion.entityId),
+      deps.cards,
+    );
+    if (host !== null) {
+      magnetSteps.push({ minion, magnetizeTo: host, sellFirst: null, score: rec.score });
+    } else if (slots > 0) {
+      slots -= 1;
+      boardAfter.push(minion);
+      magnetSteps.push({ minion, magnetizeTo: null, sellFirst: null, score: rec.score });
+    }
+  }
+
+  const steps = [...bodies, ...magnetSteps];
+  return steps.length >= 2 ? steps : [];
+}
+
 /**
  * Совет по таверне целиком.
  *
@@ -731,9 +1020,10 @@ export function adviseTavern(
   if (state.phase !== 'tavern' || state.hero === null) return null;
 
   const buys = buyRules(state, deps, rules);
+  const plays = playRules(state, deps, rules);
   const recommendations: Recommendation[] = [
     ...buys,
-    ...playRules(state, deps, rules),
+    ...plays,
     levelUpRule(state, rules, buys),
     heroPowerRule(state, deps, rules),
     darkGiftRule(state, rules),
@@ -760,5 +1050,7 @@ export function adviseTavern(
       value: minionValue(minion, state, deps, rules),
     })),
     trinkets: trinketAdvice(state, deps, rules),
+    choice: choiceAdvice(state, deps, rules),
+    playPlan: playPlan(state, deps, plays, rules),
   };
 }
