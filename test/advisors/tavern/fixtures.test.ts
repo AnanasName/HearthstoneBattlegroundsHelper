@@ -133,6 +133,25 @@ describe('советник таверны на фикстурах', () => {
     expect(advice?.recommendations[0]?.action).not.toBe('levelUp');
   });
 
+  it('экономические шаблоны находят настоящие карты пула', () => {
+    // Шаблоны написаны от реальных текстов; если патч перепишет тексты,
+    // этот тест обязан заметить, что шаблоны отстали.
+    const skipper = cards.info('BG33_140');
+    expect(skipper?.name).toBe('River Skipper');
+    expect(
+      DEFAULT_TAVERN_RULES.economyTextWords.some((w) =>
+        new RegExp(w, 'i').test(skipper?.text ?? ''),
+      ),
+    ).toBe(true);
+
+    const sellemental = cards.info('BGS_115');
+    expect(
+      DEFAULT_TAVERN_RULES.economyTextWords.some((w) =>
+        new RegExp(w, 'i').test(sellemental?.text ?? ''),
+      ),
+    ).toBe(true);
+  });
+
   it('справочник карт покрывает всё, что встретилось в витринах', () => {
     const unknown = new Set<string>();
     for (const { state } of [...part3, ...part2]) {

@@ -57,6 +57,8 @@ export interface ValueBreakdown {
   readonly keywords: number;
   readonly copies: number;
   readonly golden: number;
+  /** Экономический эффект, распознанный по тексту карты. */
+  readonly economy: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
@@ -163,6 +165,15 @@ export function minionValue(
 
   const golden = candidate.golden ? w.golden : 0;
 
+  // Экономика видна только в тексте карты: River Skipper 1/1 по статам
+  // мусор, а при продаже возвращает миньона. Шаблоны — из реальных текстов
+  // пула, вес честно помечен как непроверяемый ближайшим боем.
+  const text = info?.text ?? '';
+  const economy =
+    text !== '' && rules.economyTextWords.some((word) => new RegExp(word, 'i').test(text))
+      ? w.economy
+      : 0;
+
   return {
     techLevel: tech,
     stats,
@@ -170,7 +181,8 @@ export function minionValue(
     keywords,
     copies,
     golden,
-    total: tech + stats + tribe + keywords + copies + golden,
+    economy,
+    total: tech + stats + tribe + keywords + copies + golden + economy,
     tribeMates: mates,
     copiesOwned: owned,
   };
@@ -235,6 +247,12 @@ export function levelUpRule(
   const wanted = targetTier(state.turn, rules);
   const behind = Math.max(0, wanted - state.techLevel);
 
+  // Расширение витрины — отдельная ценность подъёма: на чётных тирах
+  // миньонов в ней становится больше (замерено по фикстурам, 3/4/4/5/5).
+  const widens =
+    (rules.shopSizeByTier[target] ?? 0) > (rules.shopSizeByTier[state.techLevel] ?? 0);
+  const widerShop = widens ? `, витрина расширится до ${String(rules.shopSizeByTier[target])}` : '';
+
   let score = behind * rules.levellingUrgencyPerTier;
   if (behind > 0 && buys.length > 0) {
     const bestBuy = Math.max(...buys.map((b) => b.score));
@@ -260,8 +278,8 @@ export function levelUpRule(
     reason:
       behind > 0
         ? `таверна ${String(state.techLevel)} при ожидаемых ${String(wanted)} к ходу ${String(state.turn)}` +
-          `, подъём до ${String(target)} стоит ${String(cost)} из ${String(state.gold)}`
-        : `таверна ${String(state.techLevel)} и так по графику, подъём до ${String(target)} за ${String(cost)} — на опережение`,
+          `, подъём до ${String(target)} стоит ${String(cost)} из ${String(state.gold)}${widerShop}`
+        : `таверна ${String(state.techLevel)} и так по графику, подъём до ${String(target)} за ${String(cost)} — на опережение${widerShop}`,
   };
 }
 
@@ -319,6 +337,7 @@ export function buyRules(
       if (value.copiesOwned >= 2) notes.push('собирает тройку');
       else if (value.copiesOwned === 1) notes.push('вторая копия');
       if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
+      if (value.economy > 0) notes.push('вернёт часть цены при продаже');
       if (minion.golden) notes.push('золотой');
       if (victim !== null) {
         const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;

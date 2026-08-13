@@ -26,6 +26,14 @@ import { minion } from '../../minions.js';
  * его читать. Настоящий снапшот проверяется отдельно, в сквозном тесте.
  */
 const cards = createCardIndex([
+  {
+    id: 'SKIPPER',
+    name: 'Речной пропойца',
+    techLevel: 1,
+    races: ['MURLOC'],
+    isBaconPool: true,
+    text: 'When you sell this, get a random Tier 1 minion.',
+  },
   { id: 'MURLOC_1', name: 'Мурлок', techLevel: 1, races: ['MURLOC'], isBaconPool: true },
   { id: 'MURLOC_2', name: 'Другой мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
   { id: 'MURLOC_3', name: 'Третий мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
@@ -145,6 +153,18 @@ describe('ценность миньона', () => {
     expect(gain).toBeGreaterThan(minionValue(candidate, plain, deps).total);
   });
 
+  it('экономический эффект читается из текста карты', () => {
+    // Жалоба игрока: миньоны с возвратом при продаже почти не советовались,
+    // потому что по статам они мусор. River Skipper 1/1 против ванильного
+    // 1/1 того же тира — разница ровно в тексте.
+    const skipper = minionValue(shopMinion(9, 'SKIPPER', { attack: 1, health: 1 }), state(), deps);
+    const vanilla = minionValue(shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 }), state(), deps);
+
+    expect(skipper.economy).toBe(DEFAULT_TAVERN_RULES.value.economy);
+    expect(vanilla.economy).toBe(0);
+    expect(skipper.total).toBeGreaterThan(vanilla.total);
+  });
+
   it('бонус за копии не растёт дальше третьей', () => {
     const three = state({ board: [1, 2, 3].map((i) => shopMinion(i, 'MURLOC_1')) });
     expect(minionValue(shopMinion(9, 'MURLOC_1'), three, deps).copies).toBe(
@@ -177,6 +197,20 @@ describe('правило подъёма таверны', () => {
     expect(behind?.score).toBe(3 * DEFAULT_TAVERN_RULES.levellingUrgencyPerTier);
     expect(onTrack?.score).toBe(0);
     expect(behind?.reason).toContain('ожидаемых 5');
+  });
+
+  it('подъём на чётный тир обещает расширение витрины', () => {
+    // Замерено по фикстурам: витрина 3/4/4/5/5 для тиров 1–5, рост на чётных.
+    const toEven = levelUpRule(
+      upgradable({ techLevel: 1, tavernUpgradeTarget: 2, tavernUpgradeCost: 4, gold: 4 }),
+    );
+    expect(toEven?.reason).toContain('витрина расширится до 4');
+
+    // Подъём 2 → 3 витрину не меняет, и обещать нечего.
+    const toOdd = levelUpRule(
+      upgradable({ techLevel: 2, tavernUpgradeTarget: 3, tavernUpgradeCost: 5, gold: 5 }),
+    );
+    expect(toOdd?.reason).not.toContain('витрина');
   });
 
   it('при отставании подъём ставится выше лучшей покупки', () => {

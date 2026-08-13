@@ -42,6 +42,16 @@ export interface TavernRules {
   readonly boardSize: number;
 
   /**
+   * Сколько миньонов показывает витрина на каждом тире (индекс — тир).
+   *
+   * Тиры 1–5 замерены по шести фикстурам: максимум размера витрины в точках
+   * решения — 3/4/4/5/5. Тир 6 в данных не встретился, значение 6 — правило
+   * игры, а не замер. Рост на чётных тирах — отдельная причина подниматься,
+   * и совет подъёма говорит об этом вслух.
+   */
+  readonly shopSizeByTier: readonly number[];
+
+  /**
    * К какому тиру стремиться на каком ходу.
    *
    * Кривая сообщества, сверенная с фикстурами: в part3 человек шёл
@@ -79,7 +89,26 @@ export interface TavernRules {
     readonly poisonous: number;
     readonly windfury: number;
     readonly reborn: number;
+    /**
+     * Экономический эффект, распознанный по тексту карты.
+     *
+     * Возврат при продаже или золото — это будущая ценность, которой
+     * в статах не видно: River Skipper 1/1 по статам мусор, а по факту
+     * возвращает миньона при продаже. Вес НЕ проверяется сверкой с ближайшим
+     * боем — экономика окупается через ходы, и это сказано в docs/tavern.md.
+     */
+    readonly economy: number;
   };
+
+  /**
+   * Признаки экономического эффекта в тексте карты.
+   *
+   * Источники шаблонов — реальные тексты пула: «When you sell this, get …»
+   * (River Skipper, Sellemental, Patient Scout), «gain N Gold» / «Tavern
+   * Coin» (Accord-o-Tron, Shell Collector). Это данные из опубликованного
+   * текста, не выдуманная таблица.
+   */
+  readonly economyTextWords: readonly string[];
 
   /**
    * Сколько добавляет каждая уже имеющаяся копия карты.
@@ -130,6 +159,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   rerollCost: 1,
   boardSize: 7,
 
+  shopSizeByTier: [0, 3, 4, 4, 5, 5, 6],
+
   // Стандартная кривая: подъём на 4 золота вторым ходом, тир 3 на шестое
   // золото четвёртым. Прежняя таблица опаздывала на ход — «тир 2 к ходу 3»
   // означало покупку вторым ходом, и советник на 4 золота брал миньона
@@ -155,7 +186,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     poisonous: 3,
     windfury: 2,
     reborn: 2,
+    economy: 2.5,
   },
+
+  economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],
 
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],
