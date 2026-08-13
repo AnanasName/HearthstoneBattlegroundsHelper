@@ -94,6 +94,33 @@ export interface TrinketOffer {
   readonly cardId: string;
 }
 
+/** Один вариант открытого модального выбора. */
+export interface ChoiceOption {
+  readonly entityId: number;
+  readonly cardId: string;
+}
+
+/**
+ * Открытый модальный выбор «возьмите одно из».
+ *
+ * Канал — `GameState.DebugPrintEntityChoices()`: заголовок с id и
+ * `ChoiceType`, затем `Source=[дескриптор]` и `Entities[i]=[дескриптор]`
+ * с cardId прямо в строках. Закрывается строками `GameState.SendChoices()`
+ * с тем же id. Подтверждено на part9: 10 выборов GENERAL за партию —
+ * лавка аксессуаров, награда за тройку, раскопки карт — все идут этим
+ * каналом, и выбор игрока виден в `m_chosenEntities`.
+ *
+ * Выбор героя в начале партии приходит тем же каналом с
+ * `ChoiceType=MULLIGAN` и в состояние не попадает.
+ */
+export interface OpenChoice {
+  /** Номер выбора из заголовка — по нему выбор и закрывается. */
+  readonly id: number;
+  /** Карта-источник выбора: кнопка тройки, заклинание раскопки, аксессуар. */
+  readonly sourceCardId: string | null;
+  readonly options: readonly ChoiceOption[];
+}
+
 export interface Hero {
   readonly entityId: number;
   readonly cardId: string;
@@ -275,6 +302,14 @@ export interface GameState {
    */
   readonly trinketOffer: readonly TrinketOffer[];
   /**
+   * Открытый модальный выбор «возьмите одно из», если он сейчас на экране.
+   *
+   * Покрывает то, чего не видно по зонам: награду за тройку, раскопку карт,
+   * лавку аксессуаров. Тринкеты при этом продолжают жить и в `trinketOffer` —
+   * старый механизм по тегам зон никуда не девается.
+   */
+  readonly openChoice: OpenChoice | null;
+  /**
    * Взятые тринкеты по игрокам: `PlayerID` → dbfId карт.
    *
    * Теги `BACON_FIRST/SECOND_TRINKET_DATABASE_ID` на сущности героя.
@@ -316,6 +351,7 @@ export const EMPTY_STATE: GameState = {
   darkGiftCost: null,
   darkGiftUsedThisTurn: false,
   trinketOffer: [],
+  openChoice: null,
   trinketsByPlayer: {},
   finalPlace: null,
   playerBattleTag: null,

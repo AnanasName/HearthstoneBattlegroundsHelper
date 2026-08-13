@@ -36,6 +36,17 @@ import { parseLogLine, splitLogLines, type LogLine } from './logLine.js';
 
 export const SOURCE_OF_TRUTH = 'GameState.DebugPrintPower';
 
+/**
+ * Каналы модальных выборов. Открытие — заголовок с вариантами, закрытие —
+ * `SendChoices` с тем же id. Идут мимо стека блоков: у этих каналов свой
+ * отступ (2 у строк `Source=`/`Entities[i]=`), и пропуск их через общий
+ * стек закрывал бы блоки DebugPrintPower посреди содержимого.
+ *
+ * `PowerTaskList` эти каналы не дублирует, применить дважды их нельзя.
+ */
+export const SOURCE_ENTITY_CHOICES = 'GameState.DebugPrintEntityChoices';
+export const SOURCE_SEND_CHOICES = 'GameState.SendChoices';
+
 export interface BlockContext {
   /** TRIGGER, POWER, PLAY, ATTACK, DEATHS, MOVE_MINION. */
   readonly blockType: string;
@@ -85,7 +96,16 @@ export class PowerEventAssembler {
   /** Событие, если строка его несёт; null для чужих каналов и границ блоков. */
   push(raw: string): PowerEvent | null {
     const line = parseLogLine(raw);
-    if (line === null || line.source !== SOURCE_OF_TRUTH) return null;
+    if (line === null) return null;
+
+    // Строки выборов отдаются как события с пустым стеком: они приходят
+    // между блоками канала-источника, и их отступ к его вложенности
+    // отношения не имеет.
+    if (line.source === SOURCE_ENTITY_CHOICES || line.source === SOURCE_SEND_CHOICES) {
+      return { line, blocks: [] };
+    }
+
+    if (line.source !== SOURCE_OF_TRUTH) return null;
 
     // Блок живёт, пока идут строки с отступом строго больше его собственного.
     while (this.#stack.length > 0) {

@@ -1,4 +1,9 @@
-import { insideBlock, readPowerEvents, type PowerEvent } from '../parser/blocks.js';
+import {
+  insideBlock,
+  readPowerEvents,
+  SOURCE_OF_TRUTH,
+  type PowerEvent,
+} from '../parser/blocks.js';
 import { parseEntityDescriptor } from '../parser/entity.js';
 import { readPlayers, type Players } from './players.js';
 import {
@@ -6,6 +11,7 @@ import {
   BOARD_VISUAL_STATE_TAVERN,
   EMPTY_GLOBAL_INFO,
   EMPTY_STATE,
+  type ChoiceOption,
   type Enchantment,
   type GameState,
   type GlobalInfo,
@@ -47,6 +53,18 @@ const TECH_UP_BUTTON_RE = /^TB_BaconShopTechUp\d+_Button$/;
 
 /** Кнопка тёмного дара — `CARDTYPE=GAME_MODE_BUTTON`, цена в теге `COST`. */
 const DARK_GIFT_BUTTON = 'BG36_Button_DarkGift';
+
+/**
+ * Заголовок открытия выбора: `id=3 Player=AngryMem#2886 TaskList= ChoiceType=GENERAL …`.
+ *
+ * `TaskList` бывает пуст — на part9 у раскопок он не заполнен, поэтому
+ * `\S*`, а не `\d+`.
+ */
+const CHOICE_HEADER_RE = /^id=(\d+) Player=(.+?) TaskList=\S* ChoiceType=(\w+)/;
+/** Вариант выбора: `Entities[0]=[дескриптор]`. */
+const CHOICE_OPTION_RE = /^Entities\[\d+\]=/;
+/** Заголовок закрытия: `id=3 ChoiceType=GENERAL` в канале SendChoices. */
+const SEND_CHOICES_RE = /^id=(\d+) ChoiceType=/;
 
 /** Теги-признаки, которые нас интересуют у миньона. */
 interface Entity {
@@ -176,6 +194,57 @@ export function createReducer(players: Players): Reducer {
 
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
+
+  /**
+   * Открытый модальный выбор и его сборка.
+   *
+   * `openChoice` живёт от заголовка `DebugPrintEntityChoices` до `SendChoices`
+   * с тем же id; варианты дописываются в него строками `Entities[i]=`.
+   * Новый заголовок заменяет прежний выбор целиком — на экране клиента
+   * выбор один. `MULLIGAN` (выбор героя) и чужие выборы не собираются.
+   */
+  interface OpenChoiceDraft {
+    id: number;
+    sourceCardId: string | null;
+    options: ChoiceOption[];
+  }
+  let openChoice: OpenChoiceDraft | null = null;
+  let collectingChoice: OpenChoiceDraft | null = null;
+
+  const stepChoice = (source: string, content: string): void => {
+    if (source === 'GameState.SendChoices') {
+      const done = SEND_CHOICES_RE.exec(content);
+      if (done?.[1] !== undefined && openChoice !== null && Number(done[1]) >= openChoice.id) {
+        openChoice = null;
+        collectingChoice = null;
+      }
+      return;
+    }
+
+    const header = CHOICE_HEADER_RE.exec(content);
+    if (header !== null) {
+      const [, id, player, choiceType] = header;
+      const ours =
+        choiceType === 'GENERAL' && (players.selfName === null || player === players.selfName);
+      collectingChoice = ours
+        ? { id: Number(id), sourceCardId: null, options: [] }
+        : null;
+      if (ours) openChoice = collectingChoice;
+      return;
+    }
+
+    if (collectingChoice === null) return;
+
+    if (content.startsWith('Source=')) {
+      const d = parseEntityDescriptor(content);
+      collectingChoice.sourceCardId = d === null || d.cardId === '' ? null : d.cardId;
+      return;
+    }
+    if (CHOICE_OPTION_RE.test(content)) {
+      const d = parseEntityDescriptor(content);
+      if (d !== null) collectingChoice.options.push({ entityId: d.id, cardId: d.cardId });
+    }
+  };
 
   const touch = (id: number, cardId?: string, authoritative = false): Entity => {
     const found = entities.get(id);
@@ -405,6 +474,13 @@ export function createReducer(players: Players): Reducer {
 
   const step = (event: PowerEvent): void => {
     const { content } = event.line;
+
+    // Каналы модальных выборов идут отдельно от DebugPrintPower и не трогают
+    // ни `current`, ни стек блоков: их строки вклиниваются между блоками.
+    if (event.line.source !== SOURCE_OF_TRUTH) {
+      stepChoice(event.line.source, content);
+      return;
+    }
 
     // Первый размен боя — момент, когда оба борда уже расставлены.
     if (phase === 'combat' && !opponentBoardCaptured && insideBlock(event, 'ATTACK')) {
@@ -671,6 +747,14 @@ export function createReducer(players: Players): Reducer {
       darkGiftCost: darkGiftButton(),
       darkGiftUsedThisTurn,
       trinketOffer,
+      openChoice:
+        openChoice === null
+          ? null
+          : {
+              id: openChoice.id,
+              sourceCardId: openChoice.sourceCardId,
+              options: [...openChoice.options],
+            },
       trinketsByPlayer,
       finalPlace,
       playerBattleTag: players.selfName,
