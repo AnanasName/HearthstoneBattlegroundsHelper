@@ -50,6 +50,19 @@ export function part4Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part4', 'game.log'), 'utf8');
 }
 
+/** Партии 5–7 — три партии 13.08.2026 одним заходом клиента, билд 248348. */
+export function part5Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part5', 'game.log'), 'utf8');
+}
+
+export function part6Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part6', 'game.log'), 'utf8');
+}
+
+export function part7Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part7', 'game.log'), 'utf8');
+}
+
 /**
  * Та же фикстура байтами, без разбора в строку.
  *

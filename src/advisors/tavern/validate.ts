@@ -19,7 +19,14 @@ import {
   type BuyComparison,
 } from './buyQuality.js';
 
-const FIXTURES = ['data/fixtures/part2/game.log', 'data/fixtures/part3/game.log'] as const;
+// Партии текущего патча: сверка идёт симулятором, а он отражает нынешние
+// правила игры. Старые партии остаются для проверки разбора лога.
+const FIXTURES = [
+  'data/fixtures/part4/game.log',
+  'data/fixtures/part5/game.log',
+  'data/fixtures/part6/game.log',
+  'data/fixtures/part7/game.log',
+] as const;
 
 function main(): void {
   const cards = loadCardIndex();
