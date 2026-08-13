@@ -21,6 +21,7 @@ const DEFAULT_FIXTURE = 'data/fixtures/part3/game.log';
 const ACTION_LABEL: Readonly<Record<Recommendation['action'], string>> = {
   levelUp: 'ПОДНЯТЬ ТАВЕРНУ',
   buy: 'КУПИТЬ',
+  play: 'РАЗЫГРАТЬ',
   sell: 'ПРОДАТЬ',
   reroll: 'ОБНОВИТЬ',
   freeze: 'ЗАМОРОЗИТЬ',

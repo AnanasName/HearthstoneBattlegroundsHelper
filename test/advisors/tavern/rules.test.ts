@@ -7,6 +7,7 @@ import {
   freezeRule,
   levelUpRule,
   minionValue,
+  playRules,
   rerollRule,
   sellRule,
   tribeMates,
@@ -26,6 +27,7 @@ import { minion } from '../../minions.js';
 const cards = createCardIndex([
   { id: 'MURLOC_1', name: 'Мурлок', techLevel: 1, races: ['MURLOC'], isBaconPool: true },
   { id: 'MURLOC_2', name: 'Другой мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
+  { id: 'MURLOC_3', name: 'Третий мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
   { id: 'DRAGON_1', name: 'Дракон', techLevel: 3, races: ['DRAGON'], isBaconPool: true },
   { id: 'AMALGAM', name: 'Амальгама', techLevel: 4, races: ['ALL'], isBaconPool: true },
   { id: 'NEUTRAL', name: 'Нейтральный', techLevel: 2, races: [], isBaconPool: true },
@@ -62,7 +64,9 @@ const shopMinion = (id: number, cardId: string, patch: Partial<Minion> = {}): Mi
 describe('таблица таймингов подъёма', () => {
   it('отдаёт тир, полагающийся к ходу', () => {
     expect(targetTier(1, DEFAULT_TAVERN_RULES)).toBe(1);
-    expect(targetTier(2, DEFAULT_TAVERN_RULES)).toBe(1);
+    // Стандартная кривая: подъём на 4 золота вторым ходом. Прежняя таблица
+    // опаздывала на ход, и советник на втором ходу брал миньона вместо тира.
+    expect(targetTier(2, DEFAULT_TAVERN_RULES)).toBe(2);
     expect(targetTier(3, DEFAULT_TAVERN_RULES)).toBe(2);
     expect(targetTier(6, DEFAULT_TAVERN_RULES)).toBe(3);
     expect(targetTier(11, DEFAULT_TAVERN_RULES)).toBe(6);
@@ -174,6 +178,55 @@ describe('правило подъёма таверны', () => {
     expect(behind?.reason).toContain('ожидаемых 5');
   });
 
+  it('при отставании подъём ставится выше лучшей покупки', () => {
+    // Очки покупки — ценность миньона, к середине партии 20+. Прежние очки
+    // подъёма (отставание × 3) жили в другой шкале и проигрывали всегда:
+    // за девять ходов партии подъём попадал в советы один раз.
+    const s = upgradable({ turn: 9, techLevel: 2, gold: 10 });
+    const buys = buyRules(
+      { ...s, shop: [shopMinion(9, 'AMALGAM', { attack: 10, health: 10, divineShield: true })] },
+      deps,
+    );
+    const bestBuy = Math.max(...buys.map((b) => b.score));
+
+    const levelUp = levelUpRule(s, DEFAULT_TAVERN_RULES, buys);
+    expect(bestBuy).toBeGreaterThan(15);
+    expect(levelUp?.score).toBeGreaterThan(bestBuy);
+  });
+
+  it('когда золота хватает на одно, тройка важнее подъёма', () => {
+    // Тройка даёт золотого и открытие карты — её упускать нельзя.
+    const s = upgradable({
+      turn: 9,
+      techLevel: 2,
+      gold: 5,
+      tavernUpgradeCost: 5,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_1')],
+      shop: [shopMinion(9, 'MURLOC_1')],
+    });
+    const buys = buyRules(s, deps);
+    const levelUp = levelUpRule(s, DEFAULT_TAVERN_RULES, buys);
+    const triple = Math.max(...buys.map((b) => b.score));
+
+    expect(levelUp?.score).toBeLessThan(triple);
+  });
+
+  it('когда золота хватает на оба, подъём идёт раньше тройки', () => {
+    // Сыгранная после подъёма тройка открывает карту уже с нового тира.
+    const s = upgradable({
+      turn: 9,
+      techLevel: 2,
+      gold: 10,
+      tavernUpgradeCost: 5,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_1')],
+      shop: [shopMinion(9, 'MURLOC_1')],
+    });
+    const buys = buyRules(s, deps);
+    const levelUp = levelUpRule(s, DEFAULT_TAVERN_RULES, buys);
+
+    expect(levelUp?.score).toBeGreaterThan(Math.max(...buys.map((b) => b.score)));
+  });
+
   it('на низком здоровье подъём не советуется, и сказано почему', () => {
     const hurt = levelUpRule(upgradable({ gold: 10, hero: hero(40, 30) }));
     expect(hurt?.score).toBe(0);
@@ -278,39 +331,117 @@ describe('правило обновления витрины', () => {
 });
 
 describe('правило заморозки', () => {
-  const rich = shopMinion(9, 'AMALGAM', { attack: 10, health: 10, divineShield: true });
-  const alsoRich = shopMinion(10, 'DRAGON_1', { attack: 9, health: 9, taunt: true });
+  // Большие статы без синергии: свежая витрина в среднем даст не хуже.
+  const bigStats = shopMinion(9, 'AMALGAM', { attack: 10, health: 10, divineShield: true });
 
-  it('советует держать витрину ради второго ценного, на которого не хватило', () => {
-    // Золота ровно на одну покупку, а ценных двое: купленный уйдёт с борда,
-    // второй пропадёт вместе с витриной, если её не заморозить.
-    const s = state({ gold: 3, shop: [rich, alsoRich] });
-    const freeze = freezeRule(s, deps);
-    expect(freeze?.action).toBe('freeze');
-    expect(freeze?.minion?.cardId).toBe('DRAGON_1');
-  });
-
-  it('молчит, когда за одним ценным стоит только хлам', () => {
-    const s = state({ gold: 3, shop: [rich, shopMinion(11, 'NEUTRAL', { attack: 1, health: 1 })] });
+  it('голые статы заморозки не окупают: витрина и так обновится бесплатно', () => {
+    // Ровно жалоба игрока: морозили миньона, который композиции не помогает,
+    // а бесплатное обновление при этом пропадало.
+    const alsoBig = shopMinion(10, 'DRAGON_1', { attack: 9, health: 9, taunt: true });
+    const s = state({ gold: 3, shop: [bigStats, alsoBig] });
     expect(freezeRule(s, deps)).toBeNull();
   });
 
-  it('молчит, когда ценного хватает на всё золото', () => {
-    const s = state({ gold: 9, shop: [rich, alsoRich] });
+  it('копия под тройку — повод держать витрину, если золота не хватает', () => {
+    // Свежая витрина копию именно этой карты не обещает.
+    const s = state({
+      gold: 3,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+    });
+    const freeze = freezeRule(s, deps);
+    expect(freeze?.action).toBe('freeze');
+    expect(freeze?.minion?.cardId).toBe('MURLOC_1');
+    expect(freeze?.reason).toContain('копия');
+  });
+
+  it('миньон собираемого племени — тоже повод', () => {
+    // Карта витрины намеренно не копия своих: копия сработала бы раньше
+    // и по другой причине.
+    const s = state({
+      gold: 3,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_3', { attack: 4, health: 4 })],
+    });
+    const freeze = freezeRule(s, deps);
+    expect(freeze?.action).toBe('freeze');
+    expect(freeze?.reason).toContain('племени');
+  });
+
+  it('что по карману — покупается, а не морозится', () => {
+    const s = state({
+      gold: 9,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+    });
     expect(freezeRule(s, deps)).toBeNull();
   });
 
   it('молчит, когда витрина уже заморожена', () => {
     const s = state({
       gold: 3,
-      shop: [{ ...rich, frozen: true }, { ...alsoRich, frozen: true }],
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [
+        { ...bigStats, frozen: true },
+        { ...shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 }), frozen: true },
+      ],
     });
     expect(freezeRule(s, deps)).toBeNull();
   });
 
-  it('молчит, когда недоступное того не стоит', () => {
-    const s = state({ gold: 3, shop: [shopMinion(10, 'NEUTRAL'), shopMinion(11, 'NEUTRAL')] });
-    expect(freezeRule(s, deps)).toBeNull();
+  it('дешёвую синергию не морозит: порог ценности из данных', () => {
+    const s = state({
+      gold: 3,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+    });
+    const strict = {
+      ...DEFAULT_TAVERN_RULES,
+      freeze: { ...DEFAULT_TAVERN_RULES.freeze, minValue: 1000 },
+    };
+    expect(freezeRule(s, deps, strict)).toBeNull();
+  });
+});
+
+describe('правило розыгрыша из руки', () => {
+  it('советует разыграть, пока на борде есть место', () => {
+    const s = state({ hand: [shopMinion(9, 'MURLOC_1', { attack: 3, health: 4 })] });
+    const plays = playRules(s, deps);
+    expect(plays).toHaveLength(1);
+    expect(plays[0]?.action).toBe('play');
+    expect(plays[0]?.cost).toBe(0);
+    expect(plays[0]?.reason).toContain('из руки');
+  });
+
+  it('карта в руке не считает копией саму себя', () => {
+    const alone = state({ hand: [shopMinion(9, 'MURLOC_1')] });
+    expect(playRules(alone, deps)[0]?.reason).not.toContain('копия');
+
+    // А настоящая пара в руке — считается.
+    const pair = state({ hand: [shopMinion(9, 'MURLOC_1'), shopMinion(10, 'MURLOC_1')] });
+    expect(playRules(pair, deps)[0]?.reason).toContain('вторая копия');
+  });
+
+  it('на полном борде — только через продажу кого-то слабее', () => {
+    const s = state({
+      board: Array.from({ length: 7 }, (_, i) =>
+        shopMinion(i + 1, 'NEUTRAL', { attack: 1, health: 1 }),
+      ),
+      hand: [shopMinion(9, 'AMALGAM', { attack: 8, health: 8 })],
+    });
+    const play = playRules(s, deps)[0];
+    expect(play?.requiresSlot).toBe(true);
+    expect(play?.sellFirst).not.toBeNull();
+  });
+
+  it('слабее слабейшего своего из руки не разыгрывается', () => {
+    const s = state({
+      board: Array.from({ length: 7 }, (_, i) =>
+        shopMinion(i + 1, 'DRAGON_1', { attack: 8, health: 8 }),
+      ),
+      hand: [shopMinion(9, 'NEUTRAL', { attack: 1, health: 1 })],
+    });
+    expect(playRules(s, deps)).toHaveLength(0);
   });
 });
 
@@ -337,7 +468,7 @@ describe('совет целиком', () => {
     expect(advice?.recommendations.map((r) => r.action)).toContain('pass');
   });
 
-  it('третья копия перевешивает подъём таверны', () => {
+  it('при отставании и полном золоте первым идёт подъём, тройка следом', () => {
     const s = state({
       turn: 9,
       techLevel: 2,
@@ -347,8 +478,29 @@ describe('совет целиком', () => {
       board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_1')],
       shop: [shopMinion(9, 'MURLOC_1')],
     });
+    const actions = adviseTavern(s, deps)?.recommendations.map((r) => r.action) ?? [];
+    expect(actions[0]).toBe('levelUp');
+    expect(actions[1]).toBe('buy');
+  });
+
+  it('когда золота хватает на одно, тройка перевешивает подъём', () => {
+    const s = state({
+      turn: 9,
+      techLevel: 2,
+      gold: 5,
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 3,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_1')],
+      shop: [shopMinion(9, 'MURLOC_1')],
+    });
     const first = adviseTavern(s, deps)?.recommendations[0];
     expect(first?.action).toBe('buy');
     expect(first?.reason).toContain('собирает тройку');
+  });
+
+  it('купленное в руке советуется разыграть', () => {
+    const s = state({ hand: [shopMinion(9, 'DRAGON_1', { attack: 5, health: 5 })] });
+    const actions = adviseTavern(s, deps)?.recommendations.map((r) => r.action) ?? [];
+    expect(actions).toContain('play');
   });
 });

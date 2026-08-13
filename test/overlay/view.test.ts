@@ -138,7 +138,7 @@ describe('вид оверлея', () => {
     expect(view.active).toBe(false);
   });
 
-  it('шапка, борд, витрина и два первых совета', () => {
+  it('шапка, борд, витрина и три первых совета', () => {
     const view = buildView(input(), cards);
 
     expect(view.header).toContain('ход 9');
@@ -148,8 +148,9 @@ describe('вид оверлея', () => {
     expect(view.board).toHaveLength(2);
     expect(view.shop).toHaveLength(2);
 
-    // Третий совет не показывается: оверлей не должен становиться простынёй.
-    expect(view.actions).toHaveLength(2);
+    // Три совета, не больше: с «разыграть» и подъёмом-приоритетом в топе
+    // обычно сочетание разных действий, а простыня оверлею всё же не к лицу.
+    expect(view.actions).toHaveLength(3);
     expect(view.actions[0]?.tone).toBe('good');
   });
 

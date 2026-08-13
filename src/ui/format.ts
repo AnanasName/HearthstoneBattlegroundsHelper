@@ -15,6 +15,7 @@ import type { GameState, Minion } from '../state/types.js';
 export const ACTION_LABEL: Readonly<Record<Recommendation['action'], string>> = {
   levelUp: 'ПОДНЯТЬ ТАВЕРНУ',
   buy: 'КУПИТЬ',
+  play: 'РАЗЫГРАТЬ',
   sell: 'ПРОДАТЬ',
   reroll: 'ОБНОВИТЬ',
   freeze: 'ЗАМОРОЗИТЬ',
