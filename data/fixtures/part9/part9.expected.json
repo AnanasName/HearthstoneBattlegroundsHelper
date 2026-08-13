@@ -1,0 +1,174 @@
+{
+  "$comment": [
+    "Партия 13.08.2026 за Зиреллу, билд 248348, снята с работающим оверлеем:",
+    "игрок прислал пять скриншотов советов ПРЯМО ИЗ ИГРЫ и шесть пунктов",
+    "обратной связи. Каждая контрольная точка ниже — один из этих скриншотов.",
+    "Скриншоты присланы в чат и в data/screenshots/ не сохранялись, поэтому",
+    "пометка «скриншот из чата»: сверка делалась по изображению в переписке.",
+    "",
+    "Ценность фикстуры — фактура, которой не было в part1–part8:",
+    " - модальные выборы каналом GameState.DebugPrintEntityChoices():",
+    "   лавка аксессуаров (id=2), раскопка карт (id=3, источник BG34_330),",
+    "   награда за тройку (id=4, TB_BaconShop_Triples_01) — всего 10 GENERAL;",
+    " - закрытие выбора строками GameState.SendChoices() с тем же id;",
+    " - магнитные мехи (Accord-o-Tron, Lullabot) и их примагничивание;",
+    " - сила героя, дающая миньона местоимением («…add it to your hand»);",
+    " - тринкет с племенем в тексте (Scraper Sticker, «Mech»).",
+    "",
+    "Шесть жалоб игрока, закрытых этой фикстурой (номера из переписки):",
+    " 1) ход 3: сила за 2 при золоте 2 доступна, а совет — НИЧЕГО;",
+    " 2) ход 11: «для племени MECHANICAL, а своих таких нет» при мехах",
+    "    на борде + советы обрезались троеточием в оверлее;",
+    " 3) ход 13: «разыграть Accord-o-Tron, ПРОДАВ Molten Rock» — магнитный",
+    "    мех не требует места;",
+    " 4) ход 13: раскопка «Выберите одно» шла без рекомендации;",
+    " 5) ход 19: «разыграть Turbo Hogrider, продав Kangor's Apprentice» —",
+    "    продажа ключевой для композиции карты ради чужого племени;",
+    " 6) ход 25: совет «разыграть Glambot» вместо плана на несколько карт."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-13T22:59:05+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerId": 4,
+    "hero": { "cardId": "BG20_HERO_101", "name": "Зирелла / Xyrella", "entityId": 106 },
+    "heroPower": {
+      "cardId": "BG20_HERO_101p",
+      "entityId": 152,
+      "cost": 2,
+      "text": "Choose a minion in the Tavern. Set its stats to 2 and add it to your hand."
+    }
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 59124202,
+    "lines": 422894,
+    "truncationBanners": 0,
+    "createGameBlocks": 1,
+    "maxTurn": 28,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 14.08.2026",
+      "expect": {
+        "phase": "gameOver",
+        "finalPlace": 2
+      }
+    },
+    {
+      "id": "turn3-hero-power-affordable",
+      "turn": 3,
+      "verifiedBy": "скриншот из чата (22:31), сверено 14.08.2026",
+      "expect": {
+        "phase": "tavern",
+        "techLevel": 1,
+        "goldTotal": 4,
+        "hero": { "health": 30, "armor": 10, "heroPowerCost": 2 },
+        "boardNames": ["Molten Rock", "Glim Guardian"],
+        "shopNames": ["River Skipper", "Tusked Camper", "Scarlet Survivor"]
+      },
+      "$note": [
+        "Жалоба 1: на скриншоте золото 2/4, сила за 2 подсвечена доступной,",
+        "а совет оверлея — «НИЧЕГО». Причина: все шаблоны heroPowerMinionWords",
+        "ждали слово «minion» после глагола, у Зиреллы объект — «it»."
+      ]
+    },
+    {
+      "id": "turn11-trinket-shop",
+      "turn": 11,
+      "verifiedBy": "скриншот из чата (22:36), сверено 14.08.2026",
+      "expect": {
+        "phase": "tavern",
+        "techLevel": 3,
+        "goldTotal": 8,
+        "openChoiceId": 2,
+        "openChoiceSource": "BG30_Trinket_1st",
+        "openChoiceOptions": [
+          "BG30_MagicItem_303",
+          "BG30_MagicItem_891",
+          "BG30_MagicItem_425",
+          "BG35_MagicItem_301"
+        ],
+        "boardHasMechs": true
+      },
+      "$note": [
+        "Жалоба 2: «Scraper Sticker — для племени MECHANICAL, а своих таких",
+        "нет» при Lullabot и Ancestral Automaton на борде. Племя в снапшоте",
+        "Firestone называется MECH, ключ таблицы MECHANICAL не совпадал ни с чем.",
+        "Выбор игрока: Scraper Sticker (SendChoices id=2, 22:36:30)."
+      ]
+    },
+    {
+      "id": "turn13-dig-choice",
+      "turn": 13,
+      "verifiedBy": "скриншот из чата (22:38), сверено 14.08.2026",
+      "expect": {
+        "phase": "tavern",
+        "techLevel": 4,
+        "openChoiceId": 3,
+        "openChoiceSource": "BG34_330",
+        "openChoiceOptions": ["BG35_341", "BG36_331", "BG36_180"],
+        "bestChoice": "BG35_341"
+      },
+      "$note": [
+        "Жалобы 3 и 4. Раскопка предлагает Зачарованного часового (Enchanted",
+        "Sentinel, мех, магнитный), Шипастого проходчика (Bramble Tunneler,",
+        "свинобраз) и Ожившую тюрьму (Living Prison, элементаль). На борде",
+        "пять мехов — часовой обязан быть первым. Выбор игрока совпал:",
+        "SendChoices id=3 — BG35_341 (22:38:52)."
+      ]
+    },
+    {
+      "id": "turn19-kangor-not-for-sale",
+      "turn": 19,
+      "sliceAt": "D 22:47:0",
+      "verifiedBy": "скриншот из чата (22:47), сверено 14.08.2026",
+      "expect": {
+        "phase": "tavern",
+        "techLevel": 5,
+        "handNames": ["Turbo Hogrider", "Brann Bronzebeard"],
+        "boardHas": "BGS_012",
+        "boardNames": [
+          "Falling Sky Golem",
+          "Falling Sky Golem",
+          "Spark Snapper",
+          "Ancestral Automaton",
+          "Lullabot",
+          "Cord Puller",
+          "Kangor's Apprentice"
+        ]
+      },
+      "$note": [
+        "Жалоба 5: совет был «РАЗЫГРАТЬ Turbo Hogrider 5/7, продав Kangor's",
+        "Apprentice 3/6». Ученица — без племени, но её текст называет мехов;",
+        "теперь ценность видит племя из текста (perTextTribeMate), и свинобраз",
+        "шестого тира мех-композицию не разбирает."
+      ]
+    },
+    {
+      "id": "turn25-play-plan",
+      "turn": 25,
+      "sliceAt": "D 22:54:2",
+      "verifiedBy": "скриншот из чата (22:54), сверено 14.08.2026",
+      "expect": {
+        "phase": "tavern",
+        "techLevel": 6,
+        "boardFull": true,
+        "handHasMagnetic": ["BG26_147", "BG26_146"],
+        "planIncludes": "BG36_853"
+      },
+      "$note": [
+        "Жалоба 6: три отдельных строки «РАЗЫГРАТЬ», игрок прочитал верхнюю",
+        "и поставил одну карту. Теперь план: Glambot через продажу слабейшего,",
+        "магнитные Accord-o-Tron и Lullabot — примагнитить к Falling Sky Golem."
+      ]
+    }
+  ]
+}

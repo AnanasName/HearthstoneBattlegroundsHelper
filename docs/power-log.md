@@ -619,6 +619,49 @@ FULL_ENTITY - Creating ID=362 CardID=BG27_Anomaly_301        <- отдельна
 - Сила героя (пример): `TB_BaconShop_HP_103`
 - Миньон (пример): `BG35_814`
 
+## Модальные выборы: DebugPrintEntityChoices и SendChoices
+
+Все выборы «возьмите одно из» идут отдельным каналом, не через зоны.
+Подтверждено на part9 — 10 выборов `ChoiceType=GENERAL` за партию: лавка
+аксессуаров (источник `BG30_Trinket_1st`/`BG30_Trinket_2nd`), награда
+за тройку (`TB_BaconShop_Triples_01`), раскопки карт (`BG34_330`,
+`BG31_890` и другие).
+
+Открытие — `GameState.DebugPrintEntityChoices()`:
+
+```
+D 22:38:41 GameState.DebugPrintEntityChoices() - id=3 Player=AngryMem#2886 TaskList= ChoiceType=GENERAL CountMin=1 CountMax=1
+D 22:38:41 GameState.DebugPrintEntityChoices() -   Source=[entityName=Межвременной поиск id=4218 zone=PLAY zonePos=0 cardId=BG34_330 player=4]
+D 22:38:41 GameState.DebugPrintEntityChoices() -   Entities[0]=[entityName=Зачарованный часовой id=4431 zone=SETASIDE zonePos=0 cardId=BG35_341 player=4]
+```
+
+Закрытие — `GameState.SendChoices()` с тем же id и выбором игрока:
+
+```
+D 22:38:52 GameState.SendChoices() - id=3 ChoiceType=GENERAL
+D 22:38:52 GameState.SendChoices() -   m_chosenEntities[0]=[entityName=Зачарованный часовой id=4431 … cardId=BG35_341 player=4]
+```
+
+Что важно и легко сделать неправильно:
+
+- **`cardId` вариантов стоит прямо в дескрипторах строк** — зонные сущности
+  не нужны. Больше того, id в `Entities[i]` НЕ совпадают с id сущностей,
+  созданных для тех же карт через `FULL_ENTITY` в `SETASIDE` (в примере
+  выше выбор называет 4431–4433, а `FULL_ENTITY` создавал 4428–4430):
+  клиент держит два комплекта, и связывать их по id нельзя.
+- **`TaskList=` бывает пуст** — у раскопок part9 значения нет.
+- **Выбор героя приходит тем же каналом** с `ChoiceType=MULLIGAN` —
+  его надо отличать.
+- **`PowerTaskList` этот канал не дублирует** — применять можно без
+  дедупликации.
+- **Строки каналов выбора нельзя пропускать через стек блоков**: их отступ
+  (2 у `Source=`/`Entities[i]=`) не имеет отношения к вложенности
+  `DebugPrintPower` и закрывал бы открытые блоки посреди содержимого.
+- Предложение тринкетов ПАРАЛЛЕЛЬНО видно и по зонам (`BACON_TRINKET=1`
+  в `SETASIDE`, см. выше) — но зонный путь опаздывает: в точке решения
+  хода 11 part9 зонами видны 3 варианта из 4, а канал выбора называет
+  все четыре сразу.
+
 ## DebugPrintOptions
 
 Перечисляет все доступные игроку действия с полными дескрипторами:
