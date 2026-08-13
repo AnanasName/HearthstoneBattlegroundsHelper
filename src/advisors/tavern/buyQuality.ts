@@ -123,6 +123,12 @@ export function measureBuyQuality(
       techLevel: state.techLevel,
       anomalyCardId: state.anomalyCardId,
       globalInfo: state.globalInfo,
+      playerTrinketDbfIds:
+        state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
+      opponentTrinketDbfIds:
+        state.nextOpponentPlayerId === null
+          ? []
+          : (state.trinketsByPlayer[state.nextOpponentPlayerId] ?? []),
     };
     const base = toBattleInfo(setup, 1);
 

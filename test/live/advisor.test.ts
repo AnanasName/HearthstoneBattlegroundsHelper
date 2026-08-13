@@ -173,4 +173,15 @@ describe('живой советник: когда звать и когда бр�
     );
     expect(situationKey(state)).not.toBe(situationKey({ ...state, gold: 4 }));
   });
+
+  it('открытие выбора тринкета — новое положение', () => {
+    // Предложение открывается посреди хода, не меняя ни золота, ни бордов:
+    // без него в ключе оверлей не проснулся бы и совет никто бы не увидел.
+    const state = tavernState();
+    const withOffer = {
+      ...state,
+      trinketOffer: [{ entityId: 900, cardId: 'BG30_MagicItem_425' }],
+    };
+    expect(situationKey(state)).not.toBe(situationKey(withOffer));
+  });
 });

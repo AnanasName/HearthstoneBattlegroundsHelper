@@ -11,6 +11,7 @@ import {
   rerollRule,
   sellRule,
   tribeMates,
+  trinketAdvice,
 } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, targetTier } from '../../../src/advisors/tavern/rules.js';
 import { createCardIndex } from '../../../src/data/cards.js';
@@ -442,6 +443,68 @@ describe('правило розыгрыша из руки', () => {
       hand: [shopMinion(9, 'NEUTRAL', { attack: 1, health: 1 })],
     });
     expect(playRules(s, deps)).toHaveLength(0);
+  });
+});
+
+describe('совет по выбору тринкета', () => {
+  const trinketCards = createCardIndex([
+    { id: 'MURLOC_1', name: 'Мурлок', techLevel: 1, races: ['MURLOC'], isBaconPool: true },
+    { id: 'DRAGON_1', name: 'Дракон', techLevel: 3, races: ['DRAGON'], isBaconPool: true },
+    {
+      id: 'TR_DRAKE',
+      dbfId: 1001,
+      name: 'Планер',
+      text: 'Whenever you play a card, give a friendly Dragon +1/+1.',
+    },
+    {
+      id: 'TR_GOLD',
+      dbfId: 1002,
+      name: 'Копилка',
+      text: 'At the start of your turn, gain 1 Gold.',
+    },
+    {
+      id: 'TR_MURLOC',
+      dbfId: 1003,
+      name: 'Икра',
+      text: 'After you sell a Murloc, give your Murlocs +1/+1.',
+    },
+  ]);
+  const trinketDeps = { cards: trinketCards };
+
+  const offer = (...cardIds: string[]): Partial<GameState> => ({
+    trinketOffer: cardIds.map((cardId, i) => ({ entityId: 9000 + i, cardId })),
+  });
+
+  it('без открытого предложения совет пуст', () => {
+    expect(trinketAdvice(state(), trinketDeps)).toEqual([]);
+  });
+
+  it('тринкет собираемого племени встаёт первым', () => {
+    const s = state({
+      board: [
+        minion(1, { cardId: 'DRAGON_1' }),
+        minion(2, { cardId: 'DRAGON_1' }),
+        minion(3, { cardId: 'MURLOC_1' }),
+      ],
+      ...offer('TR_MURLOC', 'TR_DRAKE'),
+    });
+    const advice = trinketAdvice(s, trinketDeps);
+
+    expect(advice[0]?.name).toBe('Планер');
+    expect(advice[0]?.tribeMinions).toBe(2);
+    expect(advice[0]?.reason).toContain('DRAGON');
+  });
+
+  it('про эффект вне племён сказано честно, а не выдуман рейтинг', () => {
+    const s = state({ board: [minion(1, { cardId: 'DRAGON_1' })], ...offer('TR_GOLD') });
+    const advice = trinketAdvice(s, trinketDeps);
+    expect(advice[0]?.reason).toContain('не берёмся');
+  });
+
+  it('племя без своих миньонов не получает очков авансом', () => {
+    const s = state({ board: [minion(1, { cardId: 'DRAGON_1' })], ...offer('TR_MURLOC') });
+    expect(trinketAdvice(s, trinketDeps)[0]?.tribeMinions).toBe(0);
+    expect(trinketAdvice(s, trinketDeps)[0]?.reason).toContain('своих таких нет');
   });
 });
 

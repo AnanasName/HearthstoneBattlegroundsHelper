@@ -42,6 +42,7 @@ const tavern: TavernAdvice = {
   gold: 7,
   targetTier: 4,
   shopValues: [],
+  trinkets: [],
   recommendations: [
     {
       action: 'buy',

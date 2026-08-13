@@ -88,6 +88,12 @@ export interface Minion {
   readonly tags: Readonly<Record<string, number>>;
 }
 
+/** Один вариант из открытого предложения тринкетов. */
+export interface TrinketOffer {
+  readonly entityId: number;
+  readonly cardId: string;
+}
+
 export interface Hero {
   readonly entityId: number;
   readonly cardId: string;
@@ -233,6 +239,23 @@ export interface GameState {
    * обязан говорить, насколько его картинка устарела.
    */
   readonly lastSeenBoardTurns: Readonly<Record<number, number>>;
+  /**
+   * Открытое сейчас предложение тринкетов.
+   *
+   * Сущности `CARDTYPE=BATTLEGROUND_TRINKET` под своим контроллером
+   * в `SETASIDE` с тегом `USE_DISCOVER_VISUALS=1`. После выбора клиент
+   * обнуляет тег, и предложение из состояния исчезает само.
+   */
+  readonly trinketOffer: readonly TrinketOffer[];
+  /**
+   * Взятые тринкеты по игрокам: `PlayerID` → dbfId карт.
+   *
+   * Теги `BACON_FIRST/SECOND_TRINKET_DATABASE_ID` на сущности героя.
+   * Видны у ВСЕХ восьми игроков, не только у себя, — поэтому тринкеты
+   * противника можно передавать симулятору. Идентификатор здесь dbfId,
+   * как в логе; в cardId его переводит справочник карт.
+   */
+  readonly trinketsByPlayer: Readonly<Record<number, readonly number[]>>;
   /** Финальное место, появляется на `FINAL_GAMEOVER`. */
   readonly finalPlace: number | null;
   /** BattleTag игрока — самый надёжный якорь «кто я». */
@@ -263,6 +286,8 @@ export const EMPTY_STATE: GameState = {
   wonLastCombat: null,
   lastSeenBoards: {},
   lastSeenBoardTurns: {},
+  trinketOffer: [],
+  trinketsByPlayer: {},
   finalPlace: null,
   playerBattleTag: null,
   playerId: null,

@@ -1,6 +1,6 @@
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { ResolvedOpponent } from '../advisors/position/opponent.js';
-import type { Recommendation } from '../advisors/tavern/advisor.js';
+import type { Recommendation, TrinketAdvice } from '../advisors/tavern/advisor.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState, Minion } from '../state/types.js';
 
@@ -61,6 +61,11 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   const price = r.cost > 0 ? ` за ${String(r.cost)}` : '';
   const victim = r.sellFirst === null ? '' : `, продав ${minionLabel(r.sellFirst, cards)}`;
   return `${ACTION_LABEL[r.action]}${what}${price}${victim}`;
+}
+
+/** Вариант выбора тринкета одной строкой. */
+export function trinketLine(t: TrinketAdvice): string {
+  return `${t.name} — ${t.reason}`;
 }
 
 /** Доля побед оценки, в процентах. */

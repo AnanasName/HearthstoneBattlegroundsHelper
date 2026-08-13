@@ -119,6 +119,10 @@ export function situationKey(state: GameState): string {
     state.board.map(minionKey).join(','),
     state.shop.map(minionKey).join(','),
     state.hand.map((m) => m.cardId).join(','),
+    // Предложение тринкетов открывается посреди хода, не меняя ни золота,
+    // ни бордов. Без него в ключе оверлей не просыпался бы на открытие
+    // выбора и совет по тринкету никто бы не увидел.
+    state.trinketOffer.map((t) => t.entityId).join(','),
   ].join('|');
 }
 

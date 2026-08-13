@@ -32,6 +32,7 @@ import {
   positionLine,
   recommendationLine,
   situationLine,
+  trinketLine,
 } from './format.js';
 import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
 import { checkGameSetup, waitingForLogText } from './setup.js';
@@ -96,6 +97,11 @@ function printSituation(state: GameState, advice: TavernAdvice | null, cards: Ca
 
   for (const r of advice.recommendations.slice(0, 2)) {
     console.log(`   ▸ ${recommendationLine(r, cards)} — ${r.reason}`);
+  }
+
+  if (advice.trinkets.length > 0) {
+    console.log('   выбор тринкета:');
+    for (const t of advice.trinkets) console.log(`     ◆ ${trinketLine(t)}`);
   }
 }
 

@@ -1,10 +1,14 @@
 import type { BgsBattleInfo } from '@firestone-hs/simulate-bgs-battle/dist/bgs-battle-info.js';
-import type { BgsPlayerEntity } from '@firestone-hs/simulate-bgs-battle/dist/bgs-player-entity.js';
+import type {
+  BgsPlayerEntity,
+  BoardTrinket,
+} from '@firestone-hs/simulate-bgs-battle/dist/bgs-player-entity.js';
 import type {
   BoardEnchantment,
   BoardEntity,
 } from '@firestone-hs/simulate-bgs-battle/dist/board-entity.js';
 
+import { loadCardIndex, type CardIndex } from '../../data/cards.js';
 import {
   EMPTY_GLOBAL_INFO,
   type Enchantment,
@@ -136,6 +140,37 @@ export interface BattleSetup {
   readonly techLevel: number;
   readonly anomalyCardId: string | null;
   readonly globalInfo: GlobalInfo;
+  /**
+   * Взятые тринкеты, свои и противника, как dbfId из лога.
+   *
+   * Поля необязательные: старые фикстуры сыграны до тринкетов, а часть
+   * вызовов собирает вход там, где тринкеты неизвестны. Отсутствие честнее
+   * пустого списка — оно означает «не знаем», а не «нет тринкетов».
+   */
+  readonly playerTrinketDbfIds?: readonly number[];
+  readonly opponentTrinketDbfIds?: readonly number[];
+}
+
+/**
+ * dbfId тринкетов → вход симулятора.
+ *
+ * Справочник карт грузится лениво и один раз: он нужен только партиям
+ * с тринкетами, а тесты маппера на старых фикстурах не должны платить
+ * секунду за разбор снапшота, которым не пользуются.
+ */
+let trinketCards: CardIndex | null = null;
+
+function toTrinkets(dbfIds: readonly number[] | undefined): BoardTrinket[] {
+  if (dbfIds === undefined || dbfIds.length === 0) return [];
+  trinketCards ??= loadCardIndex();
+
+  return dbfIds.flatMap((dbfId) => {
+    const info = trinketCards?.infoByDbfId(dbfId);
+    // Незнакомый dbfId молча пропускается: выдуманный тринкет исказил бы
+    // бой сильнее, чем отсутствующий.
+    if (info === undefined || info === null) return [];
+    return [{ cardId: info.id, entityId: 0, scriptDataNum1: 0 }];
+  });
 }
 
 /**
@@ -156,11 +191,15 @@ export function toBattleInfo(
     heroPowers: [],
     questEntities: [],
     globalInfo: toGlobalInfo(EMPTY_GLOBAL_INFO),
+    trinkets: toTrinkets(episode.opponentTrinketDbfIds),
   };
 
   return {
     playerBoard: {
-      player: toPlayerEntity(episode.playerHero, episode.techLevel, episode.globalInfo),
+      player: {
+        ...toPlayerEntity(episode.playerHero, episode.techLevel, episode.globalInfo),
+        trinkets: toTrinkets(episode.playerTrinketDbfIds),
+      },
       board: episode.playerBoard.map(toBoardEntity),
     },
     opponentBoard: {

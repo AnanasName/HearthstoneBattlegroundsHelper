@@ -166,6 +166,10 @@ export function positionQuestion(state: GameState): PositionQuestion | null {
       techLevel: state.techLevel,
       anomalyCardId: state.anomalyCardId,
       globalInfo: state.globalInfo,
+      playerTrinketDbfIds:
+        state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
+      opponentTrinketDbfIds:
+        opponent.playerId === null ? [] : (state.trinketsByPlayer[opponent.playerId] ?? []),
     },
   };
 }

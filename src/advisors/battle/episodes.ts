@@ -25,6 +25,9 @@ export interface BattleEpisode {
   readonly anomalyCardId: string | null;
   readonly globalInfo: GlobalInfo;
   readonly opponentPlayerId: number | null;
+  /** Взятые тринкеты, свои и противника, как dbfId из лога. */
+  readonly playerTrinketDbfIds: readonly number[];
+  readonly opponentTrinketDbfIds: readonly number[];
   /** Чем бой закончился на самом деле. */
   readonly outcome: Outcome;
   /** Сколько здоровья потерял игрок. */
@@ -46,6 +49,8 @@ interface Pending {
   anomalyCardId: string | null;
   globalInfo: GlobalInfo;
   opponentPlayerId: number | null;
+  playerTrinketDbfIds: readonly number[];
+  opponentTrinketDbfIds: readonly number[];
   hpBefore: number;
 }
 
@@ -99,6 +104,12 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
           anomalyCardId: state.anomalyCardId,
           globalInfo: state.globalInfo,
           opponentPlayerId: state.currentOpponentPlayerId,
+          playerTrinketDbfIds:
+            state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
+          opponentTrinketDbfIds:
+            state.currentOpponentPlayerId === null
+              ? []
+              : (state.trinketsByPlayer[state.currentOpponentPlayerId] ?? []),
           hpBefore: hpBeforeCombat,
         };
       }
@@ -120,6 +131,8 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
         anomalyCardId: pending.anomalyCardId,
         globalInfo: pending.globalInfo,
         opponentPlayerId: pending.opponentPlayerId,
+        playerTrinketDbfIds: pending.playerTrinketDbfIds,
+        opponentTrinketDbfIds: pending.opponentTrinketDbfIds,
         outcome,
         damageTaken,
       });

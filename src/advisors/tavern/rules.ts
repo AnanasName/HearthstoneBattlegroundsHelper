@@ -90,6 +90,17 @@ export interface TavernRules {
    */
   readonly copiesBonus: readonly number[];
 
+  /**
+   * Слово, которым текст тринкета называет племя.
+   *
+   * У тринкетов в снапшоте нет поля `races` — племя написано словами
+   * в тексте карты («give a friendly Dragon +X/+Y»). Это данные из
+   * опубликованного текста, а не выдуманная таблица ценности: совет по
+   * тринкетам ранжирует их по числу своих миньонов упомянутых племён
+   * и честно отказывается оценивать эффекты вне племён.
+   */
+  readonly trinketTribeWords: Readonly<Record<string, string>>;
+
   /** Ниже этой ценности покупка считается пустой, и лучше обновить витрину. */
   readonly rerollWhenBestBelow: number;
   /**
@@ -148,6 +159,19 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],
+
+  trinketTribeWords: {
+    MURLOC: 'murlocs?',
+    DEMON: 'demons?',
+    MECHANICAL: 'mechs?',
+    ELEMENTAL: 'elementals?',
+    BEAST: 'beasts?',
+    PIRATE: 'pirates?',
+    DRAGON: 'dragons?',
+    QUILBOAR: 'quilboars?',
+    NAGA: 'nagas?',
+    UNDEAD: 'undead',
+  },
 
   rerollWhenBestBelow: 6,
   freeze: {

@@ -10,6 +10,7 @@ import {
   positionLine,
   recommendationLine,
   situationLine,
+  trinketLine,
 } from '../ui/format.js';
 
 /**
@@ -74,14 +75,25 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   const { state } = input;
   if (state.hero === null) return EMPTY_VIEW;
 
+  // Открытый выбор тринкета вытесняет обычные советы: в игре это модальный
+  // экран, и пока он открыт, игрок решает именно его.
+  const trinkets = input.tavern?.trinkets ?? [];
+  const actions: OverlayLine[] =
+    trinkets.length > 0
+      ? trinkets.map((t, i) => ({
+          text: `ВЗЯТЬ? ${trinketLine(t)}`,
+          tone: i === 0 && t.tribeMinions > 0 ? 'good' : 'normal',
+        }))
+      : (input.tavern?.recommendations ?? [])
+          .slice(0, MAX_ACTIONS)
+          .map((r, i) => ({ text: recommendationLine(r, cards), tone: i === 0 ? 'good' : 'normal' }));
+
   return {
     active: true,
     header: situationLine(state),
     board: state.board.map((m) => minionLabel(m, cards)),
     shop: state.shop.map((m) => minionLabel(m, cards)),
-    actions: (input.tavern?.recommendations ?? [])
-      .slice(0, MAX_ACTIONS)
-      .map((r, i) => ({ text: recommendationLine(r, cards), tone: i === 0 ? 'good' : 'normal' })),
+    actions,
     position: positionView(input, cards),
   };
 }

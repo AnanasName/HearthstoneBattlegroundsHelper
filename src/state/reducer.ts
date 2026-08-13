@@ -553,6 +553,39 @@ export function createReducer(players: Players): Reducer {
     // Различает их только фаза: сама зона и контроллер одинаковые.
     const theirs = phase === 'gameOver' ? [] : collectMinions('PLAY', false, enchantmentsByHost);
 
+    // Открытое предложение тринкетов: варианты показаны, выбор ещё не сделан.
+    // Маркер — BACON_TRINKET=1 при жизни в SETASIDE: на выборе клиент уводит
+    // все варианты в REMOVEDFROMGAME (проверено на part6 по сущностям
+    // 3371–3374 — и взятый, и отвергнутые). USE_DISCOVER_VISUALS для этого
+    // не годится: он стоит лишь у части вариантов, у двух из четырёх.
+    const trinketOffer = [...entities.values()]
+      .filter(
+        (e) =>
+          e.cardType === 'BATTLEGROUND_TRINKET' &&
+          e.controller === self &&
+          e.zone === 'SETASIDE' &&
+          e.cardId !== '' &&
+          flag(e, 'BACON_TRINKET'),
+      )
+      .sort((a, b) => a.id - b.id)
+      .map((e) => ({ entityId: e.id, cardId: e.cardId }));
+
+    // Взятые тринкеты всех игроков — теги на сущностях героев. Один игрок
+    // может быть представлен несколькими сущностями героя (пересадки,
+    // дубликаты в SETASIDE), поэтому значения сливаются в множество.
+    const trinketsByPlayer: Record<number, number[]> = {};
+    for (const e of entities.values()) {
+      const first = e.tags.get('BACON_FIRST_TRINKET_DATABASE_ID') ?? 0;
+      const second = e.tags.get('BACON_SECOND_TRINKET_DATABASE_ID') ?? 0;
+      if (first <= 0 && second <= 0) continue;
+      const owner = heroOwner.get(e.id) ?? e.tags.get('PLAYER_ID');
+      if (owner === undefined) continue;
+      const known = (trinketsByPlayer[owner] ??= []);
+      for (const dbfId of [first, second]) {
+        if (dbfId > 0 && !known.includes(dbfId)) known.push(dbfId);
+      }
+    }
+
     return {
       ...EMPTY_STATE,
       phase,
@@ -572,6 +605,8 @@ export function createReducer(players: Players): Reducer {
       wonLastCombat,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
       lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
+      trinketOffer,
+      trinketsByPlayer,
       finalPlace,
       playerBattleTag: players.selfName,
       playerId: self,

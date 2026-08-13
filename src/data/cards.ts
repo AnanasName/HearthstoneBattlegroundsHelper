@@ -16,7 +16,9 @@ import { readFileSync } from 'node:fs';
 /** Поля снапшота, которые нам нужны. Остальные игнорируются. */
 interface RawCard {
   readonly id?: unknown;
+  readonly dbfId?: unknown;
   readonly name?: unknown;
+  readonly text?: unknown;
   readonly techLevel?: unknown;
   readonly races?: unknown;
   readonly race?: unknown;
@@ -28,7 +30,11 @@ interface RawCard {
 
 export interface CardInfo {
   readonly id: string;
+  /** Числовой идентификатор из базы игры — им лог называет тринкеты. */
+  readonly dbfId: number | null;
   readonly name: string;
+  /** Текст карты. Нужен тринкетам: их племя написано словами в тексте. */
+  readonly text: string | null;
   /** Тир таверны. `null` у карт вне Battlegrounds. */
   readonly techLevel: number | null;
   /**
@@ -50,6 +56,13 @@ export const RACE_ALL = 'ALL';
 export interface CardIndex {
   /** Карта по идентификатору. `null`, если такой в снапшоте нет. */
   readonly info: (cardId: string) => CardInfo | null;
+  /**
+   * Карта по dbfId.
+   *
+   * Лог называет тринкеты именно так: теги
+   * `BACON_FIRST/SECOND_TRINKET_DATABASE_ID` несут числовой идентификатор.
+   */
+  readonly infoByDbfId: (dbfId: number) => CardInfo | null;
   readonly size: number;
 }
 
@@ -64,25 +77,31 @@ function asRaces(card: RawCard): string[] {
 
 export function createCardIndex(raw: readonly unknown[]): CardIndex {
   const byId = new Map<string, CardInfo>();
+  const byDbfId = new Map<number, CardInfo>();
 
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue;
     const card = item as RawCard;
     if (typeof card.id !== 'string' || card.id === '') continue;
 
-    byId.set(card.id, {
+    const info: CardInfo = {
       id: card.id,
+      dbfId: asNumber(card.dbfId),
       name: typeof card.name === 'string' ? card.name : card.id,
+      text: typeof card.text === 'string' ? card.text : null,
       techLevel: asNumber(card.techLevel),
       races: asRaces(card),
       isBaconPool: card.isBaconPool === true,
       attack: asNumber(card.attack),
       health: asNumber(card.health),
-    });
+    };
+    byId.set(card.id, info);
+    if (info.dbfId !== null) byDbfId.set(info.dbfId, info);
   }
 
   return {
     size: byId.size,
+    infoByDbfId: (dbfId) => byDbfId.get(dbfId) ?? null,
     info: (cardId) => {
       const direct = byId.get(cardId);
       if (direct !== undefined) return direct;

@@ -1,5 +1,5 @@
 import { RACE_ALL, type CardIndex } from '../../data/cards.js';
-import type { GameState, Minion } from '../../state/types.js';
+import type { GameState, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, type TavernRules } from './rules.js';
 
 /**
@@ -64,6 +64,15 @@ export interface ValueBreakdown {
   readonly copiesOwned: number;
 }
 
+/** Один вариант открытого предложения тринкетов с оценкой. */
+export interface TrinketAdvice {
+  readonly offer: TrinketOffer;
+  readonly name: string;
+  /** Своих миньонов из племён, которые текст тринкета называет словами. */
+  readonly tribeMinions: number;
+  readonly reason: string;
+}
+
 export interface TavernAdvice {
   /** Рекомендации по убыванию очков. Первая — то, что советуем сделать. */
   readonly recommendations: readonly Recommendation[];
@@ -72,6 +81,13 @@ export interface TavernAdvice {
   readonly targetTier: number;
   /** Ценность каждого миньона витрины — в том же порядке, что и магазин. */
   readonly shopValues: readonly { readonly minion: Minion; readonly value: ValueBreakdown }[];
+  /**
+   * Открытое предложение тринкетов, лучший первым. Пусто, когда выбора нет.
+   *
+   * Отдельным полем, а не рекомендацией в общем списке: в игре это модальный
+   * выбор со своим экраном, он не соревнуется с покупками за золото.
+   */
+  readonly trinkets: readonly TrinketAdvice[];
 }
 
 export interface TavernAdvisorDeps {
@@ -526,6 +542,55 @@ export function freezeRule(
 }
 
 /**
+ * Совет по выбору тринкета.
+ *
+ * Честная граница возможностей: у тринкета нет ни статов, ни племени в данных —
+ * только текст. Из текста извлекаются упомянутые словами племена
+ * (таблица `trinketTribeWords`), и варианты ранжируются по числу своих
+ * миньонов этих племён. Про эффекты вне племён совет прямо говорит,
+ * что оценить их не берётся, — это лучше выдуманного рейтинга.
+ */
+export function trinketAdvice(
+  state: GameState,
+  { cards }: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): TrinketAdvice[] {
+  if (state.trinketOffer.length === 0) return [];
+
+  const scored = state.trinketOffer.map((offer) => {
+    const info = cards.info(offer.cardId);
+    const name = info?.name ?? offer.cardId;
+    const text = info?.text ?? '';
+
+    const tribes = Object.entries(rules.trinketTribeWords)
+      .filter(([, word]) => new RegExp(`\\b(?:${word})\\b`, 'i').test(text))
+      .map(([race]) => race);
+
+    const tribeMinions =
+      tribes.length === 0
+        ? 0
+        : state.board.filter((m) => {
+            const races = racesOf(m, cards);
+            return races.includes(RACE_ALL) || races.some((r) => tribes.includes(r));
+          }).length;
+
+    return {
+      offer,
+      name,
+      tribeMinions,
+      reason:
+        tribes.length === 0
+          ? 'эффект вне племён — оценить не берёмся'
+          : tribeMinions === 0
+            ? `для племени ${tribes.join('/')}, а своих таких нет`
+            : `упоминает ${tribes.join('/')} — своих ${String(tribeMinions)}`,
+    };
+  });
+
+  return scored.sort((a, b) => b.tribeMinions - a.tribeMinions);
+}
+
+/**
  * Совет по таверне целиком.
  *
  * Возвращает `null` вне фазы таверны: советовать покупки во время боя
@@ -565,5 +630,6 @@ export function adviseTavern(
       minion,
       value: minionValue(minion, state, deps, rules),
     })),
+    trinkets: trinketAdvice(state, deps, rules),
   };
 }
