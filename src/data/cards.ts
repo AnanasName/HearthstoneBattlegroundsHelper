@@ -26,6 +26,7 @@ interface RawCard {
   readonly attack?: unknown;
   readonly health?: unknown;
   readonly type?: unknown;
+  readonly mechanics?: unknown;
 }
 
 export interface CardInfo {
@@ -48,6 +49,21 @@ export interface CardInfo {
   readonly isBaconPool: boolean;
   readonly attack: number | null;
   readonly health: number | null;
+  /**
+   * Тип карты, приведённый к верхнему регистру: MINION, SPELL,
+   * BATTLEGROUND_TRINKET… В снапшоте регистр смешанный («Minion»,
+   * «Battleground_trinket»), сравнение по сырому значению молча не совпадало бы.
+   */
+  readonly type: string | null;
+  /**
+   * Магнитный миньон — механика `MODULAR` в снапшоте.
+   *
+   * Проверено на part9: у Accord-o-Tron, Lullabot, Enchanted Sentinel
+   * `mechanics` содержит MODULAR. У Glambot и тринкета Scraper Sticker
+   * MODULAR стоит только в `referencedTags` — они про магнетизм говорят,
+   * но сами не магнитятся, и здесь это честно `false`.
+   */
+  readonly magnetic: boolean;
 }
 
 /** Племя, которое считается своим для любого другого. */
@@ -94,6 +110,8 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
       isBaconPool: card.isBaconPool === true,
       attack: asNumber(card.attack),
       health: asNumber(card.health),
+      type: typeof card.type === 'string' ? card.type.toUpperCase() : null,
+      magnetic: Array.isArray(card.mechanics) && card.mechanics.includes('MODULAR'),
     };
     byId.set(card.id, info);
     if (info.dbfId !== null) byDbfId.set(info.dbfId, info);
