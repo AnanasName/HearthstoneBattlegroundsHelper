@@ -225,6 +225,14 @@ export interface GameState {
   /** Тир таверны из `PLAYER_TECH_LEVEL`. */
   readonly techLevel: number;
   /**
+   * Ход, на котором таверна поднялась в последний раз.
+   *
+   * Нужен правилу заморозки: в ход подъёма свежая витрина будет уже нового
+   * тира, и держать витрину старого ради «собираемого племени» — потеря
+   * (part11, ход 9: заморозка наги сразу после подъёма на третий тир).
+   */
+  readonly techLevelUpTurn: number | null;
+  /**
    * Сколько сейчас стоит поднять таверну.
    *
    * Читается из кнопки апгрейда — сущности `TB_BaconShopTechUp0N_Button`
@@ -260,6 +268,15 @@ export interface GameState {
   readonly hand: readonly Minion[];
   /** Своя рука: заклинания. Отдельно — у них нет ни статов, ни борда. */
   readonly handSpells: readonly HandSpell[];
+  /**
+   * Заклинания в витрине таверны — монетка за 1, баффы за 1–2.
+   *
+   * Те же чужие сущности `CARDTYPE=SPELL` в `PLAY`, что и миньоны магазина,
+   * но с тегом `COST` — в отличие от миньонов, цена заклинания в логе есть
+   * (part11: монетка BG28_810 у бармена с COST=1). Служебные заклинания
+   * клиента (`TB_BaconShop_*` — перетаскивание, проверка троек) отсеяны.
+   */
+  readonly shopSpells: readonly HandSpell[];
   /**
    * Магазин таверны. Непуст только в фазе `tavern`.
    *
@@ -363,6 +380,7 @@ export const EMPTY_STATE: GameState = {
   phase: 'tavern',
   turn: 0,
   techLevel: 1,
+  techLevelUpTurn: null,
   tavernUpgradeCost: null,
   tavernUpgradeTarget: null,
   maxTechLevel: null,
@@ -373,6 +391,7 @@ export const EMPTY_STATE: GameState = {
   board: [],
   hand: [],
   handSpells: [],
+  shopSpells: [],
   shop: [],
   opponentBoard: [],
   anomalyCardId: null,

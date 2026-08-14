@@ -144,6 +144,7 @@ export function createReducer(players: Players): Reducer {
   let phase: Phase = 'tavern';
   let turn = 0;
   let techLevel = 1;
+  let techLevelUpTurn: number | null = null;
   let goldTotal = 0;
   let goldSpent = 0;
   let anomalyCardId: string | null = null;
@@ -343,7 +344,12 @@ export function createReducer(players: Players): Reducer {
         if (subject.kind === 'game' && value === 'FINAL_GAMEOVER') phase = 'gameOver';
         return;
       case 'PLAYER_TECH_LEVEL':
-        if (subject.kind === 'self' && n !== null) techLevel = n;
+        if (subject.kind === 'self' && n !== null) {
+          // Ход подъёма запоминается для правила заморозки: в этот ход
+          // свежая витрина будет уже нового тира.
+          if (n > techLevel) techLevelUpTurn = turn;
+          techLevel = n;
+        }
         return;
       case 'RESOURCES':
         if (subject.kind === 'self' && n !== null) goldTotal = n;
@@ -663,7 +669,7 @@ export function createReducer(players: Players): Reducer {
     return none;
   };
 
-  /** Кнопка тёмного дара, если она сейчас есть. */
+  /** Кнопка тёмного дара, если она сейчас есть И заряды не исчерпаны. */
   const darkGiftButton = (): number | null => {
     const self = players.selfPlayerId;
     if (self === null) return null;
@@ -671,10 +677,47 @@ export function createReducer(players: Players): Reducer {
     for (const e of entities.values()) {
       if (e.controller !== self || e.zone !== 'PLAY') continue;
       if (e.cardId !== DARK_GIFT_BUTTON) continue;
+      // Оставшиеся дары — TAG_SCRIPT_DATA_NUM_2 на кнопке: 3 при создании,
+      // по единице за нажатие (part11: 3 → 2 → 1 → 0). После нуля кнопка
+      // остаётся в PLAY с ценой, и совет по ней был тихо неверным.
+      const charges = e.tags.get('TAG_SCRIPT_DATA_NUM_2');
+      if (charges !== undefined && charges <= 0) return null;
       const cost = e.tags.get('COST') ?? 0;
       return cost > 0 ? cost : null;
     }
     return null;
+  };
+
+  /**
+   * Заклинания в зоне: рука своя, витрина чужая.
+   *
+   * Белый список по типу, как у миньонов, — но у заклинаний ДВА типа:
+   * в руке `CARDTYPE=SPELL`, в витрине — `BATTLEGROUND_SPELL` (part11:
+   * монетка таверны у бармена за 1 создаётся именно так). Разбор, знающий
+   * один тип, молча теряет витринные. Служебные заклинания клиента
+   * (`TB_BaconShop_*` — перетаскивание покупки, проверка троек) картами
+   * не являются и отсеиваются по префиксу.
+   */
+  const collectSpells = (zone: string, ownedBySelf: boolean) => {
+    const self = players.selfPlayerId;
+    if (self === null) return [];
+    return [...entities.values()]
+      .filter(
+        (e) =>
+          (e.cardType === 'SPELL' || e.cardType === 'BATTLEGROUND_SPELL') &&
+          e.zone === zone &&
+          (ownedBySelf ? e.controller === self : e.controller !== self) &&
+          e.cardId !== '' &&
+          !e.cardId.startsWith('TB_BaconShop'),
+      )
+      .sort((a, b) => a.zonePos - b.zonePos)
+      .map((e) => ({
+        entityId: e.id,
+        cardId: e.cardId,
+        cost: e.tags.get('COST') ?? 0,
+        scriptData: [1, 2, 3, 4].map((i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null),
+        unplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
+      }));
   };
 
   const snapshot = (): GameState => {
@@ -730,6 +773,7 @@ export function createReducer(players: Players): Reducer {
       phase,
       turn,
       techLevel,
+      techLevelUpTurn,
       tavernUpgradeCost: upgrade.cost,
       tavernUpgradeTarget: upgrade.target,
       maxTechLevel,
@@ -762,7 +806,7 @@ export function createReducer(players: Players): Reducer {
                   ? o
                   : {
                       ...o,
-                      scriptData: [1, 2].map(
+                      scriptData: [1, 2, 3, 4].map(
                         (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
                       ),
                     };
@@ -777,27 +821,10 @@ export function createReducer(players: Players): Reducer {
       // Заклинания руки — отдельным списком: белый список CARDTYPE=SPELL,
       // как у миньонов. Подтверждено на part10: монетка таверны BG28_810
       // создаётся в HAND с CARDTYPE=SPELL и живым тегом COST.
-      handSpells:
-        self === null
-          ? []
-          : [...entities.values()]
-              .filter(
-                (e) =>
-                  e.cardType === 'SPELL' &&
-                  e.zone === 'HAND' &&
-                  e.controller === self &&
-                  e.cardId !== '',
-              )
-              .sort((a, b) => a.zonePos - b.zonePos)
-              .map((e) => ({
-                entityId: e.id,
-                cardId: e.cardId,
-                cost: e.tags.get('COST') ?? 0,
-                scriptData: [1, 2].map(
-                  (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
-                ),
-                unplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
-              })),
+      handSpells: collectSpells('HAND', true),
+      // Заклинания витрины — чужие SPELL в PLAY, только в фазе таверны:
+      // в бою чужой PLAY — борд противника, а не магазин.
+      shopSpells: phase === 'tavern' ? collectSpells('PLAY', false) : [],
       shop: phase === 'tavern' ? theirs : [],
       opponentBoard: phase === 'combat' ? theirs : [],
       hero:

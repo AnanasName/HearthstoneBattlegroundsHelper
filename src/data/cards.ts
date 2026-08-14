@@ -64,6 +64,14 @@ export interface CardInfo {
    * но сами не магнитятся, и здесь это честно `false`.
    */
   readonly magnetic: boolean;
+  /**
+   * Механики карты как есть: DEATHRATTLE, REBORN, MODULAR…
+   *
+   * Нужны советнику для карт-смертников из «Восстания из гробницы»
+   * (part11): розыгрыш в ход получения убивает миньона, и оправдан он
+   * только предсмертным хрипом или перерождением.
+   */
+  readonly mechanics: readonly string[];
 }
 
 /** Племя, которое считается своим для любого другого. */
@@ -112,6 +120,9 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
       health: asNumber(card.health),
       type: typeof card.type === 'string' ? card.type.toUpperCase() : null,
       magnetic: Array.isArray(card.mechanics) && card.mechanics.includes('MODULAR'),
+      mechanics: Array.isArray(card.mechanics)
+        ? card.mechanics.filter((m): m is string => typeof m === 'string')
+        : [],
     };
     byId.set(card.id, info);
     if (info.dbfId !== null) byDbfId.set(info.dbfId, info);
