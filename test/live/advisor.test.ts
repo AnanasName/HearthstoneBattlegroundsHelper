@@ -51,6 +51,7 @@ const HERO: GameState['hero'] = {
   heroPowerCost: null,
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
+  heroPowerHasActivate: false,
 };
 
 function tavernState(patch: Partial<GameState> = {}): GameState {
@@ -207,5 +208,26 @@ describe('живой советник: когда звать и когда бр�
       trinketOffer: [{ entityId: 900, cardId: 'BG30_MagicItem_425', subsetRaces: [] }],
     };
     expect(situationKey(state)).not.toBe(situationKey(withOffer));
+  });
+
+  it('открытие модального выбора карт — новое положение', () => {
+    // part13, ход 5: раскопка «Нового ростка» открылась, не тронув ни золота,
+    // ни бордов. Без выбора в ключе советник не пересчитался, и оверлей
+    // показывал «НИЧЕГО» поверх трёх вариантов — на что игрок и указал.
+    const state = tavernState();
+    const withChoice = {
+      ...state,
+      openChoice: {
+        id: 2,
+        sourceCardId: 'BG33_101',
+        options: [
+          { entityId: 1202, cardId: 'BG26_146' },
+          { entityId: 1203, cardId: 'BG25_001' },
+        ],
+      },
+    };
+    expect(situationKey(state)).not.toBe(situationKey(withChoice));
+    // Закрытие выбора — тоже новое положение: старые «ВЫБРАТЬ?» гасятся.
+    expect(situationKey(withChoice)).not.toBe(situationKey({ ...withChoice, openChoice: null }));
   });
 });

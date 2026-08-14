@@ -172,6 +172,24 @@ export interface TavernRules {
   readonly heroPowerMinionWords: readonly string[];
 
   /**
+   * Признаки «сила обновляет витрину» в тексте силы героя — и цена такого
+   * напоминания в очках.
+   *
+   * Случай part13 (Хроми, «Мана в минуту»: «Refresh the Tavern with Tavern
+   * spells», активная, без тега COST): бесплатную силу прежнее правило
+   * отсекало на входе условием `cost > 0`, и игрок за партию не увидел
+   * ни одного напоминания — на что и указал. Советуется только бесплатная
+   * И активная (тег `HAS_ACTIVATE_POWER`) сила: за платные и пассивные
+   * вне «даёт миньона» совет по-прежнему не берётся судить.
+   *
+   * Очки малые сознательно: напоминание должно всплывать, когда покупки
+   * сделаны и список действий пустеет, — то есть к концу хода, когда
+   * бесплатное обновление уже ничего не ломает.
+   */
+  readonly heroPowerRefreshWords: readonly string[];
+  readonly freeHeroPowerValue: number;
+
+  /**
    * Очков ценности в одном золотом.
    *
    * Курс выводится из самих правил, а не выдуман: покупка за 3 золота даёт
@@ -294,6 +312,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     // слова «minion» в тексте силы нет вовсе.
     'discover[^.]*\\bbuddy\\b',
   ],
+
+  heroPowerRefreshWords: ['refresh[^.]*tavern'],
+  freeHeroPowerValue: 2,
 
   goldPointValue: 3,
 

@@ -6,6 +6,7 @@ import {
   choiceAdvice,
   copiesOwned,
   darkGiftRule,
+  freeHeroPowerRule,
   freezeRule,
   heroPowerRule,
   levelUpRule,
@@ -63,6 +64,7 @@ const hero = (health: number, damage = 0, armor = 0): Hero => ({
   heroPowerCost: null,
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
+  heroPowerHasActivate: false,
 });
 
 function state(patch: Partial<GameState> = {}): GameState {
@@ -902,10 +904,39 @@ describe('заклинания руки', () => {
       { id: 'GOLD', text: 'Gain 2 Gold.' },
       { id: 'NONE', text: 'Discover a minion.' },
     ]);
-    expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false });
-    expect(spellEffect('PH', [10, null], idx)).toEqual({ gold: 0, stats: 10, divineShield: true });
-    expect(spellEffect('GOLD', [], idx)).toEqual({ gold: 2, stats: 0, divineShield: false });
+    const plain = { destroysFriendly: false, destroyRace: null };
+    expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
+    expect(spellEffect('PH', [10, null], idx)).toEqual({
+      gold: 0,
+      stats: 10,
+      divineShield: true,
+      ...plain,
+    });
+    expect(spellEffect('GOLD', [], idx)).toEqual({ gold: 2, stats: 0, divineShield: false, ...plain });
     expect(spellEffect('NONE', [], idx)).toBeNull();
+  });
+
+  it('spellEffect: «Destroy a friendly Undead» — жертва, и её племя из текста', () => {
+    // «Разделка туши», part13, ход 21: заклинание с баффом всей нежити
+    // сперва уничтожает своего миньона-нежить, и цель тут — жертва.
+    const idx = createCardIndex([
+      {
+        id: 'BUTCHER',
+        text: 'Destroy a friendly Undead. Your Undead have +{0}/+{1} this game.',
+      },
+      { id: 'ANYKILL', text: 'Destroy a friendly minion. Gain +2/+2.' },
+    ]);
+    expect(spellEffect('BUTCHER', [6, 2], idx)).toEqual({
+      gold: 0,
+      stats: 8,
+      divineShield: false,
+      destroysFriendly: true,
+      destroyRace: 'UNDEAD',
+    });
+    expect(spellEffect('ANYKILL', [], idx)).toMatchObject({
+      destroysFriendly: true,
+      destroyRace: null,
+    });
   });
 
   it('монетка советуется, когда её золото открывает покупку (part10, ход 5)', () => {
@@ -1218,9 +1249,62 @@ describe('магнетизм', () => {
     ),
   ];
 
+  const magnetInHand = minion(9, { cardId: 'MAGNET', techLevel: 3 });
+
   it('цель примагничивания — самый крупный свой мех', () => {
-    expect(magnetizeTarget(fullMechBoard, magCards)?.cardId).toBe('MECH_BIG');
-    expect(magnetizeTarget([minion(1, { cardId: 'BEAST_1' })], magCards)).toBeNull();
+    expect(magnetizeTarget(magnetInHand, fullMechBoard, magCards)?.cardId).toBe('MECH_BIG');
+    expect(magnetizeTarget(magnetInHand, [minion(1, { cardId: 'BEAST_1' })], magCards)).toBeNull();
+  });
+
+  // «Рука-протез» из part13: Magnetic + Reborn, магнитится к мехам и нежити.
+  const giftCards = createCardIndex([
+    {
+      id: 'HAND_P',
+      name: 'Рука-протез',
+      techLevel: 3,
+      races: ['MECH', 'UNDEAD'],
+      isBaconPool: true,
+      mechanics: ['MODULAR', 'REBORN'],
+      text: '<b>Magnetic</b>, <b>Reborn</b> Can <b>Magnetize</b> to Mechs or Undead.',
+    },
+    { id: 'MECH_SMALL', name: 'Мелкий мех', techLevel: 2, races: ['MECH'], isBaconPool: true },
+    { id: 'MECH_BIG', name: 'Большой мех', techLevel: 4, races: ['MECH'], isBaconPool: true },
+    { id: 'UNDEAD_1', name: 'Нежить', techLevel: 2, races: ['UNDEAD'], isBaconPool: true },
+  ]);
+  const giftMagnet = minion(9, { cardId: 'HAND_P', techLevel: 3 });
+
+  it('дар магнита не дарится тому, у кого он уже есть (part13, ход 19)', () => {
+    // Большой мех уже перерождён прошлой такой же рукой — новый дар пропал бы.
+    const withReborn = [
+      minion(1, { cardId: 'MECH_BIG', attack: 38, health: 40, reborn: true }),
+      minion(2, { cardId: 'MECH_SMALL', attack: 10, health: 7 }),
+    ];
+    expect(magnetizeTarget(giftMagnet, withReborn, giftCards)?.cardId).toBe('MECH_SMALL');
+
+    // Перерождены все — дар пропадает в любом случае, а статы складываются
+    // всегда: носитель снова просто крупнейший.
+    const allReborn = withReborn.map((m) => ({ ...m, reborn: true }));
+    expect(magnetizeTarget(giftMagnet, allReborn, giftCards)?.cardId).toBe('MECH_BIG');
+  });
+
+  it('племена носителя читаются с карты магнита: «к мехам или нежити»', () => {
+    const undeadOnly = [minion(1, { cardId: 'UNDEAD_1', attack: 5, health: 5 })];
+    // «Рука-протез» магнитится к нежити, обычный магнит — нет.
+    expect(magnetizeTarget(giftMagnet, undeadOnly, giftCards)?.cardId).toBe('UNDEAD_1');
+    expect(magnetizeTarget(magnetInHand, undeadOnly, magCards)).toBeNull();
+  });
+
+  it('магнитному в руке носитель называется и на неполном борде (part13, ход 15)', () => {
+    const s = state({
+      board: [minion(1, { cardId: 'MECH_BIG', attack: 10, health: 10 })],
+      hand: [minion(9, { cardId: 'MAGNET', techLevel: 3 })],
+    });
+    const play = playRules(s, magDeps)[0];
+    // Прежде носитель назывался только на полном борде, и игрок решал
+    // «телом или примагнитить» вслепую — на что и указал.
+    expect(play?.magnetizeTo?.cardId).toBe('MECH_BIG');
+    expect(play?.requiresSlot).toBe(false);
+    expect(play?.sellFirst).toBeNull();
   });
 
   it('магнитный мех на полном борде идёт через примагничивание, не через продажу', () => {
@@ -1499,5 +1583,89 @@ describe('совет целиком', () => {
     const s = state({ hand: [shopMinion(9, 'DRAGON_1', { attack: 5, health: 5 })] });
     const actions = adviseTavern(s, deps)?.recommendations.map((r) => r.action) ?? [];
     expect(actions).toContain('play');
+  });
+});
+
+describe('заклинание-жертва: «Destroy a friendly …»', () => {
+  const idx = createCardIndex([
+    {
+      id: 'BUTCHER',
+      name: 'Разделка туши',
+      text: 'Destroy a friendly Undead. Your Undead have +{0}/+{1} this game.',
+    },
+    { id: 'GOLEM', name: 'Голем', races: ['MECH'], isBaconPool: true, techLevel: 6 },
+    { id: 'UND_BIG', name: 'Крупная нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 3 },
+    { id: 'UND_SMALL', name: 'Мелкая нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 1 },
+  ]);
+  const butcher = { entityId: 50, cardId: 'BUTCHER', cost: 2, scriptData: [6, 2], unplayable: false };
+
+  it('целится в наименьшего своего подходящего племени (part13, ход 21)', () => {
+    const s = state({
+      gold: 5,
+      board: [
+        minion(1, { cardId: 'GOLEM', attack: 200, health: 122 }),
+        minion(2, { cardId: 'UND_BIG', attack: 23, health: 15 }),
+        minion(3, { cardId: 'UND_SMALL', attack: 3, health: 1 }),
+      ],
+      shopSpells: [butcher],
+    });
+    const rec = shopSpellRules(s, { cards: idx })[0];
+    // Жертва — наименьшая нежить. Прежний совет целил «на» крупнейшего
+    // своего: предлагал уничтожить голема 200/122, к тому же не-нежить.
+    expect(rec?.targetMinion?.cardId).toBe('UND_SMALL');
+    expect(rec?.reason).toContain('жертву');
+  });
+
+  it('без подходящей жертвы совета нет вовсе', () => {
+    const s = state({
+      gold: 5,
+      board: [minion(1, { cardId: 'GOLEM', attack: 200, health: 122 })],
+      shopSpells: [butcher],
+    });
+    expect(shopSpellRules(s, { cards: idx })).toHaveLength(0);
+  });
+});
+
+describe('бесплатная сила героя', () => {
+  const chromieCards = createCardIndex([
+    { id: 'MANA_PM', name: 'Мана в минуту', text: 'Refresh the Tavern\nwith Tavern spells.' },
+    { id: 'DMG_P', name: 'Урон', text: 'Deal 3 damage to a minion.' },
+  ]);
+  const chromie = (patch: Partial<Hero> = {}): Hero => ({
+    ...hero(30),
+    heroPowerCardId: 'MANA_PM',
+    heroPowerEntityId: 136,
+    heroPowerCost: null,
+    heroPowerHasActivate: true,
+    ...patch,
+  });
+  const chromieDeps = { cards: chromieCards };
+
+  it('бесплатная активная сила-обновление советуется (part13, Хроми)', () => {
+    const rec = freeHeroPowerRule(state({ hero: chromie() }), chromieDeps);
+    expect(rec?.action).toBe('heroPower');
+    expect(rec?.cost).toBe(0);
+    expect(rec?.reason).toContain('обновляет витрину');
+  });
+
+  it('нажатая, платная, пассивная или запертая — молчание', () => {
+    expect(
+      freeHeroPowerRule(state({ hero: chromie({ heroPowerUsedThisTurn: true }) }), chromieDeps),
+    ).toBeNull();
+    expect(
+      freeHeroPowerRule(state({ hero: chromie({ heroPowerCost: 2 }) }), chromieDeps),
+    ).toBeNull();
+    expect(
+      freeHeroPowerRule(state({ hero: chromie({ heroPowerHasActivate: false }) }), chromieDeps),
+    ).toBeNull();
+    expect(
+      freeHeroPowerRule(state({ hero: chromie({ heroPowerUnplayable: true }) }), chromieDeps),
+    ).toBeNull();
+  });
+
+  it('бесплатная сила вне «обновить витрину» — по-прежнему не берёмся судить', () => {
+    expect(
+      freeHeroPowerRule(state({ hero: chromie({ heroPowerCardId: 'DMG_P' }) }), chromieDeps),
+    ).toBeNull();
   });
 });

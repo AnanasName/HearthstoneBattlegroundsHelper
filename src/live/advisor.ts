@@ -128,6 +128,12 @@ export function situationKey(state: GameState): string {
     // ни бордов. Без него в ключе оверлей не просыпался бы на открытие
     // выбора и совет по тринкету никто бы не увидел.
     state.trinketOffer.map((t) => t.entityId).join(','),
+    // Модальный выбор карт — та же болезнь (part13, ход 5): раскопка
+    // «Нового ростка» открылась, не тронув ни золота, ни бордов, советник
+    // не пересчитался, и оверлей показывал «НИЧЕГО» поверх трёх вариантов.
+    state.openChoice === null
+      ? '-'
+      : `${String(state.openChoice.id)}:${state.openChoice.options.map((o) => o.entityId).join(',')}`,
   ].join('|');
 }
 

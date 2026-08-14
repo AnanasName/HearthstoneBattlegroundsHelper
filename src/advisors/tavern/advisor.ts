@@ -275,26 +275,71 @@ export function minionValue(
 }
 
 /**
- * Лучший носитель для магнитного механизма — самый крупный свой мех.
+ * Ключевые слова, которые второй раз не дарятся: они у миньона либо есть,
+ * либо нет, и магнитить их носителю, у которого они уже есть, — потеря.
+ * Слева — механика в снапшоте, справа — живой признак миньона из лога.
+ */
+const BINARY_KEYWORD_FLAGS: readonly (readonly [string, (m: Minion) => boolean])[] = [
+  ['REBORN', (m) => m.reborn],
+  ['DIVINE_SHIELD', (m) => m.divineShield],
+  ['TAUNT', (m) => m.taunt],
+  ['WINDFURY', (m) => m.windfury],
+  ['POISONOUS', (m) => m.poisonous],
+  ['VENOMOUS', (m) => m.venomous],
+  ['STEALTH', (m) => m.stealth],
+];
+
+/**
+ * Лучший носитель для магнитного миньона.
  *
- * Магнитный миньон можно не ставить в отдельный слот, а присоединить к меху
- * на борде: статы и способности перейдут носителю. Цель — мех с наибольшей
- * суммой статов: усиление достаётся тому, кто дольше всех живёт в бою.
- * Тонкости вроде «щит лучше на быстром» правилам не известны, и это сказано
- * в docs/tavern.md.
+ * Магнитный миньон можно не ставить в отдельный слот, а присоединить
+ * к своему миньону: статы и способности перейдут носителю.
+ *
+ * Кому магнититься — читается с карты магнита, не выдумывается:
+ *
+ *  - **племена носителя** — поле `races` самого магнита: обычный магнит
+ *    несёт `MECH`, а «Рука-протез» — `MECH, UNDEAD` («Can Magnetize to
+ *    Mechs or Undead», part13);
+ *  - **дар магнита** — его механики: если магнит дарит перерождение,
+ *    носитель, у которого перерождение уже есть, получит его впустую.
+ *    На part13 (ход 19) «Рука-протез» советовалась на Rescue Bot, уже
+ *    перерождённого прошлой такой же рукой, — на что игрок и указал.
+ *
+ * Среди пригодных носителей: сперва самый крупный из тех, кому дар магнита
+ * не пропадёт; если дар пропадает у всех (или дара нет) — просто самый
+ * крупный: статы складываются всегда. Тонкости вроде «щит лучше на быстром»
+ * правилам по-прежнему не известны — сказано в docs/tavern.md.
  */
 export function magnetizeTarget(
+  magnet: Minion,
   board: readonly Minion[],
   cards: CardIndex,
 ): Minion | null {
-  const mechs = board.filter((m) => {
+  const magnetInfo = cards.info(magnet.cardId);
+  const carrierRaces =
+    magnetInfo !== null && magnetInfo.races.length > 0
+      ? magnetInfo.races.filter((r) => r !== RACE_ALL)
+      : ['MECH'];
+
+  const eligible = board.filter((m) => {
     const races = racesOf(m, cards);
-    return races.includes(RACE_ALL) || races.includes('MECH');
+    return races.includes(RACE_ALL) || carrierRaces.some((r) => races.includes(r));
   });
-  if (mechs.length === 0) return null;
-  return mechs.reduce((a, b) =>
-    (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+  if (eligible.length === 0) return null;
+
+  const largest = (list: readonly Minion[]): Minion =>
+    list.reduce((a, b) =>
+      (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+    );
+
+  const grants = BINARY_KEYWORD_FLAGS.filter(([mech]) =>
+    magnetInfo?.mechanics.includes(mech) ?? false,
   );
+  if (grants.length > 0) {
+    const keepsGift = eligible.filter((m) => grants.some(([, has]) => !has(m)));
+    if (keepsGift.length > 0) return largest(keepsGift);
+  }
+  return largest(eligible);
 }
 
 /** Магнитный ли миньон — механика MODULAR в справочнике. */
@@ -470,10 +515,12 @@ export function buyRules(
       let value = minionValue(minion, state, deps, rules);
       const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
 
-      // Магнитный мех на полном борде места не требует: его примагничивают
-      // к своему меху, и продавать ради него никого не нужно.
-      const host = full && isMagnetic(minion, deps.cards)
-        ? magnetizeTarget(state.board, deps.cards)
+      // Магнитному миньону носитель называется всегда, а не только на полном
+      // борде: игрок решает «телом или примагнитить», и совет без носителя
+      // перекладывал половину решения на него (part13, ход 15). На полном
+      // борде носитель ещё и освобождает от продажи: слот магниту не нужен.
+      const host = isMagnetic(minion, deps.cards)
+        ? magnetizeTarget(minion, state.board, deps.cards)
         : null;
 
       // Сколько копий кандидата стоит на борде: тройка сливает их в золотого,
@@ -528,7 +575,11 @@ export function buyRules(
       if (minion.golden) notes.push('золотой');
       if (host !== null) {
         const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
-        notes.push(`борд полон, но магнитится — примагнитить к ${hostName}`);
+        notes.push(
+          full
+            ? `борд полон, но магнитится — примагнитить к ${hostName}`
+            : `магнитный — носитель ${hostName}`,
+        );
       }
 
       // Тир берётся с тем же запасным вариантом, что и в оценке: у миньона
@@ -597,12 +648,13 @@ export function playRules(
 
     let value = minionValue(minion, state, deps, rules);
 
-    // Магнитный мех при полном борде идёт не через продажу, а через
-    // примагничивание: слот ему не нужен. Случай part9, ход 13: советник
-    // предлагал продать Molten Rock ради Accord-o-Tron, хотя того можно
-    // было присоединить к меху даром.
-    const host = full && isMagnetic(minion, deps.cards)
-      ? magnetizeTarget(state.board, deps.cards)
+    // Магнитный миньон при полном борде идёт не через продажу, а через
+    // примагничивание: слот ему не нужен (part9, ход 13: советник предлагал
+    // продать Molten Rock ради Accord-o-Tron). Носитель называется и на
+    // неполном борде — игрок решает «телом или примагнитить», и совет без
+    // носителя перекладывал половину решения на него (part13, ход 15).
+    const host = isMagnetic(minion, deps.cards)
+      ? magnetizeTarget(minion, state.board, deps.cards)
       : null;
 
     // На полном борде розыгрыш идёт через продажу. Ценность кандидата
@@ -632,7 +684,7 @@ export function playRules(
     }
     if (host !== null) {
       const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
-      notes.push(`борд полон, но магнитится — к ${hostName}`);
+      notes.push(full ? `борд полон, но магнитится — к ${hostName}` : `магнитный — носитель ${hostName}`);
     } else if (full && victim !== null) {
       const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
       notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
@@ -888,6 +940,49 @@ export function heroPowerRule(
 }
 
 /**
+ * Правило бесплатной силы героя.
+ *
+ * Прежнее правило силы отсекает бесплатные на входе (`cost > 0`): оно про
+ * «сила как дешёвая покупка миньона». Но бесплатную активную силу игрок
+ * просто забывает нажать — как монетку в руке. Случай part13 (Хроми,
+ * «Мана в минуту»: «Refresh the Tavern with Tavern spells», HAS_ACTIVATE_POWER
+ * без тега COST): за партию совет не напомнил про силу ни разу — на что
+ * игрок и указал.
+ *
+ * Советуется только бесплатная И активная сила с текстом про обновление
+ * витрины (`heroPowerRefreshWords`): про платные и пассивные вне «даёт
+ * миньона» совет по-прежнему не берётся судить. Очки малые — напоминание
+ * всплывает, когда покупки сделаны и список пустеет, то есть к концу хода.
+ */
+export function freeHeroPowerRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if ((hero.heroPowerCost ?? 0) > 0) return null;
+  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  if (!rules.heroPowerRefreshWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  return {
+    action: 'heroPower',
+    minion: null,
+    score: rules.freeHeroPowerValue,
+    cost: 0,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} бесплатна и обновляет витрину — ` +
+      'нажать, когда нынешняя витрина отработана',
+  };
+}
+
+/**
  * Эффект заклинания, восстановленный из текста карты и тегов сущности.
  *
  * Плейсхолдеры `{0}`/`{1}` в тексте снапшота — это индексы значений
@@ -903,12 +998,24 @@ export interface SpellEffect {
   readonly stats: number;
   /** Даёт ли божественный щит. */
   readonly divineShield: boolean;
+  /**
+   * Заклинание уничтожает СВОЕГО миньона — «Destroy a friendly …».
+   *
+   * Это переворачивает смысл цели: у баффа цель — кого усилить, здесь —
+   * кем пожертвовать. «Разделка туши» (part13, ход 21) советовалась
+   * «на» крупнейшего своего — то есть предлагала уничтожить главную карту
+   * борда, к тому же не проходящую по племени.
+   */
+  readonly destroysFriendly: boolean;
+  /** Племя жертвы — ключ `races` снапшота; `null` — любое. */
+  readonly destroyRace: string | null;
 }
 
 export function spellEffect(
   cardId: string,
   scriptData: readonly (number | null)[],
   cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): SpellEffect | null {
   const text = cards.info(cardId)?.text ?? '';
   if (text === '') return null;
@@ -925,12 +1032,65 @@ export function spellEffect(
   }
   const shield = /divine shield/i.test(text);
 
+  // «Destroy a friendly Undead» — слово после «friendly» сверяется с той же
+  // таблицей слов племён, что у тринкетов; не совпало ни с чем — жертва любая.
+  const destroy = /destroys? a friendly(?:\s+([a-z]+))?/i.exec(text);
+  let destroyRace: string | null = null;
+  if (destroy !== null && destroy[1] !== undefined) {
+    for (const [race, pattern] of Object.entries(rules.tribeTextWords)) {
+      if (new RegExp(`^(?:${pattern})$`, 'i').test(destroy[1])) {
+        destroyRace = race;
+        break;
+      }
+    }
+  }
+
   if (gold === null && stats === 0 && !shield) return null;
   return {
     gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
     stats,
     divineShield: shield,
+    destroysFriendly: destroy !== null,
+    destroyRace,
   };
+}
+
+/**
+ * В кого целить заклинание с целью на своём борде.
+ *
+ * Бафф идёт на крупнейшего своего — усиление достаётся тому, кто дольше
+ * живёт в бою (точечный выбор правила не судят, сказано в docs). Заклинание
+ * с «Destroy a friendly …» целится наоборот: жертва — НАИМЕНЬШИЙ свой
+ * подходящего племени. `null` — целить не в кого, и советовать такое
+ * заклинание нельзя вовсе: у «Разделки туши» без нежити на борде нет
+ * ни жертвы, ни выгоды.
+ */
+function spellTargetOn(
+  effect: SpellEffect,
+  state: GameState,
+  cards: CardIndex,
+): { readonly target: Minion; readonly note: string } | null {
+  if (state.board.length === 0) return null;
+
+  if (effect.destroysFriendly) {
+    const eligible = state.board.filter((m) => {
+      if (effect.destroyRace === null) return true;
+      const races = racesOf(m, cards);
+      return races.includes(RACE_ALL) || races.includes(effect.destroyRace);
+    });
+    if (eligible.length === 0) return null;
+    const victim = eligible.reduce((a, b) =>
+      (b.attack ?? 0) + (b.health ?? 0) < (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+    );
+    const name = cards.info(victim.cardId)?.name ?? victim.cardId;
+    return { target: victim, note: `в жертву ${name} — наименьший свой подходящий` };
+  }
+
+  const target = state.board.reduce((a, b) =>
+    (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+  );
+  const name = cards.info(target.cardId)?.name ?? target.cardId;
+  return { target, note: `цель — ${name}` };
 }
 
 /**
@@ -1023,17 +1183,15 @@ export function spellRules(
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
-    const target = state.board.reduce((a, b) =>
-      (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
-    );
-    const targetName = deps.cards.info(target.cardId)?.name ?? target.cardId;
+    const aimed = spellTargetOn(effect, state, deps.cards);
+    if (aimed === null) return [];
 
     return [
       {
         action: 'play' as const,
         minion: null,
         spellCardId: spell.cardId,
-        targetMinion: target,
+        targetMinion: aimed.target,
         score,
         cost: spell.cost,
         requiresSlot: false,
@@ -1042,7 +1200,7 @@ export function spellRules(
           `${name} — усиление перед боем` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
-          `, цель — ${targetName}`,
+          `, ${aimed.note}`,
       },
     ];
   });
@@ -1094,16 +1252,14 @@ export function shopSpellRules(
       effect.stats * rules.value.perStatPoint +
       (effect.divineShield ? rules.value.divineShield : 0);
     if (score <= 0) return [];
-    const target = state.board.reduce((a, b) =>
-      (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
-    );
-    const targetName = deps.cards.info(target.cardId)?.name ?? target.cardId;
+    const aimed = spellTargetOn(effect, state, deps.cards);
+    if (aimed === null) return [];
     return [
       {
         action: 'buy' as const,
         minion: null,
         spellCardId: spell.cardId,
-        targetMinion: target,
+        targetMinion: aimed.target,
         score,
         cost: spell.cost,
         requiresSlot: false,
@@ -1112,7 +1268,7 @@ export function shopSpellRules(
           `${name} за ${String(spell.cost)} — усиление` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
-          `, цель — ${targetName}`,
+          `, ${aimed.note}`,
       },
     ];
   });
@@ -1391,6 +1547,7 @@ export function playPlan(
   const magnetSteps: PlanStep[] = [];
   for (const { rec, minion } of magnets) {
     const host = magnetizeTarget(
+      minion,
       boardAfter.filter((m) => m.entityId !== minion.entityId),
       deps.cards,
     );
@@ -1429,6 +1586,7 @@ export function adviseTavern(
     ...shopSpellRules(state, deps, rules),
     levelUpRule(state, rules, buys),
     heroPowerRule(state, deps, rules),
+    freeHeroPowerRule(state, deps, rules),
     darkGiftRule(state, rules),
     sellRule(state, deps, rules),
     rerollRule(state, deps, rules),

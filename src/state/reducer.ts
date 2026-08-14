@@ -641,6 +641,7 @@ export function createReducer(players: Players): Reducer {
     heroPowerCost: number | null;
     heroPowerUsedThisTurn: boolean;
     heroPowerUnplayable: boolean;
+    heroPowerHasActivate: boolean;
   }
 
   /** Своя сила героя: живая сущность HERO_POWER под своим контроллером. */
@@ -652,6 +653,7 @@ export function createReducer(players: Players): Reducer {
       heroPowerCost: null,
       heroPowerUsedThisTurn: false,
       heroPowerUnplayable: false,
+      heroPowerHasActivate: false,
     };
     if (self === null) return none;
 
@@ -664,6 +666,9 @@ export function createReducer(players: Players): Reducer {
         heroPowerCost: e.tags.get('COST') ?? null,
         heroPowerUsedThisTurn,
         heroPowerUnplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
+        // part13, «Мана в минуту» Хроми: HAS_ACTIVATE_POWER=1, тега COST нет.
+        // Пассивные силы тега не имеют, и «нажать» их советовать нельзя.
+        heroPowerHasActivate: flag(e, 'HAS_ACTIVATE_POWER'),
       };
     }
     return none;

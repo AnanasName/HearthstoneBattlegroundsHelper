@@ -186,6 +186,14 @@ export interface Hero {
   readonly heroPowerUsedThisTurn: boolean;
   /** Тег `LITERALLY_UNPLAYABLE`: сила есть, но жать её сейчас нельзя. */
   readonly heroPowerUnplayable: boolean;
+  /**
+   * Активная ли сила — тег `HAS_ACTIVATE_POWER` на её сущности.
+   *
+   * У пассивных сил тега нет, и советовать «нажать» их нельзя. Фактура
+   * part13: у «Мана в минуту» Хроми `HAS_ACTIVATE_POWER=1` при отсутствии
+   * тега `COST` — сила активная и бесплатная.
+   */
+  readonly heroPowerHasActivate: boolean;
 }
 
 /**
