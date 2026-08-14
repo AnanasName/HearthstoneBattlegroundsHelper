@@ -79,32 +79,50 @@ describe('part11: заряды дара, смертники из гробниц�
 
   it('карта из гробницы не советуется в ход получения без хрипа (жалоба 7)', () => {
     // Срез после выбора из «Восстания из гробницы»: в руке карты с энчантом
-    // TB_BaconShopBadsongE. Свежие (NUM_TURNS_IN_HAND=1) без хрипа молчат,
-    // отлежавшие ход и с хрипом — советуются.
+    // TB_BaconShopBadsongE от РАЗНЫХ источников. Смертность несёт текст
+    // СОЗДАТЕЛЯ (урок part16): Barrier Banshee от Tomb Turning («It dies
+    // if you play it this turn») — смертник, а Бранн от «Boundless
+    // Potential» с тем же энчантом не умирает и советуется свободно —
+    // энчант значит лишь «бесплатно».
     const cut = text.indexOf('D 03:43:2');
     expect(cut).toBeGreaterThan(0);
     const state = reduceTo(text.slice(0, cut));
 
-    const doomed = state.hand.filter((m) =>
-      m.enchantments.some((e) => e.cardId === 'TB_BaconShopBadsongE'),
-    );
+    const fromTomb = (m: (typeof state.hand)[number]): boolean => {
+      if (!m.enchantments.some((e) => e.cardId === 'TB_BaconShopBadsongE')) return false;
+      const creatorDbf = m.tags['CREATOR_DBID'];
+      const creator = creatorDbf === undefined ? null : cards.infoByDbfId(creatorDbf);
+      // Пробелы — \s+: тексты снапшота переносят строки посреди предложения.
+      return /dies\s+if\s+you\s+play\s+it\s+this\s+turn/i.test(creator?.text ?? '');
+    };
+
+    const doomed = state.hand.filter(fromTomb);
     expect(doomed.length).toBeGreaterThan(0);
 
     const plays = playRules(state, { cards });
     for (const p of plays) {
       const minion = p.minion;
       if (minion === null) continue;
-      const fresh =
-        minion.enchantments.some((e) => e.cardId === 'TB_BaconShopBadsongE') &&
-        (minion.tags['NUM_TURNS_IN_HAND'] ?? 1) <= 1;
-      if (!fresh) continue;
-      // Свежий смертник в советах — только ради хрипа или перерождения.
+      if (!fromTomb(minion) || (minion.tags['NUM_TURNS_IN_HAND'] ?? 1) > 1) continue;
+      // Свежая карта ИЗ ГРОБНИЦЫ в советах — только ради хрипа/перерождения.
       const info = cards.info(minion.cardId);
       expect(
         minion.reborn || (info?.mechanics.some((m) => m === 'DEATHRATTLE' || m === 'REBORN') ?? false),
       ).toBe(true);
       expect(p.reason).toContain('умрёт при розыгрыше');
     }
+
+    // Badsong от безобидного источника («Boundless Potential» → Бранн) —
+    // не приговор: карта советуется. Прежнее правило читало энчант как
+    // смертный и прятало розыгрыш всей руки (part16, ход 21).
+    const harmless = state.hand.find(
+      (m) =>
+        m.enchantments.some((e) => e.cardId === 'TB_BaconShopBadsongE') &&
+        !fromTomb(m) &&
+        (m.tags['NUM_TURNS_IN_HAND'] ?? 1) <= 1,
+    );
+    expect(harmless).toBeDefined();
+    expect(plays.some((p) => p.minion?.entityId === harmless?.entityId)).toBe(true);
   });
 
   it('заклинания витрины видны и советуются (жалоба 3)', () => {

@@ -1,3 +1,4 @@
+import { endOfTurnAuraGains, withEndOfTurnAuras } from '../battle/endOfTurn.js';
 import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mapper.js';
 import type { BattleSimulator } from '../battle/simulator.js';
 import { battleQuestion } from '../position/advisor.js';
@@ -165,10 +166,16 @@ export function checkBuysWithBattle(
   const bases = question.setups.map((s) => toBattleInfo(s, perBoard));
 
   const outcomes = question.candidates.map((candidate) => {
+    // Баффы «соседям» конца хода — как у расстановки: борд кандидата идёт
+    // в бой уже с ними (Surfing Sylvar, part16).
+    const board = withEndOfTurnAuras(
+      candidate.boardAfter,
+      endOfTurnAuraGains(candidate.boardAfter, deps.simulator.cards),
+    );
     let outcomeSum = 0;
     for (const base of bases) {
       if (deps.aborted?.() ?? false) throw new BuyCheckAborted();
-      const result = deps.simulator.run(withPlayerBoard(base, candidate.boardAfter), perBoard);
+      const result = deps.simulator.run(withPlayerBoard(base, board), perBoard);
       outcomeSum += result.wonPercent + result.tiedPercent / 2;
     }
     return {

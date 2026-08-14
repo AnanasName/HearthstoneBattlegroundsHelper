@@ -1,0 +1,91 @@
+{
+  "$comment": [
+    "Партия 14.08.2026 (23:00–23:30) — восьмая партия с работающим оверлеем",
+    "(герой BG33_HERO_001, АПМ-пираты, 4-е место). Четыре пункта обратной",
+    "связи: три скриншота из чата (23:04, 23:07, 23:20) плюс пункт словами.",
+    "Закрыты тестами в test/state/part16.test.ts.",
+    "",
+    "Ценность фикстуры:",
+    " - батлкрай-генератор карт: Oozeling Gladiator (BG27_002, «Battlecry:",
+    "   Get two Slimy Shields…») в витрине хода 5 при 5 золотых и золотом",
+    "   Aureate Laureate рядом — цепочка «купить-разыграть-продать» выгоднее",
+    "   прямой покупки;",
+    " - тавернный бафф соседям: Surfing Sylvar (BG32_235, «At the end of",
+    "   your turn, give adjacent minions +{0} Attack. Repeat for each",
+    "   friendly Golden minion») на борде хода 7 с золотым лауреатом;",
+    " - нецелевое заклинание с числительным: Healthy Bounty (BG33_811,",
+    "   «Give four friendly minions +{1} Health») в руке хода 11;",
+    " - энчант TB_BaconShopBadsongE на картах от БЕЗОБИДНЫХ источников:",
+    "   в руке хода 21 Lovesick Balladist (создатель: Friendly Bounty),",
+    "   Dual-Wield Corsair (Chef's Choice), Ignition Specialist (награда",
+    "   за тройку) — ни один не смертник, смертность несёт только текст",
+    "   создателя («It dies if you play it this turn», ср. part11);",
+    " - заклинание-замок Lockbox (BG36_520t, «Unplayable. In 5 turns…»).",
+    "",
+    "Четыре жалобы игрока:",
+    " 1) ход 5 (игрокский 3), словами: выгоднее было купить Oozeling 2/2,",
+    "    разыграть (клич даст два Slimy Shield), продать и купить золотого",
+    "    Aureate Laureate — совет же предлагал сразу лауреата, и два золота",
+    "    сгорали. Закрыто правилом прокрутки (spinRule).",
+    " 2) ход 7, скриншот 23:04: расстановка советовала переставить Surfing",
+    "    Sylvar из центра краем (+2.2 п.п. боя) — теряя бафф второму соседу.",
+    "    Закрыто применением баффа конца хода к кандидатам перед симуляцией",
+    "    (endOfTurn.ts): порядок таверна → конец хода → бой.",
+    " 3) ход 11, скриншот 23:07: «РАЗЫГРАТЬ Healthy Bounty → на Aureate",
+    "    Laureate» — у заклинания «four friendly» цель не выбирается.",
+    "    Закрыто шаблоном числительного в untargetedSpellWords.",
+    " 4) ход 21, скриншот 23:20: место на борде (6 из 7), три миньона",
+    "    в руке, совет «НИЧЕГО» — прежнее правило читало энчант Badsong как",
+    "    смертный приговор. Закрыто: смертность — по тексту СОЗДАТЕЛЯ",
+    "    (CREATOR_DBID), энчант значит лишь «бесплатно»."
+  ],
+  "game": "Battlegrounds, билд 248348, 14.08.2026 23:00–23:30",
+  "log": "game.log",
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 15.08.2026",
+      "expect": { "phase": "gameOver", "finalPlace": 4, "heroCardId": "BG33_HERO_001" }
+    },
+    {
+      "id": "turn5-spin-oozeling",
+      "turn": 5,
+      "verifiedBy": "со слов игрока, сверено 15.08.2026",
+      "expect": {
+        "gold": 5,
+        "shopHas": ["BG27_002", "BG32_236"],
+        "topAction": "spin",
+        "spinMinion": "BG27_002",
+        "reasonMentionsFollowUp": true
+      }
+    },
+    {
+      "id": "turn7-sylvar-adjacency",
+      "turn": 7,
+      "verifiedBy": "скриншот из чата (23:04), сверено 15.08.2026",
+      "expect": {
+        "boardHas": "BG32_235",
+        "goldenOnBoardAtLeast": 1,
+        "auraGainAtLeast": 2
+      }
+    },
+    {
+      "id": "turn11-healthy-bounty-untargeted",
+      "turn": 11,
+      "verifiedBy": "скриншот из чата (23:07), сверено 15.08.2026",
+      "expect": { "handSpellsHave": "BG33_811", "spellTargetNamed": false }
+    },
+    {
+      "id": "turn21-hand-plays-advised",
+      "turn": 21,
+      "verifiedBy": "скриншот из чата (23:20), сверено 15.08.2026",
+      "expect": {
+        "gold": 0,
+        "boardSize": 6,
+        "handHas": ["BG26_814", "BG31_824", "BG28_595"],
+        "handSpellLocked": "BG36_520t",
+        "playsAdvisedAtLeast": 3
+      }
+    }
+  ]
+}

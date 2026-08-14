@@ -1,3 +1,4 @@
+import { endOfTurnAuraGains, withEndOfTurnAuras } from '../battle/endOfTurn.js';
 import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mapper.js';
 import type { BattleSimulator } from '../battle/simulator.js';
 import type { GameState, Minion } from '../../state/types.js';
@@ -122,10 +123,18 @@ export function advisePosition(
   // на каждый вызов.
   const bases = list.map((setup) => toBattleInfo(setup, 1));
 
-  const evaluate = (board: readonly Minion[], sims: number, seed: number) => {
+  // Баффы «соседям» конца хода (Surfing Sylvar, part16) применяются
+  // к каждому кандидату: расстановка решает, кому они достанутся, и польза
+  // центра входит в счёт боя сама. Состав борда у перестановок один —
+  // носители и величины считаются однажды.
+  const auraGains = endOfTurnAuraGains(first.playerBoard, simulator.cards);
+
+  const evaluate = (rawBoard: readonly Minion[], sims: number, seed: number) => {
     // Проверка перед оценкой, а не внутри неё: одна оценка — это от 27
     // до 150 мс, и такой задержки прерыванию довольно.
     if (aborted?.() === true) throw new SearchAborted();
+
+    const board = withEndOfTurnAuras(rawBoard, auraGains);
 
     // Зерно фиксируется не ради точности — замер показал, что общие
     // случайные числа разброс не уменьшают, — а ради воспроизводимости.

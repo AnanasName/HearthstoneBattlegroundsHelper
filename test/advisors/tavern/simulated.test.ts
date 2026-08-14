@@ -158,7 +158,9 @@ function fakeSimulator(outcomeByCardId: Record<string, number>): BattleSimulator
     const won = outcomeByCardId[last?.cardId ?? ''] ?? 0;
     return { wonPercent: won, tiedPercent: 0, lostPercent: 100 - won };
   };
-  return { run } as unknown as BattleSimulator;
+  // Сервис карт нужен баффам конца хода; здесь карт с ними нет.
+  const cards = { getCard: () => undefined };
+  return { run, cards } as unknown as BattleSimulator;
 }
 
 function setup(opponentBoard: readonly Minion[]): BattleSetup {
@@ -206,7 +208,7 @@ describe('счёт покупок боем', () => {
       tiedPercent: 0,
       lostPercent: 100 - bySecondBoard(input),
     });
-    const simulator = { run } as unknown as BattleSimulator;
+    const simulator = { run, cards: { getCard: () => undefined } } as unknown as BattleSimulator;
 
     const result = checkBuysWithBattle(
       { setups: [setup(board([201])), setup(board([202]))], candidates: CANDIDATES },

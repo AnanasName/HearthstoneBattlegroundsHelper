@@ -182,6 +182,8 @@ describe('счёт против поля из нескольких бордов'
     calls: FakeCall[] = [],
   ): BattleSimulator =>
     ({
+      // Сервис карт нужен баффам конца хода; в этих тестах карт с ними нет.
+      cards: { getCard: () => undefined },
       run: (input: BgsBattleInfo, sims = 0): SimulationResult => {
         const playerFirst = input.playerBoard.board[0]?.entityId ?? 0;
         const opponentFirst = input.opponentBoard.board[0]?.entityId ?? 0;
@@ -197,7 +199,7 @@ describe('счёт против поля из нескольких бордов'
           damageLost: 0,
         } as SimulationResult;
       },
-    }) as BattleSimulator;
+    }) as unknown as BattleSimulator;
 
   const HERO: NonNullable<GameState['hero']> = {
     entityId: 64,

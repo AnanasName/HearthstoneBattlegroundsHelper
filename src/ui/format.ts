@@ -28,6 +28,7 @@ export const ACTION_LABEL: Readonly<Record<Recommendation['action'], string>> = 
   heroPower: 'СИЛА ГЕРОЯ',
   darkGift: 'ТЁМНЫЙ ДАР',
   activate: 'АКТИВИРОВАТЬ',
+  spin: 'ПРОКРУТИТЬ',
   pass: 'НИЧЕГО',
 };
 

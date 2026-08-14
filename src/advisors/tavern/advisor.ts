@@ -36,6 +36,7 @@ export type TavernAction =
   | 'heroPower'
   | 'darkGift'
   | 'activate'
+  | 'spin'
   | 'pass';
 
 export interface Recommendation {
@@ -571,12 +572,20 @@ export function lobbyRaces(state: GameState, cards: CardIndex): ReadonlySet<stri
 }
 
 /**
- * Энчант «умрёт, если разыграть в этот ход» — вешается на карту, добытую
- * «Восстанием из гробницы» (BG34_888) и родственными эффектами. Подтверждено
- * на part11: выбранный миньон уходит в руку с приаттаченным
- * TB_BaconShopBadsongE от сущности заклинания.
+ * Энчант карты, добытой заклинанием или наградой, — сам по себе означает
+ * лишь «розыгрыш бесплатен» (текст энчанта — «Costs (0)»).
+ *
+ * Урок part16: правило part11 читало его как «умрёт, если разыграть в этот
+ * ход» — но смертность несёт ТЕКСТ ИСТОЧНИКА, а не энчант. «Восстание
+ * из гробницы» (BG34_888, part11) пишет «It dies if you play it this turn»;
+ * а карты от «Friendly Bounty», «Chef's Choice» и награды за тройку носят
+ * тот же энчант и не умирают вовсе — прежнее правило прятало розыгрыш всей
+ * руки (part16, ход 21: три миньона в руке, место на борде, совет «НИЧЕГО»,
+ * на что игрок и указал). Источник читается тегом CREATOR_DBID.
  */
 const DOOMED_ENCHANTMENT = 'TB_BaconShopBadsongE';
+// Пробелы — \s+: тексты снапшота переносят строки посреди предложения.
+const DOOMED_CREATOR_WORDS = /dies\s+if\s+you\s+play\s+it\s+this\s+turn/i;
 
 /** Здоровье с бронёй — то, чем игрок реально расплачивается за слабый ход. */
 function effectiveHp(state: GameState): number {
@@ -880,14 +889,19 @@ export function playRules(
     // с замком на два хода, — тег LITERALLY_UNPLAYABLE, тикает и снимается.
     if ((minion.tags['LITERALLY_UNPLAYABLE'] ?? 0) > 0) return [];
 
-    // Карта-смертник из «Восстания из гробницы»: энчант Badsong означает
-    // «умрёт, если разыграть в этот ход» (текст источника BG34_888, part11).
-    // Розыгрыш в ход получения оправдан только предсмертным хрипом или
-    // перерождением — иначе совет отдаёт карту в никуда, на что игрок
-    // и указал. NUM_TURNS_IN_HAND=1 отличает ход получения.
+    // Карта-смертник: источник («Восстание из гробницы», part11) пишет
+    // «It dies if you play it this turn», и розыгрыш в ход получения
+    // оправдан только предсмертным хрипом или перерождением. Смертность —
+    // по ТЕКСТУ создателя (тег CREATOR_DBID), а не по энчанту Badsong:
+    // энчант значит лишь «бесплатно» и висит на любых добытых картах —
+    // от наград за тройку до пиратской экономики (part16, ход 21).
+    // NUM_TURNS_IN_HAND=1 отличает ход получения.
+    const creatorDbf = minion.tags['CREATOR_DBID'];
+    const creator = creatorDbf === undefined ? null : deps.cards.infoByDbfId(creatorDbf);
     const doomed =
       minion.enchantments.some((e) => e.cardId === DOOMED_ENCHANTMENT) &&
-      (minion.tags['NUM_TURNS_IN_HAND'] ?? 1) <= 1;
+      (minion.tags['NUM_TURNS_IN_HAND'] ?? 1) <= 1 &&
+      DOOMED_CREATOR_WORDS.test(creator?.text ?? '');
     const doomedWorthIt =
       minion.reborn ||
       (deps.cards.info(minion.cardId)?.mechanics.some(
@@ -962,6 +976,82 @@ export function playRules(
       },
     ];
   });
+}
+
+/**
+ * Правило прокрутки: купить батлкрай-генератора карт, разыграть, продать.
+ *
+ * Случай part16 (ход 3 игрока): Oozeling Gladiator 2/2 («Battlecry: Get two
+ * Slimy Shields…») стоил 3, продажа вернула бы 1 — два заклинания за чистых
+ * два золота, и на остаток всё ещё покупалась золотая пиратка. Советник же
+ * предлагал сразу пиратку, и два золота сгорали — на что игрок и указал.
+ *
+ * Порядок в цепочке важен: прокрутка идёт ПЕРВОЙ, пока золота хватает
+ * и на неё, и на лучшую покупку, — поэтому при выполнимости обоих её очки
+ * ставятся выше лучшей покупки, и reason называет, что купить следом.
+ * Границы честные: генератор, который сам является лучшей покупкой,
+ * не прокручивается (его хочется оставить телом), копия под тройку — тоже
+ * (продажа ломает тройку), на полном борде разыгрывать некуда.
+ */
+export function spinRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+  buys: readonly Recommendation[] = [],
+): Recommendation | null {
+  if (state.board.length >= rules.boardSize) return null;
+
+  const bestBuy = buys.reduce(
+    (a: Recommendation | null, b) => (a === null || b.score > a.score ? b : a),
+    null,
+  );
+  const numbers: Readonly<Record<string, number>> = { two: 2, three: 3, four: 4 };
+
+  let best: { minion: Minion; count: number; net: number; score: number } | null = null;
+  for (const minion of state.shop) {
+    const cost = buyCostOf(minion, rules);
+    if (cost > state.gold) continue;
+    // Лучшую покупку не прокручивают — её хочется оставить телом.
+    if (bestBuy?.minion?.entityId === minion.entityId) continue;
+    // Копию не прокручивают: продажа ломает будущую тройку.
+    if (copiesOwned(minion, state) > 0) continue;
+
+    const text = deps.cards.info(minion.cardId)?.text ?? '';
+    if (text === '') continue;
+    if (!rules.battlecryGetWords.some((w) => new RegExp(w, 'i').test(text))) continue;
+
+    const countWord = /\b(two|three|four)\b/i.exec(text);
+    const count = countWord?.[1] === undefined ? 1 : (numbers[countWord[1].toLowerCase()] ?? 1);
+    const net = cost - rules.sellGold;
+    const base = count * rules.heroPowerSpellValue - net * rules.goldPointValue;
+    if (base <= 0) continue;
+
+    // Пока выполнимы и прокрутка, и лучшая покупка, прокрутка идёт первой:
+    // начатая с покупки цепочка умирает — золота на генератора не остаётся.
+    const affordBoth =
+      bestBuy?.minion != null && state.gold - net >= buyCostOf(bestBuy.minion, rules);
+    const score = affordBoth && bestBuy !== null ? bestBuy.score + 0.5 : base;
+    if (best === null || score > best.score) best = { minion, count, net, score };
+  }
+  if (best === null) return null;
+
+  const name = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
+  const followUp =
+    bestBuy?.minion != null && state.gold - best.net >= buyCostOf(bestBuy.minion, rules)
+      ? `; потом ${deps.cards.info(bestBuy.minion.cardId)?.name ?? bestBuy.minion.cardId}`
+      : '';
+
+  return {
+    action: 'spin',
+    minion: best.minion,
+    score: best.score,
+    cost: best.net,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `купить ${name}, разыграть (клич даст ${String(best.count)} карт.) и продать — ` +
+      `чистая цена ${String(best.net)}${followUp}`,
+  };
 }
 
 /**
@@ -2194,6 +2284,7 @@ export function adviseTavern(
     heroPowerSpellRule(state, deps, rules),
     ...activationRules(state, deps, rules),
     darkGiftRule(state, rules),
+    spinRule(state, deps, rules, buys),
     sellRule(state, deps, rules),
     rerollRule(state, deps, rules),
     freezeRule(state, deps, rules),

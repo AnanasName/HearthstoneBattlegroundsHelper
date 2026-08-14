@@ -38,6 +38,8 @@ export interface TavernRules {
   readonly minionCost: number;
   /** Обновление витрины. Прочитано из кнопки `TB_BaconShop_8p_Reroll_Button`: 1. */
   readonly rerollCost: number;
+  /** Сколько золота возвращает продажа миньона. Правило игры. */
+  readonly sellGold: number;
   /** Мест на борде. */
   readonly boardSize: number;
 
@@ -163,6 +165,21 @@ export interface TavernRules {
    * не призывающий; отрицательный просмотр назад отсекает его.
    */
   readonly battleTextWords: readonly string[];
+
+  /**
+   * Признаки боевого клича, приносящего карты, — и курс одной принесённой
+   * карты в очках.
+   *
+   * Случай part16 (ход 3 игрока): Oozeling Gladiator 2/2 («Battlecry: Get
+   * two Slimy Shields that give +1/+1 and Taunt») выгодно было купить,
+   * разыграть, ПРОДАТЬ — и на вернувшееся золото взять пиратку: карты клича
+   * остаются, а чистая цена цепочки — цена покупки минус золото продажи.
+   * Советник же предлагал сразу пиратку, и два золота сгорали — на что
+   * игрок и указал. Курс карты — как у заклинания таверны от силы героя
+   * (`heroPowerSpellValue`): приносимое — почти всегда заклинание или карта
+   * той же ценности, и это честная граница разбора.
+   */
+  readonly battlecryGetWords: readonly string[];
 
   /**
    * Сколько добавляет каждая уже имеющаяся копия карты.
@@ -398,6 +415,7 @@ export interface TavernRules {
 export const DEFAULT_TAVERN_RULES: TavernRules = {
   minionCost: 3,
   rerollCost: 1,
+  sellGold: 1,
   boardSize: 7,
 
   shopSizeByTier: [0, 3, 4, 4, 5, 5, 6],
@@ -442,6 +460,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   battleTextWords: ['rally:', '(?<!you |your )summons? '],
 
+  // «Battlecry: Get two Slimy Shields…» (Oozeling, part16). Строго после
+  // «Battlecry:» в том же предложении: триггеры и хрипы сюда не попадают.
+  battlecryGetWords: ['battlecry:?[^.]*\\b(?:get|discover|add)s?\\b'],
+
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],
 
@@ -470,6 +492,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '(?:left|right)-?most',
     'all (?:friendly|your)',
     'your (?:other )?minions',
+    // «Give four friendly minions +{1} Health» (Healthy Bounty, part16):
+    // числительное перед friendly — заклинание раздаёт само, а совет писал
+    // «→ на Aureate Laureate». Одиночное «a friendly» остаётся целевым.
+    '\\b(?:two|three|four|five|six|seven|\\d+) (?:friendly|of your)\\b',
   ],
 
   engineTextWords: ['\\bafter (?:a|an|you|your|this)\\b', '\\bwhenever\\b', '\\bat the (?:start|end) of\\b'],

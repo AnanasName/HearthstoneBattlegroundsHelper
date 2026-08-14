@@ -23,6 +23,7 @@ import {
   shopSpellRules,
   spellEffect,
   spellRules,
+  spinRule,
   tribeMates,
   trinketAdvice,
   trinketForecast,
@@ -408,6 +409,93 @@ describe('правило продажи', () => {
   });
 });
 
+describe('правило прокрутки: купить-разыграть-продать генератора (part16)', () => {
+  const spinCards = createCardIndex([
+    {
+      id: 'OOZE',
+      name: 'Гладиатор-слизень',
+      type: 'Minion',
+      techLevel: 2,
+      races: [],
+      isBaconPool: true,
+      text: '<b>Battlecry:</b> Get two Slimy Shields that give +1/+1 and <b>Taunt.</b>',
+      mechanics: ['BATTLECRY'],
+    },
+    {
+      id: 'PIRATE_8',
+      name: 'Крупная пиратка',
+      type: 'Minion',
+      techLevel: 2,
+      races: ['PIRATE'],
+      isBaconPool: true,
+    },
+    {
+      id: 'EOT_GET',
+      name: 'Вечерний даритель',
+      type: 'Minion',
+      techLevel: 2,
+      races: [],
+      isBaconPool: true,
+      text: 'At the end of your turn, get a Tavern spell.',
+    },
+  ]);
+  const spinDeps = { cards: spinCards };
+  const ooze = (id = 301): Minion => minion(id, { cardId: 'OOZE', attack: 2, health: 2, techLevel: 2 });
+  const pirate = (): Minion => minion(302, { cardId: 'PIRATE_8', attack: 8, health: 8, techLevel: 2 });
+
+  it('пока хватает на цепочку и лучшую покупку, прокрутка идёт первой', () => {
+    // part16, ход 3 игрока: Oozeling за 3 → клич даст два заклинания →
+    // продать за 1 — чистая цена 2, и золотая пиратка всё ещё по карману.
+    // Совет «сразу пиратку» оставлял два золота сгорать.
+    const s = state({ gold: 5, shop: [ooze(), pirate()] });
+    const buys = buyRules(s, spinDeps);
+    const spin = spinRule(s, spinDeps, DEFAULT_TAVERN_RULES, buys);
+
+    expect(spin?.minion?.cardId).toBe('OOZE');
+    expect(spin?.score).toBeGreaterThan(Math.max(...buys.map((b) => b.score)));
+    expect(spin?.cost).toBe(2);
+    expect(spin?.reason).toContain('чистая цена 2');
+    expect(spin?.reason).toContain('потом Крупная пиратка');
+  });
+
+  it('когда на оба не хватает, прокрутка конкурирует очками эффекта', () => {
+    const s = state({ gold: 3, shop: [ooze(), pirate()] });
+    const buys = buyRules(s, spinDeps);
+    const spin = spinRule(s, spinDeps, DEFAULT_TAVERN_RULES, buys);
+
+    // 2 карты × курс заклинания (6) − чистая цена 2 × курс золота (3) = 6.
+    expect(spin?.score).toBeCloseTo(6);
+    expect(spin?.reason).not.toContain('потом');
+  });
+
+  it('лучшая покупка, копия и полный борд не прокручиваются', () => {
+    // Генератор — единственная и лучшая покупка: его хочется оставить телом.
+    const alone = state({ gold: 5, shop: [ooze()] });
+    expect(spinRule(alone, spinDeps, DEFAULT_TAVERN_RULES, buyRules(alone, spinDeps))).toBeNull();
+
+    // Копия на борде: продажа ломает будущую тройку.
+    const withCopy = state({ gold: 5, board: [ooze(1)], shop: [ooze(), pirate()] });
+    expect(
+      spinRule(withCopy, spinDeps, DEFAULT_TAVERN_RULES, buyRules(withCopy, spinDeps)),
+    ).toBeNull();
+
+    // Полный борд: разыграть генератора некуда.
+    const full = state({
+      gold: 5,
+      board: Array.from({ length: 7 }, (_, i) => minion(i + 1)),
+      shop: [ooze(), pirate()],
+    });
+    expect(spinRule(full, spinDeps, DEFAULT_TAVERN_RULES, buyRules(full, spinDeps))).toBeNull();
+  });
+
+  it('«получить» вне боевого клича — не прокрутка', () => {
+    // «At the end of your turn, get…» дарит, только пока стоит на борде, —
+    // цепочка «купить-разыграть-продать» его эффекта не получает.
+    const s = state({ gold: 5, shop: [minion(303, { cardId: 'EOT_GET' }), pirate()] });
+    expect(spinRule(s, spinDeps, DEFAULT_TAVERN_RULES, buyRules(s, spinDeps))).toBeNull();
+  });
+});
+
 describe('правило обновления витрины', () => {
   it('советует, когда покупать нечего', () => {
     const s = state({ gold: 4, shop: [shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 })] });
@@ -764,7 +852,7 @@ describe('правило заморозки', () => {
   });
 });
 
-describe('карты-смертники из гробницы (part11)', () => {
+describe('карты-смертники: смертность — по тексту источника (part11, part16)', () => {
   const doomCards = createCardIndex([
     { id: 'PLAIN', name: 'Простой', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
     {
@@ -776,6 +864,22 @@ describe('карты-смертники из гробницы (part11)', () => {
       isBaconPool: true,
       mechanics: ['DEATHRATTLE'],
     },
+    // Источник-гробница: смертность написана в его тексте (part11).
+    {
+      id: 'TOMB',
+      dbfId: 501,
+      name: 'Восстание из гробницы',
+      type: 'Battleground_spell',
+      text: 'Discover an Undead. It dies if you play it this turn.',
+    },
+    // Безобидный создатель — награда за тройку: карта бесплатна, не смертна.
+    {
+      id: 'REWARD',
+      dbfId: 502,
+      name: 'Награда за тройку',
+      type: 'Battleground_spell',
+      text: 'Discover a minion from Tier 0.',
+    },
   ]);
   const doomDeps = { cards: doomCards };
   const badsong = {
@@ -785,11 +889,11 @@ describe('карты-смертники из гробницы (part11)', () => {
     scriptDataNum1: null,
     scriptDataNum2: null,
   };
-  const doomedMinion = (cardId: string, turnsInHand: number) =>
+  const doomedMinion = (cardId: string, turnsInHand: number, creatorDbf = 501) =>
     minion(9, {
       cardId,
       enchantments: [badsong],
-      tags: { NUM_TURNS_IN_HAND: turnsInHand },
+      tags: { NUM_TURNS_IN_HAND: turnsInHand, CREATOR_DBID: creatorDbf },
     });
 
   it('смертник без хрипа и перерождения не советуется в ход получения', () => {
@@ -809,6 +913,27 @@ describe('карты-смертники из гробницы (part11)', () => {
     const play = playRules(s, doomDeps)[0];
     expect(play).toBeDefined();
     expect(play?.reason).not.toContain('умрёт');
+  });
+
+  it('та же наклейка от безобидного источника — советуется без пометки (part16)', () => {
+    // Энчант Badsong значит лишь «бесплатно»: его носят карты от наград
+    // за тройку и заклинаний, и они не умирают. Прежнее правило читало
+    // энчант как приговор и прятало розыгрыш всей руки — part16, ход 21:
+    // три миньона в руке, место на борде, совет «НИЧЕГО».
+    const s = state({ hand: [doomedMinion('PLAIN', 1, 502)] });
+    const play = playRules(s, doomDeps)[0];
+    expect(play).toBeDefined();
+    expect(play?.reason).not.toContain('умрёт');
+  });
+
+  it('без известного создателя карта не считается смертником', () => {
+    // Смертность — доказанный факт текста источника, а не догадка по энчанту.
+    const orphan = minion(9, {
+      cardId: 'PLAIN',
+      enchantments: [badsong],
+      tags: { NUM_TURNS_IN_HAND: 1 },
+    });
+    expect(playRules(state({ hand: [orphan] }), doomDeps)).toHaveLength(1);
   });
 });
 
@@ -1035,6 +1160,23 @@ describe('заклинания руки', () => {
     const s = state({
       board: [minion(1, { cardId: 'BODY', attack: 10, health: 10 })],
       handSpells: [handSpell('TEASET')],
+    });
+    const rec = spellRules(s, { cards: idx })[0];
+    expect(rec).toBeDefined();
+    expect(rec?.targetMinion).toBeNull();
+    expect(rec?.reason).toContain('не выбирается');
+  });
+
+  it('числительное перед friendly — тоже без выбора цели (part16, Healthy Bounty)', () => {
+    // «Give four friendly minions +{1} Health» раздаёт сама, а совет писал
+    // «→ на Aureate Laureate». Одиночное «a friendly» остаётся целевым.
+    const idx = createCardIndex([
+      { id: 'BOUNTY', name: 'Щедрость', text: 'Give four friendly minions +{1} Health.' },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    ]);
+    const s = state({
+      board: [minion(1, { cardId: 'BODY', attack: 10, health: 10 })],
+      handSpells: [{ ...handSpell('BOUNTY'), scriptData: [null, 4, null, null] }],
     });
     const rec = spellRules(s, { cards: idx })[0];
     expect(rec).toBeDefined();
