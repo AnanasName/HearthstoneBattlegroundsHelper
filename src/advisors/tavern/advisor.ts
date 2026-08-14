@@ -1888,13 +1888,27 @@ export function trinketAdvice(
     };
   });
 
-  // Сначала свои племена — статистика глобальна и нашего борда не знает;
-  // при равных своих разводит среднее место.
-  return scored.sort(
-    (a, b) =>
+  // Ранжирование совмещает статистику и синергию. У вариантов со
+  // статистикой считается «эффективное место»: среднее место минус
+  // trinketPlacePerTribeMinion за каждого своего миньона племени. Так
+  // сильный нейтральный обходит слабый племенной — правило JeefHS,
+  // подтверждено игроком (docs/jeefhs.md), — а сильная синергия (4+
+  // своих) статистикой не перебивается. Варианты без статистики
+  // ранжируются прежним порядком: сначала свои племена — глобальное
+  // среднее нашего борда не знает.
+  const effectivePlace = (t: { averagePlacement?: number | null; tribeMinions: number }) =>
+    t.averagePlacement == null
+      ? null
+      : t.averagePlacement - t.tribeMinions * rules.trinketPlacePerTribeMinion;
+  return scored.sort((a, b) => {
+    const ea = effectivePlace(a);
+    const eb = effectivePlace(b);
+    if (ea !== null && eb !== null && ea !== eb) return ea - eb;
+    return (
       b.tribeMinions - a.tribeMinions ||
-      (a.averagePlacement ?? 9) - (b.averagePlacement ?? 9),
-  );
+      (a.averagePlacement ?? 9) - (b.averagePlacement ?? 9)
+    );
+  });
 }
 
 /**

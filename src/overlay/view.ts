@@ -110,9 +110,12 @@ function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
   // экран, и пока он открыт, игрок решает именно его.
   const trinkets = input.tavern?.trinkets ?? [];
   if (trinkets.length > 0) {
+    // Лучший помечается и при выборе по статистике: нейтральный тринкет
+    // с хорошим средним местом — обоснованный совет, а не «первый попавшийся»
+    // (JeefHS: сильный нейтральный лучше слабого племенного).
     return trinkets.map((t, i) => ({
       text: `ВЗЯТЬ? ${trinketLine(t)}`,
-      tone: i === 0 && t.tribeMinions > 0 ? 'good' : 'normal',
+      tone: i === 0 && (t.tribeMinions > 0 || t.averagePlacement != null) ? 'good' : 'normal',
     }));
   }
 

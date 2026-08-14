@@ -28,6 +28,7 @@ import {
   trinketForecast,
 } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, targetTier } from '../../../src/advisors/tavern/rules.js';
+import { createBgStats } from '../../../src/data/bgStats.js';
 import { createCardIndex } from '../../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
 import { minion } from '../../minions.js';
@@ -1304,6 +1305,44 @@ describe('совет по выбору тринкета', () => {
     const s = state({ board: [minion(1, { cardId: 'DRAGON_1' })], ...offer('TR_MURLOC') });
     expect(trinketAdvice(s, trinketDeps)[0]?.tribeMinions).toBe(0);
     expect(trinketAdvice(s, trinketDeps)[0]?.reason).toContain('своих таких нет');
+  });
+
+  it('заметно лучшая статистика перевешивает слабую племенную синергию (JeefHS)', () => {
+    // Правило из базы знаний JeefHS, подтверждено игроком: сильный
+    // нейтральный/экономический тринкет лучше слабого племенного. Курс —
+    // trinketPlacePerTribeMinion (σ выборки снапшота) за своего миньона.
+    const stats = createBgStats(null, {
+      trinketStats: [
+        { trinketCardId: 'TR_GOLD', averagePlacement: 3.5, dataPoints: 5000 },
+        { trinketCardId: 'TR_MURLOC', averagePlacement: 4.3, dataPoints: 5000 },
+      ],
+    });
+    const pair = state({
+      board: [minion(1, { cardId: 'MURLOC_1' }), minion(2, { cardId: 'MURLOC_1' })],
+      ...offer('TR_MURLOC', 'TR_GOLD'),
+    });
+    // Эффективные места: копилка 3.5, икра 4.3 − 2×0.3 = 3.7 — копилка первой.
+    const advice = trinketAdvice(pair, { cards: trinketCards, bgStats: stats });
+    expect(advice[0]?.name).toBe('Копилка');
+
+    // Сильная синергия статистикой не перебивается: при пяти мурлоках
+    // икра 4.3 − 5×0.3 = 2.8 против 3.5 — племенной тринкет первый.
+    const many = state({
+      board: Array.from({ length: 5 }, (_, i) => minion(i + 1, { cardId: 'MURLOC_1' })),
+      ...offer('TR_MURLOC', 'TR_GOLD'),
+    });
+    expect(trinketAdvice(many, { cards: trinketCards, bgStats: stats })[0]?.name).toBe('Икра');
+  });
+
+  it('без статистики порядок прежний: свои племена первыми', () => {
+    // Глобальное среднее нашего борда не знает; когда статистики нет,
+    // единственный сигнал — синергия.
+    const pair = state({
+      board: [minion(1, { cardId: 'MURLOC_1' }), minion(2, { cardId: 'MURLOC_1' })],
+      ...offer('TR_MURLOC', 'TR_GOLD'),
+    });
+    const advice = trinketAdvice(pair, { cards: trinketCards, bgStats: null });
+    expect(advice[0]?.name).toBe('Икра');
   });
 
   it('племя тринкета читается из тега BACON_SUBSET, когда в тексте плейсхолдер (part12)', () => {
