@@ -99,6 +99,17 @@ export function part10Game(): string {
 }
 
 /**
+ * Партия 11 — 14.08.2026, третья партия с оверлеем (Сильвана, 3-е место).
+ * Семь пунктов обратной связи. Фактура: заряды тёмного дара
+ * (TAG_SCRIPT_DATA_NUM_2 на кнопке), карты-смертники из «Восстания
+ * из гробницы» (энчант TB_BaconShopBadsongE), заклинания витрины
+ * (CARDTYPE=BATTLEGROUND_SPELL с ценой в COST), тег CARDRACE строками.
+ */
+export function part11Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part11', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция

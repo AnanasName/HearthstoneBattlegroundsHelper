@@ -78,15 +78,18 @@ describe('part10: заморозка, продажи на полном борд�
     expect(advice?.recommendations[0]?.spellCardId).toBe('BG28_810');
   });
 
-  it('ход 7: подъём называет судьбу остатка (жалоба 3)', () => {
+  it('ход 7: подъём называет судьбу остатка (жалоба 3, уточнена в part11)', () => {
     const state = sliceAt('D 00:30:3');
     expect(state.turn).toBe(7);
     expect(state.gold).toBe(6);
     expect(state.tavernUpgradeCost).toBe(5);
 
+    // Первая версия хвоста обещала остаток «на обновление» всегда; игрок
+    // уточнил (part11, жалоба 4): рано реролл на сдачу — пустая трата,
+    // и на втором тире остаток честно называется ценой подъёма.
     const advice = adviseTavern(state, { cards });
     const levelUp = advice?.recommendations.find((r) => r.action === 'levelUp');
-    expect(levelUp?.reason).toContain('остаток 1 — на обновление');
+    expect(levelUp?.reason).toContain('остаток 1 сгорит — это цена подъёма');
   });
 
   it('ход 9: бесплатная Тавматургия советуется с целью (жалоба 4)', () => {
