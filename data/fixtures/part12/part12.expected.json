@@ -1,0 +1,82 @@
+{
+  "$comment": [
+    "Партия 14.08.2026 (13:58–14:30) — четвёртая партия с работающим оверлеем.",
+    "Три скриншота из чата — три пункта обратной связи, каждый закрыт тестом",
+    "в test/state/part12.test.ts на срезах лога по времени скриншотов.",
+    "",
+    "Ценность фикстуры:",
+    " - сила героя E.T.C. «Sign a New Artist»: «Discover a Buddy» — миньон",
+    "   без слова «minion» в тексте (BG25_HERO_105p, за 3);",
+    " - племя тринкета ТЕГОМ: у «Разноцветного компаса» (BG30_MagicItem_426)",
+    "   текст «Get a random {0}», а племя — BACON_SUBSET_DRAGON=1 на сущности;",
+    "   имена тегов совпадают со строками races снапшота (MECH, не MECHANICAL);",
+    " - заклинание витрины Fortify (BG28_503) за 1 с целью-миньоном.",
+    "",
+    "Три жалобы игрока:",
+    " 1) ход 7 (и ранее): сила за 3 доступна, совет молчал — шаблоны не знали",
+    "    слова «Buddy»;",
+    " 2) ход 11, лавка: «только один аксессуар подходит» — Colorful Compass",
+    "    с племенем-плейсхолдером получал «эффект вне племён»;",
+    " 3) ход 13: «РАЗЫГРАТЬ Fortify» без цели — теперь строка совета несёт",
+    "    «→ на <крупнейший свой>»."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-14T14:30:37+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerId": 2,
+    "hero": { "cardId": "BG25_HERO_105", "name": "Музыкальный менеджер E.T.C." },
+    "heroPower": { "cardId": "BG25_HERO_105p", "cost": 3, "text": "Discover a Buddy. (Unlocks at Tier 2.)" }
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 70694483,
+    "createGameBlocks": 1,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 14.08.2026",
+      "expect": { "phase": "gameOver", "finalPlace": 2 }
+    },
+    {
+      "id": "turn7-etc-hero-power",
+      "turn": 7,
+      "sliceAt": "D 14:03:0",
+      "verifiedBy": "скриншот из чата (14:02), сверено 14.08.2026",
+      "expect": {
+        "techLevel": 2,
+        "gold": 6,
+        "heroPowerCost": 3,
+        "heroPowerAdvised": true
+      }
+    },
+    {
+      "id": "turn11-compass-subset",
+      "turn": 11,
+      "sliceAt": "D 14:06:1",
+      "verifiedBy": "скриншот из чата (14:06), сверено 14.08.2026",
+      "expect": {
+        "trinketOfferHas": "BG30_MagicItem_426",
+        "compassSubsetRaces": ["DRAGON"],
+        "compassAdvice": "упоминает DRAGON — своих 3"
+      }
+    },
+    {
+      "id": "turn13-fortify-target",
+      "turn": 13,
+      "sliceAt": "D 14:09:1",
+      "verifiedBy": "скриншот из чата (14:09), сверено 14.08.2026",
+      "expect": {
+        "shopSpellHas": "BG28_503",
+        "adviceLine": "КУПИТЬ Fortify за 1 → на Icesnarl the Mighty 7/27"
+      }
+    }
+  ]
+}
