@@ -17,6 +17,7 @@
     "demo:phase4": "tsx src/ui/demo-phase4.ts",
     "spike:battle": "tsx src/advisors/battle/spike.ts",
     "spike:position": "tsx src/advisors/position/spike.ts",
+    "spike:field": "tsx src/advisors/position/spikeField.ts",
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "validate:tavern": "tsx src/advisors/tavern/validate.ts",
     "update:cards": "tsx src/data/updateCards.ts",
