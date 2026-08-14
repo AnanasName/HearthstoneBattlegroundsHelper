@@ -132,6 +132,18 @@ export function part13Game(): string {
 }
 
 /**
+ * Партия 14 — 14.08.2026, шестая партия с оверлеем (Сильвана, 5-е место),
+ * три пункта обратной связи. Фактура: заклинание-замена от тринкета
+ * (наклейка Тюремщика, Spellcraft: «Destroy a friendly Undead to get
+ * a random Undead»), активации миньонов (HAS_ACTIVATE_POWER +
+ * INTERACTABLE_OBJECT_COST, применение блоком PLAY на стоящей в PLAY
+ * сущности — Suspicious Prisonguard).
+ */
+export function part14Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part14', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция

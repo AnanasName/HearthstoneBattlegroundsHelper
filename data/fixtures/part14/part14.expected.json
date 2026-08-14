@@ -1,0 +1,87 @@
+{
+  "$comment": [
+    "Партия 14.08.2026 (18:24–18:47) — шестая партия с работающим оверлеем,",
+    "первая после правок эвристик по сверке с симулятором. Три пункта",
+    "обратной связи (скриншот хода 21 + два словами), закрыты тестами",
+    "в test/state/part14.test.ts и test/advisors/tavern/rules.test.ts.",
+    "",
+    "Ценность фикстуры:",
+    " - заклинание-ЗАМЕНА от тринкета: наклейка с Тюремщиком",
+    "   (BG35_MagicItem_306, Spellcraft) каждый ход кладёт в руку",
+    "   BG35_MagicItem_306t «Destroy a friendly Undead to get a random",
+    "   Undead» — CARDTYPE=SPELL без тега COST, ни статов, ни золота",
+    "   в тексте;",
+    " - АКТИВАЦИИ миньонов: Suspicious Prisonguard (BG36_345, «Activate",
+    "   ({2}): Give another minion +{0}/+{1}») — активируемость тегом",
+    "   HAS_ACTIVATE_POWER, цена живым тегом INTERACTABLE_OBJECT_COST=1",
+    "   (сходится с плейсхолдером {2} → TAG_SCRIPT_DATA_NUM_3=1),",
+    "   применение — блок PLAY на сущности, СТОЯЩЕЙ в PLAY (18:28:22,",
+    "   ход 7, id 1854); розыгрыш из руки отличается зоной сущности;",
+    " - Dustbone Devastator 15/6 т3 в витрине хода 21: ценность дул",
+    "   боевой бонус за «Rally: Your Undead have +1 Attack» при борде",
+    "   из одних элементалей — племенное ралли без своих того племени.",
+    "",
+    "Три жалобы игрока:",
+    " 1) заклинание наклейки Тюремщика не советовалось ни разу — прежний",
+    "    разбор видел только статы/золото/щит и возвращал null;",
+    " 2) ход 21 (скриншот 18:45): «КУПИТЬ Dustbone Devastator 15/6 тир 3»",
+    "    — низкий тир при таверне 5; боевой бонус нежить-ралли на борде",
+    "    без нежити снят, остальное (тело крупнее всей витрины за 3) —",
+    "    случай для симулятора-досчёта, записан в docs;",
+    " 3) активации («Activate (N)») не советовались вовсе — прежде были",
+    "    отложены с фактурой part8."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-14T18:47:00+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerId": 5,
+    "hero": { "cardId": "BG23_HERO_306", "name": "Сильвана Ветрокрылая" }
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 29550396,
+    "createGameBlocks": 1,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 14.08.2026",
+      "expect": { "phase": "gameOver", "finalPlace": 5 }
+    },
+    {
+      "id": "jailer-sticker-spell-advised",
+      "verifiedBy": "жалоба игрока словами, сверено 14.08.2026",
+      "expect": {
+        "handSpellSeen": "BG35_MagicItem_306t",
+        "advisedAsTransform": true,
+        "victimIsSmallestUndead": true
+      }
+    },
+    {
+      "id": "turn7-prisonguard-activation",
+      "turn": 7,
+      "sliceAt": "D 18:28:33.9673078",
+      "verifiedBy": "лог, сверено 14.08.2026",
+      "expect": {
+        "activatedEntityIds": [1854],
+        "clearedOnNextTurn": true
+      }
+    },
+    {
+      "id": "turn21-dustbone-tribal-rally",
+      "turn": 21,
+      "verifiedBy": "скриншот из чата (18:45), сверено 14.08.2026",
+      "expect": {
+        "shopHas": "BG33_323",
+        "battleBonusWithoutTribe": 0
+      }
+    }
+  ]
+}
