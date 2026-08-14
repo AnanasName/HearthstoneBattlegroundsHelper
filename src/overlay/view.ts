@@ -75,6 +75,24 @@ export interface ViewInput {
 
 export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   const { state } = input;
+
+  // Выбор героя — самый первый экран партии. Сущность героя-заготовки
+  // в состоянии уже может быть (part14), поэтому признак — сам открытый
+  // выбор, а не отсутствие героя.
+  const heroPick = input.tavern?.heroChoice ?? [];
+  if (heroPick.length > 0) {
+    return {
+      active: true,
+      header: 'выбор героя',
+      board: [],
+      shop: [],
+      actions: heroPick.map((h, i) => ({
+        text: `ВЗЯТЬ? ${h.name} — ${h.reason}`,
+        tone: i === 0 && h.averagePosition !== null ? 'good' : 'normal',
+      })),
+      position: null,
+    };
+  }
   if (state.hero === null) return EMPTY_VIEW;
 
   return {

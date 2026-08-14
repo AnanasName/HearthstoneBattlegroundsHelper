@@ -21,6 +21,7 @@
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "validate:tavern": "tsx src/advisors/tavern/validate.ts",
     "update:cards": "tsx src/data/updateCards.ts",
+    "update:bgstats": "tsx src/data/updateBgStats.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -387,6 +387,15 @@ export interface GameState {
    */
   readonly openChoice: OpenChoice | null;
   /**
+   * Открытый выбор ГЕРОЯ в начале партии — канал тот же
+   * (`DebugPrintEntityChoices`), но `ChoiceType=MULLIGAN`.
+   *
+   * Отдельным полем: это не модальный выбор таверны, советуется он
+   * статистикой мест, а не ценностью миньона. Среди вариантов бывают
+   * скины (`BG27_HERO_801_SKIN_A`) — статистика приводится к базовой карте.
+   */
+  readonly heroChoice: OpenChoice | null;
+  /**
    * Взятые тринкеты по игрокам: `PlayerID` → dbfId карт.
    *
    * Теги `BACON_FIRST/SECOND_TRINKET_DATABASE_ID` на сущности героя.
@@ -450,6 +459,7 @@ export const EMPTY_STATE: GameState = {
   activatedEntityIds: [],
   trinketOffer: [],
   openChoice: null,
+  heroChoice: null,
   trinketsByPlayer: {},
   seenShopCardIds: [],
   finalPlace: null,

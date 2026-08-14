@@ -59,6 +59,27 @@ describe('part14: заклинание-замена и активации мин
     expect(advised.length).toBeGreaterThan(0);
   });
 
+  it('выбор героя виден в состоянии и ранжирован статистикой мест', () => {
+    // Канал MULLIGAN прежде отбрасывался; теперь выбор героя — первое
+    // положение партии, и совет ранжирует варианты по среднему месту.
+    const state = reduceTo('D 18:24:24.4307741');
+    expect(state.heroChoice?.options.length).toBeGreaterThanOrEqual(2);
+    expect(state.heroChoice?.options.some((o) => o.cardId.startsWith('BG23_HERO_306'))).toBe(
+      true,
+    );
+
+    const advice = adviseTavern(state, { cards });
+    const picks = advice?.heroChoice ?? [];
+    expect(picks.length).toBe(state.heroChoice?.options.length);
+    // Ранжирование по возрастанию среднего места; без статистики — в конец.
+    const places = picks.map((p) => p.averagePosition ?? 9);
+    expect([...places].sort((a, b) => a - b)).toEqual(places);
+
+    // После выбора состояние чисто: героя выбрали, выбор закрыт.
+    const after = reduceTo('D 18:24:50');
+    expect(after.heroChoice).toBeNull();
+  });
+
   it('нажатая активация видна в состоянии и повторно не советуется (жалоба 3, фактура)', () => {
     // Надзиратель (id 1854) активирован в 18:28:22, ход 7; срез до смены
     // хода — нажатие в состоянии, после смены хода счётчик чист.

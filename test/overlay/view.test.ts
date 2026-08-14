@@ -53,6 +53,7 @@ const tavern: TavernAdvice = {
   trinkets: [],
   choice: [],
   playPlan: [],
+  heroChoice: [],
   recommendations: [
     {
       action: 'buy',
@@ -362,5 +363,37 @@ describe('вид оверлея', () => {
       cards,
     );
     expect(mixed.position?.tone).toBe('good');
+  });
+});
+
+describe('экран выбора героя', () => {
+  it('открытый выбор героя показывает ранжирование, лучший помечен', () => {
+    const cards2 = loadCardIndex();
+    const withHeroes: TavernAdvice = {
+      ...tavern,
+      heroChoice: [
+        {
+          option: { entityId: 98, cardId: 'BG34_HERO_001' },
+          name: 'Исказительница Хроми',
+          averagePosition: 3.86,
+          reason: 'по статистике среднее место 3.86 (17 453 партий)',
+        },
+        {
+          option: { entityId: 99, cardId: 'НЕИЗВЕСТНЫЙ' },
+          name: 'Новый герой',
+          averagePosition: null,
+          reason: 'статистики по герою нет',
+        },
+      ],
+    };
+    // Сущность героя-заготовки уже существует — экран включается по выбору.
+    const view = buildView(input({ tavern: withHeroes }), cards2);
+
+    expect(view.active).toBe(true);
+    expect(view.header).toBe('выбор героя');
+    expect(view.actions[0]?.text).toContain('Хроми');
+    expect(view.actions[0]?.text).toContain('3.86');
+    expect(view.actions[0]?.tone).toBe('good');
+    expect(view.actions[1]?.tone).toBe('normal');
   });
 });

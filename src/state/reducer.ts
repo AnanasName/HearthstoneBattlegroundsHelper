@@ -208,21 +208,33 @@ export function createReducer(players: Players): Reducer {
    * `openChoice` живёт от заголовка `DebugPrintEntityChoices` до `SendChoices`
    * с тем же id; варианты дописываются в него строками `Entities[i]=`.
    * Новый заголовок заменяет прежний выбор целиком — на экране клиента
-   * выбор один. `MULLIGAN` (выбор героя) и чужие выборы не собираются.
+   * выбор один. Чужие выборы не собираются.
+   *
+   * `MULLIGAN` — выбор героя в начале партии — собирается тем же каналом,
+   * но в ОТДЕЛЬНОЕ поле: это не модальный выбор таверны, и советуется он
+   * иначе (статистикой мест, а не ценностью миньона).
    */
   interface OpenChoiceDraft {
     id: number;
     sourceCardId: string | null;
     options: ChoiceOption[];
+    mulligan: boolean;
   }
   let openChoice: OpenChoiceDraft | null = null;
+  let heroChoice: OpenChoiceDraft | null = null;
   let collectingChoice: OpenChoiceDraft | null = null;
 
   const stepChoice = (source: string, content: string): void => {
     if (source === 'GameState.SendChoices') {
       const done = SEND_CHOICES_RE.exec(content);
-      if (done?.[1] !== undefined && openChoice !== null && Number(done[1]) >= openChoice.id) {
+      if (done?.[1] === undefined) return;
+      const id = Number(done[1]);
+      if (openChoice !== null && id >= openChoice.id) {
         openChoice = null;
+        collectingChoice = null;
+      }
+      if (heroChoice !== null && id >= heroChoice.id) {
+        heroChoice = null;
         collectingChoice = null;
       }
       return;
@@ -231,12 +243,15 @@ export function createReducer(players: Players): Reducer {
     const header = CHOICE_HEADER_RE.exec(content);
     if (header !== null) {
       const [, id, player, choiceType] = header;
-      const ours =
-        choiceType === 'GENERAL' && (players.selfName === null || player === players.selfName);
-      collectingChoice = ours
-        ? { id: Number(id), sourceCardId: null, options: [] }
-        : null;
-      if (ours) openChoice = collectingChoice;
+      const mine = players.selfName === null || player === players.selfName;
+      const general = choiceType === 'GENERAL' && mine;
+      const mulligan = choiceType === 'MULLIGAN' && mine;
+      collectingChoice =
+        general || mulligan
+          ? { id: Number(id), sourceCardId: null, options: [], mulligan }
+          : null;
+      if (general) openChoice = collectingChoice;
+      if (mulligan) heroChoice = collectingChoice;
       return;
     }
 
@@ -882,6 +897,14 @@ export function createReducer(players: Players): Reducer {
                       ),
                     };
               }),
+            },
+      heroChoice:
+        heroChoice === null
+          ? null
+          : {
+              id: heroChoice.id,
+              sourceCardId: heroChoice.sourceCardId,
+              options: heroChoice.options,
             },
       trinketsByPlayer,
       activatedEntityIds: [...activatedEntityIds].sort((a, b) => a - b),

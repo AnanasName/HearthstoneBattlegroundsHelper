@@ -81,7 +81,14 @@ function searchOptions(args: Args): { budgetMs?: number; screenBudgetMs?: number
 }
 
 function printSituation(state: GameState, advice: TavernAdvice | null, cards: CardIndex): void {
-  // До выбора героя советовать нечего, а печатать пустую шапку — шум.
+  // Открытый выбор героя — свой экран; сущность героя-заготовки уже может
+  // существовать, поэтому признак — сам выбор.
+  const picks = advice?.heroChoice ?? [];
+  if (picks.length > 0) {
+    console.log('\n══ выбор героя');
+    for (const h of picks) console.log(`   ◆ ${h.name} — ${h.reason}`);
+    return;
+  }
   if (state.hero === null) return;
 
   console.log(`\n══ ${situationLine(state)}`);

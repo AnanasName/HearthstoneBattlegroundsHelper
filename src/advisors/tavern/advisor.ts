@@ -1,4 +1,5 @@
 import { RACE_ALL, type CardIndex } from '../../data/cards.js';
+import { sharedBgStats, type BgStats } from '../../data/bgStats.js';
 import type { ChoiceOption, GameState, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, type TavernRules } from './rules.js';
 
@@ -107,7 +108,52 @@ export interface TrinketAdvice {
   readonly name: string;
   /** Своих миньонов из племён, которые текст тринкета называет словами. */
   readonly tribeMinions: number;
+  /** Среднее место по статистике Firestone. `null` — нет данных. */
+  readonly averagePlacement?: number | null;
   readonly reason: string;
+}
+
+/** Один вариант выбора героя со статистикой мест. */
+export interface HeroChoiceAdvice {
+  readonly option: ChoiceOption;
+  readonly name: string;
+  /** Среднее место по статистике Firestone. `null` — нет данных. */
+  readonly averagePosition: number | null;
+  readonly reason: string;
+}
+
+/**
+ * Совет по выбору героя — ранжирование статистикой мест.
+ *
+ * Своих правил ценности у героев нет и не выдумывается: сила героя,
+ * стартовая броня и кривая — это ровно то, что уже свёрнуто в среднем месте
+ * по реальным партиям (снапшот Firestone, `npm run update:bgstats`).
+ * Скины приводятся к базовой карте внутри справочника статистики.
+ * Без снапшота честно говорится «статистики нет».
+ */
+export function heroChoiceAdvice(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+): HeroChoiceAdvice[] {
+  const choice = state.heroChoice;
+  if (choice === null || choice.options.length === 0) return [];
+  const stats = bgStatsOf(deps);
+
+  return choice.options
+    .map((option) => {
+      const stat = stats?.hero(option.cardId) ?? null;
+      return {
+        option,
+        name: deps.cards.info(option.cardId)?.name ?? option.cardId,
+        averagePosition: stat?.averagePosition ?? null,
+        reason:
+          stat === null
+            ? 'статистики по герою нет'
+            : `по статистике среднее место ${stat.averagePosition.toFixed(2)}` +
+              ` (${stat.dataPoints.toLocaleString('ru-RU')} партий)`,
+      };
+    })
+    .sort((a, b) => (a.averagePosition ?? 9) - (b.averagePosition ?? 9));
 }
 
 export interface TavernAdvice {
@@ -135,10 +181,28 @@ export interface TavernAdvice {
    * Пусто, когда карт меньше двух — там хватает обычной рекомендации.
    */
   readonly playPlan: readonly PlanStep[];
+  /**
+   * Открытый выбор героя в начале партии, лучший по статистике первым.
+   * Пусто всю остальную партию.
+   */
+  readonly heroChoice: readonly HeroChoiceAdvice[];
 }
 
 export interface TavernAdvisorDeps {
   readonly cards: CardIndex;
+  /**
+   * Статистика мест из снапшота Firestone (`npm run update:bgstats`).
+   *
+   * Необязательна: `undefined` — взять общий снапшот с диска (его может
+   * не быть, тогда советы живут без статистики), `null` — явно без неё
+   * (тесты правил, которым статистика мешала бы).
+   */
+  readonly bgStats?: BgStats | null;
+}
+
+/** Статистика: из зависимостей или общий снапшот с диска. */
+function bgStatsOf(deps: TavernAdvisorDeps): BgStats | null {
+  return deps.bgStats === undefined ? sharedBgStats() : deps.bgStats;
 }
 
 /** Племена миньона по справочнику. Пустой список у нейтральных. */
@@ -1551,10 +1615,12 @@ export function darkGiftRule(
  */
 export function trinketAdvice(
   state: GameState,
-  { cards }: TavernAdvisorDeps,
+  deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): TrinketAdvice[] {
+  const { cards } = deps;
   if (state.trinketOffer.length === 0) return [];
+  const stats = bgStatsOf(deps);
 
   const scored = state.trinketOffer.map((offer) => {
     const info = cards.info(offer.cardId);
@@ -1591,20 +1657,34 @@ export function trinketAdvice(
     const unseenNote =
       unseen.length > 0 ? ` (${unseen.join('/')} в витринах партии не встречалось)` : '';
 
+    // Статистика мест из снапшота Firestone: данные, а не мнение. Особенно
+    // ценна там, где прежде было голое «оценить не берёмся».
+    const stat = stats?.trinket(offer.cardId) ?? null;
+    const statNote =
+      stat === null ? '' : `; по статистике место ${stat.averagePlacement.toFixed(2)}`;
+
     return {
       offer,
       name,
       tribeMinions,
+      averagePlacement: stat?.averagePlacement ?? null,
       reason:
-        tribes.length === 0
-          ? 'эффект вне племён — оценить не берёмся'
+        (tribes.length === 0
+          ? 'эффект вне племён'
           : tribeMinions === 0
             ? `для племени ${tribes.join('/')}, а своих таких нет${unseenNote}`
-            : `упоминает ${tribes.join('/')} — своих ${String(tribeMinions)}${unseenNote}`,
+            : `упоминает ${tribes.join('/')} — своих ${String(tribeMinions)}${unseenNote}`) +
+        (tribes.length === 0 && stat === null ? ' — оценить не берёмся' : statNote),
     };
   });
 
-  return scored.sort((a, b) => b.tribeMinions - a.tribeMinions);
+  // Сначала свои племена — статистика глобальна и нашего борда не знает;
+  // при равных своих разводит среднее место.
+  return scored.sort(
+    (a, b) =>
+      b.tribeMinions - a.tribeMinions ||
+      (a.averagePlacement ?? 9) - (b.averagePlacement ?? 9),
+  );
 }
 
 /** Один вариант открытого выбора «возьмите одно из» с оценкой. */
@@ -1818,7 +1898,23 @@ export function adviseTavern(
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): TavernAdvice | null {
-  if (state.phase !== 'tavern' || state.hero === null) return null;
+  if (state.phase !== 'tavern') return null;
+
+  // До выбора героя советовать нечего, КРОМЕ самого выбора героя: он идёт
+  // тем же каналом выборов, и его ранжирует статистика мест.
+  if (state.hero === null) {
+    if (state.heroChoice === null) return null;
+    return {
+      recommendations: [],
+      gold: state.gold,
+      targetTier: targetTier(state.turn, rules),
+      shopValues: [],
+      trinkets: [],
+      choice: [],
+      playPlan: [],
+      heroChoice: heroChoiceAdvice(state, deps),
+    };
+  }
 
   const buys = buyRules(state, deps, rules);
   const plays = playRules(state, deps, rules);
@@ -1881,5 +1977,6 @@ export function adviseTavern(
     trinkets: trinketAdvice(state, deps, rules),
     choice: choiceAdvice(state, deps, rules),
     playPlan: playPlan(state, deps, plays, rules),
+    heroChoice: heroChoiceAdvice(state, deps),
   };
 }

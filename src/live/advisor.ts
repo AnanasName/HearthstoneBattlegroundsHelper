@@ -134,6 +134,11 @@ export function situationKey(state: GameState): string {
     state.openChoice === null
       ? '-'
       : `${String(state.openChoice.id)}:${state.openChoice.options.map((o) => o.entityId).join(',')}`,
+    // Выбор героя — самое первое положение партии: кроме него в состоянии
+    // ещё ничего нет, и без него в ключе совет по героям никто не увидит.
+    state.heroChoice === null
+      ? '-'
+      : `${String(state.heroChoice.id)}:${state.heroChoice.options.map((o) => o.entityId).join(',')}`,
   ].join('|');
 }
 
