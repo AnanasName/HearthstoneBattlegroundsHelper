@@ -68,7 +68,8 @@ function printTurn(state: GameState, advice: TavernAdvice, cards: CardIndex): vo
       `    ${describe(minion, cards).padEnd(52)} ценность ${value.total.toFixed(1)}` +
         `  (тир ${value.techLevel.toFixed(1)} статы ${value.stats.toFixed(1)}` +
         ` племя ${value.tribe.toFixed(1)} слова ${value.keywords.toFixed(1)}` +
-        ` копии ${value.copies.toFixed(1)} экономика ${value.economy.toFixed(1)})`,
+        ` копии ${value.copies.toFixed(1)} экономика ${value.economy.toFixed(1)}` +
+        ` бой ${value.battle.toFixed(1)})`,
     );
   }
 

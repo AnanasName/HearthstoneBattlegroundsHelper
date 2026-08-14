@@ -1216,10 +1216,12 @@ describe('племя, названное в тексте карты', () => {
       hand: [minion(9, { cardId: 'HOG', techLevel: 6, attack: 5, health: 7 })],
     });
 
-    // Как было: без веса текстового племени жертвой выбиралась Ученица.
+    // Как было: жертвой выбиралась Ученица. Теперь её держат ДВА слагаемых —
+    // племя из текста и боевой призыв («Summon plain copies…»), поэтому
+    // ветка «как было» отключает оба.
     const noText = {
       ...DEFAULT_TAVERN_RULES,
-      value: { ...DEFAULT_TAVERN_RULES.value, perTextTribeMate: 0 },
+      value: { ...DEFAULT_TAVERN_RULES.value, perTextTribeMate: 0, battleEffect: 0 },
     };
     expect(playRules(s, textDeps, noText)[0]?.sellFirst?.cardId).toBe('KANGOR');
 
@@ -1803,5 +1805,89 @@ describe('состав племён партии по витрине', () => {
     });
     const advice = trinketAdvice(s, { cards: lobbyCards });
     expect(advice[0]?.reason).not.toContain('не встречалось');
+  });
+});
+
+describe('боевой эффект из текста и кап ключевых слов', () => {
+  const battleCards = createCardIndex([
+    {
+      id: 'BAT',
+      name: 'Мышь с ралли',
+      techLevel: 1,
+      races: ['BEAST'],
+      isBaconPool: true,
+      text: '<b>Rally:</b> Summon a {0}/{1} Beast.',
+    },
+    { id: 'PLAIN', name: 'Голое тело', techLevel: 1, races: ['NAGA'], isBaconPool: true },
+    {
+      id: 'TRIGGER',
+      name: 'Триггер на призыв',
+      techLevel: 1,
+      races: [],
+      isBaconPool: true,
+      text: 'After you summon a Beast, gain +1 Attack.',
+    },
+  ]);
+  const battleDeps = { cards: battleCards };
+
+  it('«Rally: Summon» ценится, триггер «After you summon» — нет (part6, ход 1)', () => {
+    // Flittering Bat выигрывала бой в 100% там, где лучшее по статам — в 0%:
+    // второе тело на раннем борде решает всё, а в статах его не видно.
+    const bat = minionValue(
+      minion(1, { cardId: 'BAT', attack: 1, health: 3, techLevel: 1 }),
+      state(),
+      battleDeps,
+    );
+    expect(bat.battle).toBeGreaterThan(0);
+
+    const trigger = minionValue(
+      minion(2, { cardId: 'TRIGGER', techLevel: 1 }),
+      state(),
+      battleDeps,
+    );
+    expect(trigger.battle).toBe(0);
+
+    const plain = minionValue(
+      minion(3, { cardId: 'PLAIN', attack: 3, health: 2, techLevel: 1 }),
+      state(),
+      battleDeps,
+    );
+    expect(bat.total).toBeGreaterThan(plain.total);
+  });
+
+  it('щит и вихрь не стоят дороже тела, которое усиливают (part7, ход 3)', () => {
+    // Crackling Cyclone 2/1 со щитом и вихрем советовался против Molten Rock
+    // 3/3 при цене промаха 50 п.п.: полный вес щита на полутора очках статов.
+    const small = minionValue(
+      minion(1, {
+        cardId: 'PLAIN',
+        attack: 2,
+        health: 1,
+        techLevel: 1,
+        divineShield: true,
+        windfury: true,
+      }),
+      state(),
+      battleDeps,
+    );
+    // Щит ≤ статов в очках (1.5), вихрь ≤ атаки в очках (1).
+    expect(small.keywords).toBeCloseTo(2.5, 5);
+
+    const big = minionValue(
+      minion(2, {
+        cardId: 'PLAIN',
+        attack: 8,
+        health: 8,
+        techLevel: 1,
+        divineShield: true,
+        windfury: true,
+      }),
+      state(),
+      battleDeps,
+    );
+    expect(big.keywords).toBeCloseTo(
+      DEFAULT_TAVERN_RULES.value.divineShield + DEFAULT_TAVERN_RULES.value.windfury,
+      5,
+    );
   });
 });

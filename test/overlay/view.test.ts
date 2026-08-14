@@ -196,6 +196,7 @@ describe('вид оверлея', () => {
       copies: 0,
       golden: 0,
       economy: 0,
+      battle: 0,
       textTribe: 0,
       total,
       tribeMates: 0,

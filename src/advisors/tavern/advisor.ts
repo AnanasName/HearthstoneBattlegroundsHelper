@@ -87,6 +87,8 @@ export interface ValueBreakdown {
   readonly golden: number;
   /** Экономический эффект, распознанный по тексту карты. */
   readonly economy: number;
+  /** Боевой эффект из текста: ралли, призывы — в бою сильнее статов. */
+  readonly battle: number;
   /** Синергия с племенем, которое карта называет словами, не входя в него. */
   readonly textTribe: number;
   readonly total: number;
@@ -225,12 +227,18 @@ export function minionValue(
   const mates = tribeMates(candidate, state.board, cards);
   const tribe = mates * w.perTribeMate;
 
+  // Щит, вихрь и перерождение усиливают САМО тело и не могут стоить дороже
+  // него: щит на 2/1 спасает полтора очка статов, а не три. Найдено сверкой
+  // с симулятором (part7, ход 3): Crackling Cyclone 2/1 со щитом и вихрем
+  // советовался против Molten Rock 3/3 при цене промаха 50 п.п. Провокация
+  // и яд телом не меряются: они меняют чужое поведение и чужие тела.
+  const attackPoints = (candidate.attack ?? 0) * w.perStatPoint;
   const keywords =
     (candidate.taunt ? w.taunt : 0) +
-    (candidate.divineShield ? w.divineShield : 0) +
+    (candidate.divineShield ? Math.min(w.divineShield, stats) : 0) +
     (candidate.poisonous || candidate.venomous ? w.poisonous : 0) +
-    (candidate.windfury ? w.windfury : 0) +
-    (candidate.reborn ? w.reborn : 0);
+    (candidate.windfury ? Math.min(w.windfury, attackPoints) : 0) +
+    (candidate.reborn ? Math.min(w.reborn, stats) : 0);
 
   const owned = copiesOwned(candidate, state);
   // Больше двух копий бонус не растёт: тройка собирается ровно из трёх.
@@ -245,6 +253,14 @@ export function minionValue(
   const economy =
     text !== '' && rules.economyTextWords.some((word) => new RegExp(word, 'i').test(text))
       ? w.economy
+      : 0;
+
+  // Боевой эффект из текста: ралли и призывы делают миньона в бою сильнее
+  // его статов, и сверка с симулятором показала это ценой до 100 п.п.
+  // (part6, ход 1: Flittering Bat с «Rally: Summon a Beast»).
+  const battle =
+    text !== '' && rules.battleTextWords.some((word) => new RegExp(word, 'i').test(text))
+      ? w.battleEffect
       : 0;
 
   // Племя, названное словами в тексте, — та же связь с композицией, что
@@ -266,8 +282,9 @@ export function minionValue(
     copies,
     golden,
     economy,
+    battle,
     textTribe,
-    total: tech + stats + tribe + keywords + copies + golden + economy + textTribe,
+    total: tech + stats + tribe + keywords + copies + golden + economy + battle + textTribe,
     tribeMates: mates,
     textTribeMates: textMates,
     copiesOwned: owned,

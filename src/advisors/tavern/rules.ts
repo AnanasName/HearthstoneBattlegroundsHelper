@@ -99,6 +99,17 @@ export interface TavernRules {
      */
     readonly economy: number;
     /**
+     * Боевой эффект из текста карты: в бою она сильнее своих статов.
+     *
+     * Найдено сверкой с симулятором. part6, ход 1: Flittering Bat 1/3
+     * «Rally: Summon a Beast» выигрывает бой в 100% случаев там, где миньон
+     * с лучшими статами — в 0%: второе тело на раннем борде решает всё.
+     * part11, ход 1: Tusked Camper «Rally: plays a Blood Gem on itself»
+     * лучше на 50 п.п. Ни призыва, ни ралли-баффа в статах и ключевых
+     * словах не видно. Слова — из опубликованных текстов, как у экономики.
+     */
+    readonly battleEffect: number;
+    /**
      * За каждого своего миньона племени, которое карта называет СЛОВАМИ
      * в тексте, не входя в него сама.
      *
@@ -124,6 +135,16 @@ export interface TavernRules {
    * текста, не выдуманная таблица.
    */
   readonly economyTextWords: readonly string[];
+
+  /**
+   * Признаки боевого эффекта в тексте карты.
+   *
+   * «Rally:» — эффект старта боя (Bat, Tusked Camper, Glim Guardian);
+   * «Summon» — ещё тело в бою (хрипы-призывы). «Summon» после «you»/«your» —
+   * это ТРИГГЕР на чужой призыв («After you summon a Beast…»), сам ничего
+   * не призывающий; отрицательный просмотр назад отсекает его.
+   */
+  readonly battleTextWords: readonly string[];
 
   /**
    * Сколько добавляет каждая уже имеющаяся копия карты.
@@ -302,10 +323,15 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     windfury: 2,
     reborn: 2,
     economy: 2.5,
+    // Примерно полтела раннего миньона: боевой эффект стоит как пара статов,
+    // но не как целая покупка.
+    battleEffect: 2.5,
     perTextTribeMate: 1,
   },
 
   economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],
+
+  battleTextWords: ['rally:', '(?<!you |your )summons? '],
 
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],
