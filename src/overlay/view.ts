@@ -1,5 +1,5 @@
 import type { PositionAdvice } from '../advisors/position/advisor.js';
-import type { ResolvedOpponent } from '../advisors/position/opponent.js';
+import type { PositionTarget, ResolvedOpponent } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState } from '../state/types.js';
@@ -67,7 +67,7 @@ export interface ViewInput {
   /** Идёт ли счёт расстановки прямо сейчас. */
   readonly thinking: boolean;
   readonly position:
-    | { readonly kind: 'advice'; readonly advice: PositionAdvice; readonly opponent: ResolvedOpponent }
+    | { readonly kind: 'advice'; readonly advice: PositionAdvice; readonly target: PositionTarget }
     | { readonly kind: 'dropped' }
     | { readonly kind: 'noOpponent'; readonly opponent: ResolvedOpponent }
     | null;
@@ -148,8 +148,8 @@ function positionView(input: ViewInput, cards: CardIndex): OverlayLine | null {
     return { text: noOpponentReason(position.opponent), tone: 'muted' };
   }
 
-  const text = positionLine(position.advice, position.opponent, cards);
-  if (opponentStale(position.opponent)) {
+  const text = positionLine(position.advice, position.target, cards);
+  if (opponentStale(position.target)) {
     // Не «плохой совет», а совет по устаревшим данным: разница существенная,
     // и прятать её нельзя.
     return { text: `${text} — картинка устарела, верить нельзя`, tone: 'warn' };

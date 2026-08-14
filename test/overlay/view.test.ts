@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { PositionAdvice } from '../../src/advisors/position/advisor.js';
-import type { ResolvedOpponent } from '../../src/advisors/position/opponent.js';
+import type { PositionTarget, ResolvedOpponent } from '../../src/advisors/position/opponent.js';
 import type {
   Recommendation,
   TavernAdvice,
@@ -92,6 +92,23 @@ function opponent(patch: Partial<ResolvedOpponent> = {}): ResolvedOpponent {
     staleTurns: 2,
     usable: true,
     ...patch,
+  };
+}
+
+function single(patch: Partial<ResolvedOpponent> = {}): PositionTarget {
+  return { kind: 'single', opponent: opponent(patch) };
+}
+
+/** Цель-поле с заданными давностями бордов. */
+function field(staleTurns: readonly number[]): PositionTarget {
+  return {
+    kind: 'field',
+    boards: staleTurns.map((stale, i) => ({
+      playerId: i + 2,
+      board: board([301 + i]),
+      seenOnTurn: 9 - stale,
+      staleTurns: stale,
+    })),
   };
 }
 
@@ -259,7 +276,7 @@ describe('вид оверлея', () => {
 
   it('идущий счёт показывается вместо прошлого совета', () => {
     const view = buildView(
-      input({ thinking: true, position: { kind: 'advice', advice: advice(), opponent: opponent() } }),
+      input({ thinking: true, position: { kind: 'advice', advice: advice(), target: single() } }),
       cards,
     );
 
@@ -284,7 +301,7 @@ describe('вид оверлея', () => {
 
   it('свежий совет показывается как совет', () => {
     const view = buildView(
-      input({ position: { kind: 'advice', advice: advice(), opponent: opponent() } }),
+      input({ position: { kind: 'advice', advice: advice(), target: single() } }),
       cards,
     );
 
@@ -296,7 +313,7 @@ describe('вид оверлея', () => {
   it('совет по устаревшей картинке помечается', () => {
     const view = buildView(
       input({
-        position: { kind: 'advice', advice: advice(), opponent: opponent({ staleTurns: 13 }) },
+        position: { kind: 'advice', advice: advice(), target: single({ staleTurns: 13 }) },
       }),
       cards,
     );
@@ -305,5 +322,43 @@ describe('вид оверлея', () => {
     // выходит 100% побед против того, чего давно нет.
     expect(view.position?.tone).toBe('warn');
     expect(view.position?.text).toContain('устарела');
+  });
+
+  it('совет против поля называет, из скольких бордов оно собрано', () => {
+    const view = buildView(
+      input({ position: { kind: 'advice', advice: advice(), target: field([1, 3, 5]) } }),
+      cards,
+    );
+
+    // Игрок обязан видеть, что это средний исход по полю, а не бой
+    // с конкретным противником: смысл чисел другой.
+    expect(view.position?.tone).toBe('good');
+    expect(view.position?.text).toContain('по полю из 3 бордов');
+    expect(view.position?.text).toContain('1–5 ходов');
+
+    // Поле из одного борда — не «из 1 бордов»: подпись читает человек.
+    const one = buildView(
+      input({ position: { kind: 'advice', advice: advice(), target: field([2]) } }),
+      cards,
+    );
+    expect(one.position?.text).toContain('из 1 борда');
+    expect(one.position?.text).toContain('давность 2 хода');
+  });
+
+  it('поле из одних устаревших бордов помечается, из свежих и старых — нет', () => {
+    const allStale = buildView(
+      input({ position: { kind: 'advice', advice: advice(), target: field([6, 9, 13]) } }),
+      cards,
+    );
+    expect(allStale.position?.tone).toBe('warn');
+    expect(allStale.position?.text).toContain('устарела');
+
+    // Пока хоть одна картинка свежа, средний исход опирается не только
+    // на прошлое — пугать игрока не за что.
+    const mixed = buildView(
+      input({ position: { kind: 'advice', advice: advice(), target: field([1, 9, 13]) } }),
+      cards,
+    );
+    expect(mixed.position?.tone).toBe('good');
   });
 });

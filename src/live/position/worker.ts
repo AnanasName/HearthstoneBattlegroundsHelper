@@ -28,7 +28,7 @@ port.on('message', (request: WorkerRequest) => {
 
   try {
     const advice = advisePosition(
-      request.setup,
+      request.setups,
       {
         simulator,
         // Ждут не нас — значит, ответ уже никому не нужен.

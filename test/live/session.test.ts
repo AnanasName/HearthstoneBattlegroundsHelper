@@ -24,10 +24,10 @@ import { part3Game } from '../fixtures.js';
  */
 
 class SilentPosition implements PositionSource {
-  readonly calls: BattleSetup[] = [];
+  readonly calls: (readonly BattleSetup[])[] = [];
 
-  advise(setup: BattleSetup): Promise<PositionAdvice | null> {
-    this.calls.push(setup);
+  advise(setups: readonly BattleSetup[]): Promise<PositionAdvice | null> {
+    this.calls.push(setups);
     // Счёт расстановки здесь не при чём: он проверен отдельно.
     return Promise.resolve(null);
   }

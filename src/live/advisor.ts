@@ -1,7 +1,11 @@
 import type { BattleSetup } from '../advisors/battle/mapper.js';
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import { positionQuestion } from '../advisors/position/advisor.js';
-import { resolveOpponent, type ResolvedOpponent } from '../advisors/position/opponent.js';
+import {
+  resolveOpponent,
+  type PositionTarget,
+  type ResolvedOpponent,
+} from '../advisors/position/opponent.js';
 import type { SearchOptions } from '../advisors/position/search.js';
 import { adviseTavern, type TavernAdvice } from '../advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from '../advisors/tavern/rules.js';
@@ -34,7 +38,10 @@ import type { GameState, Minion } from '../state/types.js';
  * проверять заодно и симулятор — он проверен в фазе 3.
  */
 export interface PositionSource {
-  advise(setup: BattleSetup, overrides?: Partial<SearchOptions>): Promise<PositionAdvice | null>;
+  advise(
+    setups: readonly BattleSetup[],
+    overrides?: Partial<SearchOptions>,
+  ): Promise<PositionAdvice | null>;
   cancel(): void;
 }
 
@@ -66,17 +73,15 @@ export interface LiveAdvisorHandlers {
   /** Счёт расстановки закончен. `null` — бросили, положение ушло вперёд. */
   readonly onPosition?: (
     advice: PositionAdvice | null,
-    opponent: ResolvedOpponent,
+    target: PositionTarget,
     state: GameState,
   ) => void;
   /**
-   * Расстановку считать не против кого.
+   * Расстановку считать не на чем: ни противника, ни единого виденного борда.
    *
-   * Это не редкость, а обычное положение первой половины партии: следующий
-   * противник известен заранее, но борд его виден только после боя с ним.
-   * В обеих полных фикстурах до 13-го хода включительно следующий противник
-   * ни разу не был из числа виденных. Молчать об этом нельзя — со стороны
-   * неотличимо от сломанного советника.
+   * С целью-полем это уже не полпартии, а только первые ходы до первого боя:
+   * дальше хоть один борд виден, и счёт идёт против поля. Но молчать и здесь
+   * нельзя — со стороны неотличимо от сломанного советника.
    */
   readonly onNoOpponent?: (opponent: ResolvedOpponent, state: GameState) => void;
   readonly onError?: (error: Error) => void;
@@ -190,13 +195,13 @@ export class LiveAdvisor {
 
     this.#handlers.onThinking?.(state);
     this.#deps.position
-      .advise(question.setup, this.#options.search)
+      .advise(question.setups, this.#options.search)
       .then((advice) => {
         // Ключ мог смениться, пока считали: тогда ответ уже не про это
         // положение, и показывать его нельзя. Но и промолчать нельзя —
         // «не успели» это тоже ответ, и интерфейс обязан его показать,
         // иначе неотличимо от «советник не работает».
-        this.#handlers.onPosition?.(key === this.#key ? advice : null, question.opponent, state);
+        this.#handlers.onPosition?.(key === this.#key ? advice : null, question.target, state);
       })
       .catch((error: unknown) => {
         this.#handlers.onError?.(error instanceof Error ? error : new Error(String(error)));

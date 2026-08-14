@@ -17,12 +17,12 @@ import { board, minion } from '../minions.js';
 
 /** Счётчик расстановки, которым можно управлять из теста. */
 class FakePosition implements PositionSource {
-  readonly calls: BattleSetup[] = [];
+  readonly calls: (readonly BattleSetup[])[] = [];
   cancels = 0;
   #resolve: ((advice: PositionAdvice | null) => void) | null = null;
 
-  advise(setup: BattleSetup): Promise<PositionAdvice | null> {
-    this.calls.push(setup);
+  advise(setups: readonly BattleSetup[]): Promise<PositionAdvice | null> {
+    this.calls.push(setups);
     return new Promise((resolve) => {
       this.#resolve = resolve;
     });
@@ -140,12 +140,12 @@ describe('живой советник: когда звать и когда бр�
     });
   });
 
-  it('без картинки противника счёт не начинается, но и молчания нет', async () => {
+  it('ни одного виденного борда — счёт не начинается, но и молчания нет', async () => {
     const onNoOpponent = vi.fn();
     const advisor = new LiveAdvisor({ cards, position }, { onNoOpponent }, { quietMs: QUIET });
 
-    // Следующий противник объявлен, но борда его мы не видели — обычное дело
-    // до середины партии.
+    // Следующий противник объявлен, но ни одного чужого борда ещё не видели —
+    // первые ходы до первого боя.
     advisor.update({ ...tavernState(), nextOpponentPlayerId: 5 });
 
     await vi.waitFor(() => {
@@ -153,6 +153,27 @@ describe('живой советник: когда звать и когда бр�
     });
     expect(position.calls).toHaveLength(0);
     expect(onNoOpponent.mock.calls[0]?.[0]).toMatchObject({ source: 'unseen', usable: false });
+  });
+
+  it('следующего не видели, но поле есть — счёт идёт против поля', async () => {
+    const onNoOpponent = vi.fn();
+    const advisor = new LiveAdvisor({ cards, position }, { onNoOpponent }, { quietMs: QUIET });
+
+    // Раньше здесь было молчание всю первую половину партии: следующий
+    // противник ни разу не из числа виденных до 13-го хода. Теперь счёт идёт
+    // против всех виденных бордов — по сетапу на каждый.
+    advisor.update({
+      ...tavernState(),
+      nextOpponentPlayerId: 5,
+      lastSeenBoards: { 6: board([201]), 7: board([202]) },
+      lastSeenBoardTurns: { 6: 5, 7: 7 },
+    });
+
+    await vi.waitFor(() => {
+      expect(position.calls).toHaveLength(1);
+    });
+    expect(position.calls[0]).toHaveLength(2);
+    expect(onNoOpponent).not.toHaveBeenCalled();
   });
 
   it('в бою расстановку не считаем', async () => {

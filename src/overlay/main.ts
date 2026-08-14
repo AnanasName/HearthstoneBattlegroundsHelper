@@ -159,9 +159,9 @@ function start(): void {
         thinking = true;
         show();
       },
-      onPosition: (advice, opponent) => {
+      onPosition: (advice, target) => {
         thinking = false;
-        last = advice === null ? { kind: 'dropped' } : { kind: 'advice', advice, opponent };
+        last = advice === null ? { kind: 'dropped' } : { kind: 'advice', advice, target };
         show();
       },
       onNoOpponent: (opponent) => {

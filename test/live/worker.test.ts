@@ -31,7 +31,7 @@ describe('воркер расстановки', () => {
   });
 
   it('считает совет и отвечает расстановкой', async () => {
-    const advice = await worker.advise(episode, { budgetMs: 1500, screenBudgetMs: 700 });
+    const advice = await worker.advise([episode], { budgetMs: 1500, screenBudgetMs: 700 });
 
     expect(advice).not.toBeNull();
     expect(advice?.top[0]?.board).toHaveLength(episode.playerBoard.length);
@@ -42,7 +42,7 @@ describe('воркер расстановки', () => {
     const ticks: number[] = [];
     const timer = setInterval(() => ticks.push(Date.now()), 20);
     try {
-      await worker.advise(episode, { budgetMs: 1500, screenBudgetMs: 700 });
+      await worker.advise([episode], { budgetMs: 1500, screenBudgetMs: 700 });
     } finally {
       clearInterval(timer);
     }
@@ -52,8 +52,8 @@ describe('воркер расстановки', () => {
   }, 60_000);
 
   it('новый запрос бросает незаконченный предыдущий', async () => {
-    const stale = worker.advise(episode);
-    const fresh = worker.advise(episode, { budgetMs: 1500, screenBudgetMs: 700 });
+    const stale = worker.advise([episode]);
+    const fresh = worker.advise([episode], { budgetMs: 1500, screenBudgetMs: 700 });
 
     // null — это не «ничего не нашли», а «ответ уже никому не нужен».
     await expect(stale).resolves.toBeNull();
@@ -61,7 +61,7 @@ describe('воркер расстановки', () => {
   }, 120_000);
 
   it('отмена прекращает счёт', async () => {
-    const running = worker.advise(episode);
+    const running = worker.advise([episode]);
     worker.cancel();
 
     await expect(running).resolves.toBeNull();

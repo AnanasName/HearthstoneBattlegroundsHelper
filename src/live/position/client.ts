@@ -86,7 +86,7 @@ export class PositionWorker {
    * состояние ушло вперёд, и ответ относился бы уже не к нему.
    */
   advise(
-    setup: BattleSetup,
+    setups: readonly BattleSetup[],
     overrides: Partial<SearchOptions> = {},
   ): Promise<PositionAdvice | null> {
     if (this.#closed) return Promise.reject(new Error('воркер расстановки закрыт'));
@@ -98,7 +98,7 @@ export class PositionWorker {
 
     return new Promise<PositionAdvice | null>((resolve, reject) => {
       this.#waiting.set(id, { resolve, reject });
-      const request: WorkerRequest = { type: 'advise', id, setup, overrides };
+      const request: WorkerRequest = { type: 'advise', id, setups, overrides };
       this.#worker.postMessage(request);
     });
   }

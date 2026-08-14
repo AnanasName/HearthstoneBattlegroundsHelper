@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 
 import type { PositionAdvice } from '../advisors/position/advisor.js';
-import type { ResolvedOpponent } from '../advisors/position/opponent.js';
+import type { PositionTarget } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
 import { LiveAdvisor, type LiveAdvisorHandlers } from '../live/advisor.js';
@@ -129,7 +129,7 @@ function printSituation(state: GameState, advice: TavernAdvice | null, cards: Ca
 
 function printPosition(
   advice: PositionAdvice | null,
-  opponent: ResolvedOpponent,
+  target: PositionTarget,
   cards: CardIndex,
 ): void {
   if (advice === null) {
@@ -137,9 +137,9 @@ function printPosition(
     return;
   }
 
-  console.log(`   расстановка: ${positionLine(advice, opponent, cards)}`);
+  console.log(`   расстановка: ${positionLine(advice, target, cards)}`);
 
-  if (opponentStale(opponent)) {
+  if (opponentStale(target)) {
     console.log('                картинка противника устарела, полагаться на числа нельзя');
   }
 }
@@ -188,8 +188,8 @@ async function main(): Promise<void> {
     onTavern: (advice, state) => {
       printSituation(state, advice, cards);
     },
-    onPosition: (advice, opponent) => {
-      printPosition(advice, opponent, cards);
+    onPosition: (advice, target) => {
+      printPosition(advice, target, cards);
     },
     onNoOpponent: (opponent) => {
       console.log(`   расстановка: ${noOpponentReason(opponent)}`);

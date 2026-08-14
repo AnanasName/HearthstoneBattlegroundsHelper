@@ -1,5 +1,5 @@
 import type { PositionAdvice } from '../advisors/position/advisor.js';
-import type { ResolvedOpponent } from '../advisors/position/opponent.js';
+import type { PositionTarget, ResolvedOpponent } from '../advisors/position/opponent.js';
 import type {
   ChoiceAdvice,
   PlanStep,
@@ -117,31 +117,59 @@ export function winPercent(estimate: { readonly sims: number; readonly won: numb
  */
 export const STALE_TURNS_LIMIT = 4;
 
-export function opponentStale(opponent: ResolvedOpponent): boolean {
-  return opponent.source === 'lastSeen' && opponent.staleTurns > STALE_TURNS_LIMIT;
+export function opponentStale(target: PositionTarget): boolean {
+  if (target.kind === 'single') {
+    return target.opponent.source === 'lastSeen' && target.opponent.staleTurns > STALE_TURNS_LIMIT;
+  }
+  // Поле устарело, только когда устарел КАЖДЫЙ борд в нём: пока хоть одна
+  // картинка свежа, средний исход опирается не только на прошлое.
+  return target.boards.every((b) => b.staleTurns > STALE_TURNS_LIMIT);
 }
 
-export function opponentSource(opponent: ResolvedOpponent): string {
-  return opponent.source === 'lastSeen'
-    ? `по борду ${String(opponent.staleTurns)} ходов давности`
+/** «1 ход», «3 хода», «13 ходов» — подпись не имеет права быть безграмотной. */
+function turnsLabel(n: number): string {
+  const mod100 = n % 100;
+  const mod10 = n % 10;
+  const word =
+    mod100 >= 11 && mod100 <= 14
+      ? 'ходов'
+      : mod10 === 1
+        ? 'ход'
+        : mod10 >= 2 && mod10 <= 4
+          ? 'хода'
+          : 'ходов';
+  return `${String(n)} ${word}`;
+}
+
+export function opponentSource(target: PositionTarget): string {
+  if (target.kind === 'field') {
+    const stale = target.boards.map((b) => b.staleTurns);
+    const min = Math.min(...stale);
+    const max = Math.max(...stale);
+    const age = min === max ? turnsLabel(min) : `${String(min)}–${String(max)} ходов`;
+    const count = target.boards.length;
+    return `в среднем по полю из ${String(count)} ${count === 1 ? 'борда' : 'бордов'}, давность ${age}`;
+  }
+  return target.opponent.source === 'lastSeen'
+    ? `по борду ${String(target.opponent.staleTurns)} ходов давности`
     : 'по текущему бою';
 }
 
-/** Почему расстановку считать не против кого. */
+/** Почему расстановку считать не на чем. */
 export function noOpponentReason(opponent: ResolvedOpponent): string {
-  return opponent.source === 'unseen'
-    ? 'следующего противника ещё не видели — считать не против кого'
-    : 'противник неизвестен';
+  return opponent.source === 'unknown'
+    ? 'противник неизвестен'
+    : 'чужих бордов ещё не видели — считать не против кого';
 }
 
 /** Совет по расстановке словами: что переставить и чего это стоит. */
 export function positionLine(
   advice: PositionAdvice,
-  opponent: ResolvedOpponent,
+  target: PositionTarget,
   cards: CardIndex,
 ): string {
   const odds = `${winPercent(advice.report.current.estimate).toFixed(0)}% побед`;
-  const spent = `${opponentSource(opponent)}, ${String(advice.elapsedMs)} мс`;
+  const spent = `${opponentSource(target)}, ${String(advice.elapsedMs)} мс`;
   const best = advice.top[0];
 
   if (!advice.improves || best === undefined) {

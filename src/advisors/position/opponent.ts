@@ -40,6 +40,30 @@ export interface ResolvedOpponent {
   readonly usable: boolean;
 }
 
+/** Один виденный борд поля: чей он, каков и насколько устарел. */
+export interface SeenBoard {
+  readonly playerId: number;
+  readonly board: readonly Minion[];
+  /** Ход, на котором борд снят. `null`, если редьюсер хода не записал. */
+  readonly seenOnTurn: number | null;
+  readonly staleTurns: number;
+}
+
+/**
+ * Против чего считать расстановку: один противник или всё поле.
+ *
+ * Цель-один — когда противник известен и его борд видели: это строго лучше
+ * любого усреднения. Но так бывает редко: замер по четырём партиям текущего
+ * патча (`npm run spike:field`) — из 27 точек решения цель-один есть в 11,
+ * а в 16 советник молчал, хотя на руках было от 3 до 7 виденных бордов.
+ * Следующий противник берётся из этого же множества — соперников семеро,
+ * и к середине партии мы видели почти всех. Поэтому вторая цель — поле:
+ * средний исход по всем виденным бордам.
+ */
+export type PositionTarget =
+  | { readonly kind: 'single'; readonly opponent: ResolvedOpponent }
+  | { readonly kind: 'field'; readonly boards: readonly SeenBoard[] };
+
 export function resolveOpponent(state: GameState): ResolvedOpponent {
   if (state.phase === 'combat' && state.opponentBoard.length > 0) {
     return {
@@ -71,4 +95,44 @@ export function resolveOpponent(state: GameState): ResolvedOpponent {
     staleTurns: seenOnTurn === null ? 0 : Math.max(0, state.turn - seenOnTurn),
     usable: true,
   };
+}
+
+/**
+ * Все виденные борды соперников — поле, по которому считается средний исход.
+ *
+ * Порядок фиксирован по `PlayerID`: от него зависят раздача симуляций
+ * по бордам и зёрна, а совет обязан быть воспроизводимым.
+ *
+ * Мёртвые соперники отсюда не выкидываются — редьюсер не знает, кто выбыл.
+ * Это не так страшно, как звучит: их борды перестают обновляться, давность
+ * растёт и видна в `staleTurns`, а бой с призраком играет ровно последний
+ * борд умершего.
+ */
+function seenBoards(state: GameState): SeenBoard[] {
+  return Object.entries(state.lastSeenBoards)
+    .filter(([, board]) => board.length > 0)
+    .map(([id, board]) => {
+      const playerId = Number(id);
+      const seenOnTurn = state.lastSeenBoardTurns[playerId] ?? null;
+      return {
+        playerId,
+        board,
+        seenOnTurn,
+        staleTurns: seenOnTurn === null ? 0 : Math.max(0, state.turn - seenOnTurn),
+      };
+    })
+    .sort((a, b) => a.playerId - b.playerId);
+}
+
+/**
+ * Цель счёта. `null` — считать не на чем: ни противника, ни единого
+ * виденного борда (первые ходы партии).
+ */
+export function resolveTarget(state: GameState): PositionTarget | null {
+  const opponent = resolveOpponent(state);
+  if (opponent.usable) return { kind: 'single', opponent };
+
+  const boards = seenBoards(state);
+  if (boards.length === 0) return null;
+  return { kind: 'field', boards };
 }

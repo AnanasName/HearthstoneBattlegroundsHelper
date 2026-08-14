@@ -31,7 +31,8 @@ import type { SearchOptions } from '../../advisors/position/search.js';
 export interface AdviseRequest {
   readonly type: 'advise';
   readonly id: number;
-  readonly setup: BattleSetup;
+  /** По сетапу на борд противника; поле присылает несколько. */
+  readonly setups: readonly BattleSetup[];
   readonly overrides: Partial<SearchOptions>;
 }
 
