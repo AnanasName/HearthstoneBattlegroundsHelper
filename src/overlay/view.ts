@@ -145,9 +145,17 @@ function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
     lines.push(recommendationLine(r, cards));
   }
 
-  return lines
+  const shown: OverlayLine[] = lines
     .slice(0, MAX_ACTIONS)
     .map((text, i) => ({ text, tone: i === 0 ? 'good' : 'normal' }));
+
+  // Напоминание о тринкетах — приглушённой строкой ПОВЕРХ лимита советов:
+  // это подготовка борда к следующему ходу (тьюторинг, docs/jeefhs.md),
+  // и прятаться за тремя покупками ей нельзя — тогда её не видно никогда.
+  const forecast = input.tavern?.trinketForecast ?? null;
+  if (forecast !== null) shown.push({ text: forecast, tone: 'muted' });
+
+  return shown;
 }
 
 function positionView(input: ViewInput, cards: CardIndex): OverlayLine | null {

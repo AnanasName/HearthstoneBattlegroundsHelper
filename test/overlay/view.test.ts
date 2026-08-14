@@ -54,6 +54,7 @@ const tavern: TavernAdvice = {
   choice: [],
   playPlan: [],
   heroChoice: [],
+  trinketForecast: null,
   recommendations: [
     {
       action: 'buy',
@@ -186,6 +187,19 @@ describe('вид оверлея', () => {
   it('покупка на полном борде называет, кого продать', () => {
     const view = buildView(input(), cards);
     expect(view.actions[0]?.text).toContain('продав');
+  });
+
+  it('напоминание о тринкетах — приглушённой строкой поверх лимита советов', () => {
+    // Напоминание — подготовка борда к следующему ходу (тьюторинг,
+    // docs/jeefhs.md); спрятанное за тремя покупками оно не видно никогда.
+    const withForecast = { ...tavern, trinketForecast: 'следующим ходом — выбор тринкета' };
+    const view = buildView(input({ tavern: withForecast }), cards);
+
+    const last = view.actions[view.actions.length - 1];
+    expect(last?.text).toContain('выбор тринкета');
+    expect(last?.tone).toBe('muted');
+    // Советы напоминание не вытесняет: все три строки на месте.
+    expect(view.actions).toHaveLength(4);
   });
 
   it('открытый выбор карт вытесняет советы, лучший помечен', () => {

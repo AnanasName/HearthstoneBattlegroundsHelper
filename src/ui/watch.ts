@@ -123,6 +123,10 @@ function printSituation(state: GameState, advice: TavernAdvice | null, cards: Ca
     shown += 1;
   }
 
+  if (advice.trinketForecast !== null) {
+    console.log(`   ✦ ${advice.trinketForecast}`);
+  }
+
   if (advice.choice.length > 0) {
     console.log('   открытый выбор:');
     for (const c of advice.choice) console.log(`     ◆ ${choiceLine(c)}`);

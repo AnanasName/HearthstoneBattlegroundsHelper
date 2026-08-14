@@ -190,6 +190,11 @@ export interface TavernAdvice {
    * Пусто всю остальную партию.
    */
   readonly heroChoice: readonly HeroChoiceAdvice[];
+  /**
+   * Напоминание за ход до предложения тринкетов (тьюторинг, docs/jeefhs.md).
+   * `null` всю остальную партию.
+   */
+  readonly trinketForecast: string | null;
 }
 
 export interface TavernAdvisorDeps {
@@ -1892,6 +1897,45 @@ export function trinketAdvice(
   );
 }
 
+/**
+ * Напоминание за ход до предложения тринкетов.
+ *
+ * Предложения открываются на ходах `trinketOfferTurns` (11 и 17 — 6-й
+ * и 9-й ходы таверны, замерено по всем партиям билда 248348), и игра
+ * подбирает их под борд — тьюторинг из базы знаний JeefHS, подтверждён
+ * игроком (docs/jeefhs.md). Напоминание называет племена, у которых
+ * уже есть 2+ своих, — их тринкеты и приедут; без таких — предупреждает,
+ * что предложение будет случайным.
+ *
+ * Амальгамы (`ALL`) в счёт не идут: тьюторингу нужен внятный сигнал
+ * борда, а амальгама «своя» для всех племён сразу.
+ */
+export function trinketForecast(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): string | null {
+  if (!rules.trinketOfferTurns.includes(state.turn + 2)) return null;
+
+  const counts = new Map<string, number>();
+  for (const m of state.board) {
+    for (const race of racesOf(m, deps.cards)) {
+      if (race === RACE_ALL) continue;
+      counts.set(race, (counts.get(race) ?? 0) + 1);
+    }
+  }
+  const strong = [...counts.entries()]
+    .filter(([, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .map(([race, n]) => `${race} ×${String(n)}`);
+
+  return strong.length > 0
+    ? `следующим ходом — выбор тринкета; предложение подбирается под борд, ` +
+        `своих 2+: ${strong.join(', ')}`
+    : 'следующим ходом — выбор тринкета; предложение подбирается под борд, ' +
+        'а племени с 2+ своими нет — держите пару миньонов желаемого племени';
+}
+
 /** Один вариант открытого выбора «возьмите одно из» с оценкой. */
 export interface ChoiceAdvice {
   readonly option: ChoiceOption;
@@ -2118,6 +2162,7 @@ export function adviseTavern(
       choice: [],
       playPlan: [],
       heroChoice: heroChoiceAdvice(state, deps),
+      trinketForecast: null,
     };
   }
 
@@ -2184,5 +2229,6 @@ export function adviseTavern(
     choice: choiceAdvice(state, deps, rules),
     playPlan: playPlan(state, deps, plays, rules),
     heroChoice: heroChoiceAdvice(state, deps),
+    trinketForecast: trinketForecast(state, deps, rules),
   };
 }

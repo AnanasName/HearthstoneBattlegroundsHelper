@@ -362,6 +362,19 @@ export interface TavernRules {
    * чтобы советовать продажу ради места.
    */
   readonly sellMargin: number;
+
+  /**
+   * Ходы, на которых открывается предложение тринкетов, — в НАШЕЙ нумерации
+   * (таверна идёт нечётными: 11 и 17 — это 6-й и 9-й ходы таверны).
+   *
+   * Замерено по всем двенадцати партиям билда 248348: предложение открыто
+   * в точках решения ходов 11 и 17 (part4 держал его дольше — игрок
+   * не выбирал). Смысл поля — напоминание ЗА ХОД до предложения: игра
+   * подбирает тринкеты под борд (тьюторинг, база JeefHS, подтверждено
+   * игроком), и к ходу предложения стоит держать 2+ миньонов племени,
+   * чей тринкет хочется увидеть.
+   */
+  readonly trinketOfferTurns: readonly number[];
 }
 
 export const DEFAULT_TAVERN_RULES: TavernRules = {
@@ -472,6 +485,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   rerollMarginOverTier: 2,
   lateRerollTier: 4,
+  trinketOfferTurns: [11, 17],
   freeze: {
     marginOverTier: 4,
     minTribeMates: 2,

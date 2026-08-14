@@ -25,6 +25,7 @@ import {
   spellRules,
   tribeMates,
   trinketAdvice,
+  trinketForecast,
 } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, targetTier } from '../../../src/advisors/tavern/rules.js';
 import { createCardIndex } from '../../../src/data/cards.js';
@@ -1203,6 +1204,44 @@ describe('правило розыгрыша из руки', () => {
       hand: [shopMinion(9, 'NEUTRAL', { attack: 1, health: 1 })],
     });
     expect(playRules(s, deps)).toHaveLength(0);
+  });
+});
+
+describe('напоминание о тринкетах за ход до предложения (тьюторинг, JeefHS)', () => {
+  it('называет племена с парой своих; амальгама не в счёт', () => {
+    // Предложения открываются на ходах 11 и 17 (замер по всем двенадцати
+    // партиям билда 248348), напоминание — за ход, на 9 и 15. Игра
+    // подбирает тринкеты под борд (docs/jeefhs.md, подтверждено игроком);
+    // амальгама «своя» всем племенам сразу и сигналом не считается.
+    const s = state({
+      turn: 9,
+      board: [
+        shopMinion(1, 'MURLOC_1'),
+        shopMinion(2, 'MURLOC_2'),
+        shopMinion(3, 'AMALGAM'),
+        shopMinion(4, 'DRAGON_1'),
+      ],
+    });
+    const note = trinketForecast(s, deps);
+    expect(note).toContain('MURLOC ×2');
+    expect(note).not.toContain('DRAGON');
+    expect(note).not.toContain('ALL');
+  });
+
+  it('без пары своих предупреждает держать пару желаемого племени', () => {
+    const s = state({ turn: 15, board: [shopMinion(1, 'MURLOC_1')] });
+    expect(trinketForecast(s, deps)).toContain('держите пару миньонов');
+  });
+
+  it('в остальные ходы молчит', () => {
+    for (const turn of [1, 5, 7, 11, 13, 17, 19]) {
+      expect(trinketForecast(state({ turn }), deps)).toBeNull();
+    }
+  });
+
+  it('совет целиком несёт напоминание полем', () => {
+    expect(adviseTavern(state({ turn: 9 }), deps)?.trinketForecast).not.toBeNull();
+    expect(adviseTavern(state({ turn: 7 }), deps)?.trinketForecast).toBeNull();
   });
 });
 
