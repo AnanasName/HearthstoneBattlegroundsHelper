@@ -199,9 +199,11 @@ describe('вид оверлея', () => {
       economy: 0,
       battle: 0,
       textTribe: 0,
+      textMech: 0,
       total,
       tribeMates: 0,
       textTribeMates: 0,
+      textMechMates: 0,
       copiesOwned: 0,
     });
     const withChoice: TavernAdvice = {

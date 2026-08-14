@@ -144,6 +144,19 @@ export function part14Game(): string {
 }
 
 /**
+ * Партия 15 — 14.08.2026, седьмая партия с оверлеем (Доктор Холли'дэй),
+ * пять пунктов обратной связи. Фактура: платная сила героя, дающая
+ * заклинание таверны («Get a random Tavern spell», COST=1,
+ * HAS_ACTIVATE_POWER), заморозка пары первого тира (Buzzing Vermin),
+ * миньоны-усилители механик (Titus Rivendare, Deathstrider), заклинание
+ * без выбора цели (Misplaced Tea Set, «of each type»), заклинание
+ * с провокацией (Slimy Shield) на борде с движками.
+ */
+export function part15Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part15', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция

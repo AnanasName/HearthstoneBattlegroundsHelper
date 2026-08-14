@@ -93,11 +93,15 @@ export interface ValueBreakdown {
   readonly battle: number;
   /** Синергия с племенем, которое карта называет словами, не входя в него. */
   readonly textTribe: number;
+  /** Синергия с механикой, названной словами в тексте (хрипы у Titus). */
+  readonly textMech: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
   readonly textTribeMates: number;
+  /** Сколько своих миньонов с механиками, названными в тексте карты. */
+  readonly textMechMates: number;
   /** Сколько таких же карт уже есть на борде и в руке. */
   readonly copiesOwned: number;
 }
@@ -226,6 +230,40 @@ function textTribesOf(cardId: string, cards: CardIndex, rules: TavernRules): str
   return Object.entries(rules.tribeTextWords)
     .filter(([race, word]) => !own.has(race) && new RegExp(`\\b(?:${word})\\b`, 'i').test(text))
     .map(([race]) => race);
+}
+
+/**
+ * Механики, которые текст карты называет словами, БЕЗ собственных механик карты.
+ *
+ * Та же логика, что у textTribesOf: Buzzing Vermin сам хрип и в тексте пишет
+ * «Deathrattle:» — это не синергия, а описание себя. А вот Titus Rivendare
+ * («Your Deathrattles trigger an extra time», механика AURA) и Deathstrider
+ * («After a friendly Rally minion attacks, trigger your left-most
+ * Deathrattle», TRIGGER_VISUAL) — усилители чужих механик, и без этой связи
+ * оба на борде хрипов были голыми статами (part15, ход 17: советник
+ * предложил продать Titus ради Wolf Pup 3/5).
+ */
+function textMechanicsOf(cardId: string, cards: CardIndex, rules: TavernRules): string[] {
+  const info = cards.info(cardId);
+  const text = info?.text ?? '';
+  if (text === '') return [];
+  const own = new Set(info?.mechanics ?? []);
+  return Object.entries(rules.mechanicTextWords)
+    .filter(([mech, word]) => !own.has(mech) && new RegExp(`\\b(?:${word})\\b`, 'i').test(text))
+    .map(([mech]) => mech);
+}
+
+/** Сколько своих миньонов несёт хотя бы одну из механик (по снапшоту их карт). */
+function boardMatesOfMechanics(
+  mechanics: readonly string[],
+  board: readonly Minion[],
+  cards: CardIndex,
+): number {
+  if (mechanics.length === 0) return 0;
+  return board.filter((m) => {
+    const theirs = cards.info(m.cardId)?.mechanics ?? [];
+    return mechanics.some((mech) => theirs.includes(mech));
+  }).length;
 }
 
 /** Сколько своих миньонов принадлежит хотя бы одному из племён. */
@@ -357,6 +395,15 @@ export function minionValue(
   );
   const textTribe = textMates * w.perTextTribeMate;
 
+  // Механика, названная словами в тексте, — та же связь, что у племён:
+  // Titus Rivendare без неё был слабейшим на борде хрипов (part15, ход 17).
+  const textMechMates = boardMatesOfMechanics(
+    textMechanicsOf(candidate.cardId, cards, rules),
+    state.board.filter((m) => m.entityId !== candidate.entityId),
+    cards,
+  );
+  const textMech = textMechMates * w.perTextMechMate;
+
   return {
     techLevel: tech,
     stats,
@@ -367,9 +414,11 @@ export function minionValue(
     economy,
     battle,
     textTribe,
-    total: tech + stats + tribe + keywords + copies + golden + economy + battle + textTribe,
+    textMech,
+    total: tech + stats + tribe + keywords + copies + golden + economy + battle + textTribe + textMech,
     tribeMates: mates,
     textTribeMates: textMates,
+    textMechMates,
     copiesOwned: owned,
   };
 }
@@ -742,6 +791,9 @@ export function buyRules(
       if (value.textTribeMates > 0) {
         notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
       }
+      if (value.textMechMates > 0) {
+        notes.push(`механика из текста: своих ${String(value.textMechMates)}`);
+      }
       if (value.economy > 0) notes.push('вернёт часть цены при продаже');
       if (minion.golden) notes.push('золотой');
       if (host !== null) {
@@ -1037,18 +1089,29 @@ export function freezeRule(
         minion: m,
         value: value.total,
         copies: value.copiesOwned,
+        tier: m.techLevel ?? deps.cards.info(m.cardId)?.techLevel ?? 1,
         mates: justLevelled ? 0 : strictMates(m),
       };
     })
     .sort((a, b) => b.value - a.value);
 
   // Ценное, до чего в этом ходу руки не дойдут: денег хватает не на всех.
+  //
+  // Вторая копия (copies === 1) — это ставка на будущую тройку, а не тройка:
+  // третью копию ещё предстоит встретить. Такая ставка оправдана только
+  // картой не ниже тира таверны — пара дешёвки отнимает бесплатное
+  // обновление ради того, что свежая витрина предлагает и так (part15,
+  // ход 5: заморозка Buzzing Vermin 1/1 первого тира при таверне 2 — на что
+  // игрок и указал). Третья копия (copies >= 2) собирает тройку немедленно
+  // и от тира не зависит.
   const keepers = valued
     .slice(affordable)
     .filter(
       (v) =>
         v.value >= threshold &&
-        (v.copies >= 1 || v.mates >= rules.freeze.minTribeMates),
+        (v.copies >= 2 ||
+          (v.copies === 1 && v.tier >= state.techLevel) ||
+          v.mates >= rules.freeze.minTribeMates),
     );
   const best = keepers[0];
   if (best === undefined) return null;
@@ -1171,6 +1234,53 @@ export function freeHeroPowerRule(
 }
 
 /**
+ * Правило силы героя, дающей заклинание таверны.
+ *
+ * Случай part15 (Холли'дэй, «Благословение девяти лягушек»: «Get a random
+ * Tavern spell», HAS_ACTIVATE_POWER, COST=1): на ходу 7 у игрока оставалось
+ * 1 золото, совет молчал, и золото сгорало — на что игрок и указал.
+ *
+ * Ценность — примерно цена заклинания таверны в витрине (два золота
+ * по курсу), очки — ценность минус цена силы. При силе за 1 очков мало,
+ * и совет всплывает к концу хода, когда крупные траты сделаны, — ровно
+ * как напоминание о бесплатной силе. Про платные силы вне «даёт миньона»
+ * и «даёт заклинание» совет по-прежнему не берётся судить.
+ */
+export function heroPowerSpellRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+
+  const cost = hero.heroPowerCost ?? 0;
+  // Бесплатные силы живут в freeHeroPowerRule; здесь — платная экономика.
+  if (cost <= 0 || cost > state.gold) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  if (!rules.heroPowerSpellWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  const score = rules.heroPowerSpellValue - cost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} даёт заклинание таверны — ` +
+      'оно стоит дороже своей цены, нажать, пока золото не сгорело',
+  };
+}
+
+/**
  * Правило активаций миньонов.
  *
  * «Activate (N): …» — способность своего миньона на борде за золото.
@@ -1288,6 +1398,18 @@ export interface SpellEffect {
    * хотя бесплатная замена слабейшей нежити на случайную почти всегда апгрейд.
    */
   readonly transforms: boolean;
+  /**
+   * Даёт провокацию («…and Taunt»). Провокация зовёт удары на носителя,
+   * и выбор цели обязан это учитывать: движок с постоянным эффектом
+   * в приоритет ударов не подставляется (part15, ход 19).
+   */
+  readonly grantsTaunt: boolean;
+  /**
+   * Цель НЕ выбирается: игра распределяет эффект сама («of each type»,
+   * «random», «left-most»). Совет с «→ на кого-то» показывал бы выбор,
+   * которого у игрока нет (part15, ход 19: Misplaced Tea Set).
+   */
+  readonly untargeted: boolean;
 }
 
 export function spellEffect(
@@ -1328,7 +1450,14 @@ export function spellEffect(
   // (заклинание наклейки Тюремщика, part14).
   const transforms = destroy !== null && /to (?:get|summon|discover)/i.test(text);
 
-  if (gold === null && stats === 0 && !shield && !transforms) return null;
+  const grantsTaunt = /\btaunt\b/i.test(text);
+
+  // «Цель не выбирается» имеет смысл только у усилений: у замены выбор
+  // жертвы и так наш, у золота цели нет вовсе.
+  const untargeted =
+    destroy === null && rules.untargetedSpellWords.some((w) => new RegExp(w, 'i').test(text));
+
+  if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt) return null;
   return {
     gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
     stats,
@@ -1336,7 +1465,21 @@ export function spellEffect(
     destroysFriendly: destroy !== null,
     destroyRace,
     transforms,
+    grantsTaunt,
+    untargeted,
   };
+}
+
+/**
+ * Миньон-«движок»: его ценность — постоянный эффект из текста (аура,
+ * «After/Whenever/At the start…»), а не размен телом. Признаки — механика
+ * AURA в снапшоте и слова из `engineTextWords`.
+ */
+function isEffectEngine(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
+  const info = cards.info(m.cardId);
+  if (info?.mechanics.includes('AURA') ?? false) return true;
+  const text = info?.text ?? '';
+  return text !== '' && rules.engineTextWords.some((w) => new RegExp(w, 'i').test(text));
 }
 
 /**
@@ -1348,12 +1491,24 @@ export function spellEffect(
  * подходящего племени. `null` — целить не в кого, и советовать такое
  * заклинание нельзя вовсе: у «Разделки туши» без нежити на борде нет
  * ни жертвы, ни выгоды.
+ *
+ * Два уточнения по part15 (ход 19):
+ *
+ * - у заклинания БЕЗ выбора цели (`untargeted`) цель не называется вовсе —
+ *   «Misplaced Tea Set» раздаёт «по миньону каждого племени» сам,
+ *   и «→ на Deathstrider» показывал выбор, которого нет;
+ * - провокация не вешается на миньона-«движка»: она зовёт удары, а ценность
+ *   движка — эффект, и подставлять его — терять эффект. «Slimy Shield»
+ *   советовался на Deathstrider — игрок прямо сказал, что не хочет его
+ *   в приоритете ударов. Цель — крупнейший из остальных; если весь борд
+ *   из движков, выбор честно возвращается к крупнейшему.
  */
 function spellTargetOn(
   effect: SpellEffect,
   state: GameState,
   cards: CardIndex,
-): { readonly target: Minion; readonly note: string } | null {
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly target: Minion | null; readonly note: string } | null {
   if (state.board.length === 0) return null;
 
   if (effect.destroysFriendly) {
@@ -1375,11 +1530,30 @@ function spellTargetOn(
     };
   }
 
-  const target = state.board.reduce((a, b) =>
-    (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
-  );
+  if (effect.untargeted) {
+    return { target: null, note: 'цель не выбирается — заклинание распределяет само' };
+  }
+
+  const largest = (list: readonly Minion[]): Minion =>
+    list.reduce((a, b) =>
+      (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+    );
+
+  let pool: readonly Minion[] = state.board;
+  if (effect.grantsTaunt) {
+    const bodies = state.board.filter((m) => !isEffectEngine(m, cards, rules));
+    if (bodies.length > 0) pool = bodies;
+  }
+
+  const target = largest(pool);
   const name = cards.info(target.cardId)?.name ?? target.cardId;
-  return { target, note: `цель — ${name}` };
+  return {
+    target,
+    note:
+      effect.grantsTaunt && pool !== state.board
+        ? `цель — ${name}: провокация зовёт удары, миньоны-эффекты не подставляются`
+        : `цель — ${name}`,
+  };
 }
 
 /**
@@ -1405,7 +1579,7 @@ export function spellRules(
 ): Recommendation[] {
   return state.handSpells.flatMap((spell) => {
     if (spell.unplayable) return [];
-    const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards);
+    const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
     if (effect === null) return [];
     const name = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
 
@@ -1470,11 +1644,12 @@ export function spellRules(
       (effect.transforms
         ? rules.value.transform
         : effect.stats * rules.value.perStatPoint +
-          (effect.divineShield ? rules.value.divineShield : 0)) -
+          (effect.divineShield ? rules.value.divineShield : 0) +
+          (effect.grantsTaunt ? rules.value.taunt : 0)) -
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
-    const aimed = spellTargetOn(effect, state, deps.cards);
+    const aimed = spellTargetOn(effect, state, deps.cards, rules);
     if (aimed === null) return [];
 
     return [
@@ -1513,7 +1688,7 @@ export function shopSpellRules(
 ): Recommendation[] {
   return state.shopSpells.flatMap((spell) => {
     if (spell.unplayable || spell.cost > state.gold) return [];
-    const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards);
+    const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
     if (effect === null) return [];
     const name = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
 
@@ -1542,9 +1717,10 @@ export function shopSpellRules(
     const score = effect.transforms
       ? rules.value.transform
       : effect.stats * rules.value.perStatPoint +
-        (effect.divineShield ? rules.value.divineShield : 0);
+        (effect.divineShield ? rules.value.divineShield : 0) +
+        (effect.grantsTaunt ? rules.value.taunt : 0);
     if (score <= 0) return [];
-    const aimed = spellTargetOn(effect, state, deps.cards);
+    const aimed = spellTargetOn(effect, state, deps.cards, rules);
     if (aimed === null) return [];
     return [
       {
@@ -1730,7 +1906,7 @@ export function choiceAdvice(
       // Заклинание: оценка эффекта из текста и тегов варианта.
       const effect =
         info !== null && (info.type?.includes('SPELL') ?? false)
-          ? spellEffect(option.cardId, option.scriptData ?? [], deps.cards)
+          ? spellEffect(option.cardId, option.scriptData ?? [], deps.cards, rules)
           : null;
       if (effect === null || (effect.stats === 0 && !effect.divineShield && effect.gold === 0)) {
         return { option, name, value: null, score: null, reason: 'оценить не берёмся' };
@@ -1926,6 +2102,7 @@ export function adviseTavern(
     levelUpRule(state, rules, buys),
     heroPowerRule(state, deps, rules),
     freeHeroPowerRule(state, deps, rules),
+    heroPowerSpellRule(state, deps, rules),
     ...activationRules(state, deps, rules),
     darkGiftRule(state, rules),
     sellRule(state, deps, rules),

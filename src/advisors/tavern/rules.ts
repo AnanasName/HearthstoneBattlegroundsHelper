@@ -126,6 +126,22 @@ export interface TavernRules {
      * баффы на такого миньона не действуют.
      */
     readonly perTextTribeMate: number;
+    /**
+     * За каждого своего миньона с механикой, которую карта называет СЛОВАМИ
+     * в тексте, сама её не неся.
+     *
+     * Случай part15, ход 17: Titus Rivendare 5/9 — без племени, тир 5, текст
+     * «Your Deathrattles trigger an extra time», механика в снапшоте — AURA.
+     * На борде хрипов-жуков он был слабейшим по голым статам, и советник
+     * предложил продать его ради Wolf Pup 3/5 — на что игрок и указал.
+     * Связь с механикой написана в опубликованном тексте, а носители
+     * механики видны по снапшоту (`mechanics`) — это данные, не таблица
+     * ключевых карт.
+     *
+     * Вес как у perTribeMate: карта-усилитель механики без её носителей
+     * пуста, с ними — сердце композиции, и это та же логика, что у племён.
+     */
+    readonly perTextMechMate: number;
   };
 
   /**
@@ -179,6 +195,22 @@ export interface TavernRules {
   readonly tribeTextWords: Readonly<Record<string, string>>;
 
   /**
+   * Слово, которым текст карты называет МЕХАНИКУ. Ключ — имя механики
+   * в поле `mechanics` снапшота Firestone.
+   *
+   * Той же логикой, что `tribeTextWords`: Titus Rivendare говорит
+   * «Your Deathrattles trigger an extra time», Deathstrider — «After
+   * a friendly Rally minion attacks, trigger your left-most Deathrattle»
+   * (part15). Сами они этих механик не несут (AURA и TRIGGER_VISUAL),
+   * и без таблицы их ценность на борде хрипов была голыми статами.
+   *
+   * В таблице только механики с фактурой из фикстур. «Taunt» словами
+   * в тексте сознательно не разбирается: он часто описывает ПРИЗЫВАЕМЫХ
+   * («…summon Turtles with Taunt», Sewer Lord), а не своих на борде.
+   */
+  readonly mechanicTextWords: Readonly<Record<string, string>>;
+
+  /**
    * Признаки «сила даёт миньона» в тексте силы героя.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -211,6 +243,46 @@ export interface TavernRules {
    */
   readonly heroPowerRefreshWords: readonly string[];
   readonly freeHeroPowerValue: number;
+
+  /**
+   * Признаки «сила даёт заклинание таверны» — и ценность такого заклинания
+   * в очках.
+   *
+   * Случай part15 (Холли'дэй, «Благословение девяти лягушек» за 1: «Get
+   * a random Tavern spell», HAS_ACTIVATE_POWER, COST=1): при остатке
+   * в 1 золото совет молчал, и золото сгорало — на что игрок и указал.
+   * Ценность — примерно цена заклинания таверны в витрине (part11: монетка
+   * за 1, part15: заклинания за 2), то есть два золота по курсу. Очки
+   * совета = ценность минус цена силы в золоте: при силе за 1 совет
+   * всплывает к концу хода, когда крупные траты сделаны.
+   */
+  readonly heroPowerSpellWords: readonly string[];
+  readonly heroPowerSpellValue: number;
+
+  /**
+   * Признаки заклинания БЕЗ выбора цели в тексте: игра распределяет эффект
+   * сама, и совет с «→ на кого-то» показывал бы выбор, которого нет.
+   *
+   * Случай part15, ход 19: «Misplaced Tea Set» — «Give a friendly minion
+   * of each type +2/+2», а совет писал «→ на Deathstrider», хотя цель
+   * не выбирается, — на что игрок и указал. Шаблоны из опубликованных
+   * текстов: «of each type», «random», «left-/right-most», «all friendly»,
+   * «your minions».
+   */
+  readonly untargetedSpellWords: readonly string[];
+
+  /**
+   * Признаки миньона-«движка»: его ценность — постоянный эффект из текста
+   * (аура, триггер «After/Whenever/At the start…»), а не размен телом.
+   *
+   * Нужны выбору цели провокации: провокация зовёт удары на носителя,
+   * и вешать её на движок — подставлять эффект под смерть. Случай part15,
+   * ход 19: «Slimy Shield» (+1/+1 и провокация) советовался на Deathstrider
+   * («After a friendly Rally minion attacks, trigger your left-most
+   * Deathrattle») — игрок прямо сказал, что не хочет его в приоритете
+   * ударов. Механика AURA в снапшоте — тот же признак без слов.
+   */
+  readonly engineTextWords: readonly string[];
 
   /**
    * Со скольких доказанных племён состав партии считается «известным».
@@ -332,6 +404,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     // part14): почти всегда апгрейд, но что выпадет — неизвестно.
     transform: 3,
     perTextTribeMate: 1,
+    perTextMechMate: 1.5,
   },
 
   economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],
@@ -357,6 +430,19 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   heroPowerRefreshWords: ['refresh[^.]*tavern'],
   freeHeroPowerValue: 2,
 
+  heroPowerSpellWords: ['(?:get|add)[^.]*tavern spell'],
+  heroPowerSpellValue: 6,
+
+  untargetedSpellWords: [
+    'of each type',
+    '\\brandom\\b',
+    '(?:left|right)-?most',
+    'all (?:friendly|your)',
+    'your (?:other )?minions',
+  ],
+
+  engineTextWords: ['\\bafter (?:a|an|you|your|this)\\b', '\\bwhenever\\b', '\\bat the (?:start|end) of\\b'],
+
   lobbyRacesKnownAfter: 3,
 
   goldPointValue: 3,
@@ -376,6 +462,12 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     QUILBOAR: 'quilboars?',
     NAGA: 'nagas?',
     UNDEAD: 'undead',
+  },
+
+  // Только механики с фактурой: хрипы (Titus) и ралли (Deathstrider), part15.
+  mechanicTextWords: {
+    DEATHRATTLE: 'deathrattles?',
+    BACON_RALLY: 'rally',
   },
 
   rerollMarginOverTier: 2,

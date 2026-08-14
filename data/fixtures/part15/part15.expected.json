@@ -1,0 +1,123 @@
+{
+  "$comment": [
+    "Партия 14.08.2026 (20:19–20:48) — седьмая партия с работающим оверлеем",
+    "(Доктор Холли'дэй, 1-е место). Пять пунктов обратной связи по пяти",
+    "скриншотам из чата, закрыты тестами в test/state/part15.test.ts",
+    "и test/advisors/tavern/rules.test.ts.",
+    "",
+    "Ценность фикстуры:",
+    " - платная сила героя, дающая ЗАКЛИНАНИЕ таверны: «Благословение",
+    "   девяти лягушек» (BG28_HERO_801p, «Get a random Tavern spell») —",
+    "   COST=1 и HAS_ACTIVATE_POWER на сущности id 166, применение — блок",
+    "   PLAY (20:23:10, ход 7);",
+    " - миньоны-усилители МЕХАНИК: Titus Rivendare (BG25_354, «Your",
+    "   Deathrattles trigger an extra time», mechanics=AURA) и Deathstrider",
+    "   (BG36_208, «After a friendly Rally minion attacks, trigger your",
+    "   left-most Deathrattle», TRIGGER_VISUAL) — ценность в тексте,",
+    "   не в статах;",
+    " - заклинание БЕЗ выбора цели: Misplaced Tea Set (BG28_888, «Give",
+    "   a friendly minion of each type +{0}/+{1}») — витринное, цена 2;",
+    " - заклинание с провокацией: Slimy Shield (BG27_002t, «Give a minion",
+    "   +1/+1 and Taunt», COST=0) — остаётся в руке от проданного",
+    "   Слизнюченыша-гладиатора.",
+    "",
+    "Пять жалоб игрока (все — скриншоты из чата 20:22–20:36):",
+    " 1) ход 5, золото 0: «ЗАМОРОЗИТЬ Buzzing Vermin 1/1» — пара первого",
+    "    тира при таверне 2; пара дешёвки витрину больше не держит",
+    "    (порог тира у второй копии);",
+    " 2) ход 7, золото 1: сила за 1 «Get a random Tavern spell» молчала,",
+    "    золото сгорало; теперь советуется (heroPowerSpellRule);",
+    " 3) ход 17: «РАЗЫГРАТЬ Wolf Pup 3/5, продав Titus Rivendare 5/9» —",
+    "    усилитель хрипов был слабейшим по голым статам; закрыто",
+    "    perTextMechMate (механика из текста);",
+    " 4) ход 19: «КУПИТЬ Misplaced Tea Set → на Deathstrider» — у «of each",
+    "    type» цель не выбирается; совет теперь без цели;",
+    " 5) ход 19: «РАЗЫГРАТЬ Slimy Shield → на Deathstrider» — провокация",
+    "    звала удары на движок; цель теперь крупнейший не-движок."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-14T20:48:00+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerId": 7,
+    "hero": { "cardId": "BG28_HERO_801", "name": "Доктор Холли'дэй" }
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 53035927,
+    "createGameBlocks": 1,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 14.08.2026",
+      "expect": { "phase": "gameOver", "finalPlace": 1 }
+    },
+    {
+      "id": "turn5-no-tier1-pair-freeze",
+      "turn": 5,
+      "sliceAt": "D 20:22:36.2985502",
+      "verifiedBy": "скриншот из чата (20:22), сверено 14.08.2026",
+      "expect": {
+        "gold": 0,
+        "boardHas": "BG31_803",
+        "shopHas": "BG31_803",
+        "freezeAdvised": false
+      }
+    },
+    {
+      "id": "turn7-tavern-spell-hero-power",
+      "turn": 7,
+      "sliceAt": "D 20:23:10.2083028",
+      "verifiedBy": "скриншот из чата (20:23), сверено 14.08.2026",
+      "expect": {
+        "gold": 1,
+        "heroPowerCardId": "BG28_HERO_801p",
+        "heroPowerCost": 1,
+        "heroPowerAdvised": true,
+        "silentAfterPress": true
+      }
+    },
+    {
+      "id": "turn17-titus-not-sold",
+      "turn": 17,
+      "sliceAt": "D 20:34:52.4361189",
+      "verifiedBy": "скриншот из чата (20:34), сверено 14.08.2026",
+      "expect": {
+        "boardHas": ["BG25_354", "BG36_208"],
+        "handHas": "BG36_207",
+        "titusTextMechMatesAtLeast": 3,
+        "sellTitusAdvised": false
+      }
+    },
+    {
+      "id": "turn19-tea-set-untargeted",
+      "turn": 19,
+      "sliceAt": "D 20:36:14.3485417",
+      "verifiedBy": "скриншот из чата (20:35), сверено 14.08.2026",
+      "expect": {
+        "gold": 2,
+        "shopSpellsHave": "BG28_888",
+        "teaSetTarget": null,
+        "reasonMentions": "не выбирается"
+      }
+    },
+    {
+      "id": "turn19-taunt-not-on-deathstrider",
+      "turn": 19,
+      "sliceAt": "D 20:36:14.3485417",
+      "verifiedBy": "скриншот из чата (20:36), сверено 14.08.2026",
+      "expect": {
+        "handSpellsHave": "BG27_002t",
+        "targetIsNot": "BG36_208",
+        "reasonMentions": "провокация"
+      }
+    }
+  ]
+}

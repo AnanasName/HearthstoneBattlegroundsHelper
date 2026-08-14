@@ -10,6 +10,7 @@ import {
   freeHeroPowerRule,
   freezeRule,
   heroPowerRule,
+  heroPowerSpellRule,
   levelUpRule,
   lobbyRaces,
   magnetizeTarget,
@@ -573,16 +574,37 @@ describe('правило заморозки', () => {
   });
 
   it('копия под тройку — повод держать витрину, если золота не хватает', () => {
-    // Свежая витрина копию именно этой карты не обещает.
+    // Свежая витрина копию именно этой карты не обещает. Карта пары — тиром
+    // не ниже таверны: пара дешёвки витрину больше не держит (part15, ход 5).
     const s = state({
       gold: 3,
-      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
-      shop: [bigStats, shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+      board: [shopMinion(1, 'MURLOC_3'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_3', { attack: 3, health: 4 })],
     });
     const freeze = freezeRule(s, deps);
     expect(freeze?.action).toBe('freeze');
-    expect(freeze?.minion?.cardId).toBe('MURLOC_1');
+    expect(freeze?.minion?.cardId).toBe('MURLOC_3');
     expect(freeze?.reason).toContain('копия');
+  });
+
+  it('вторая копия НИЖЕ тира таверны витрину не держит (part15, ход 5)', () => {
+    // Buzzing Vermin 1/1 первого тира при таверне 2: пара — это ставка
+    // на будущую тройку, и ставка дешёвкой не окупает потерю бесплатного
+    // обновления — на что игрок и указал. Та же карта тиром таверны — повод.
+    const s = state({
+      gold: 0,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [shopMinion(10, 'MURLOC_1', { attack: 3, health: 4, taunt: true })],
+    });
+    expect(freezeRule(s, deps)).toBeNull();
+
+    // Третья копия собирает тройку немедленно — тир не важен.
+    const triple = state({
+      gold: 0,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_1')],
+      shop: [shopMinion(10, 'MURLOC_1', { attack: 3, health: 4, taunt: true })],
+    });
+    expect(freezeRule(triple, deps)?.reason).toContain('третья копия');
   });
 
   it('миньон собираемого племени — тоже повод', () => {
@@ -656,8 +678,8 @@ describe('правило заморозки', () => {
       state({
         techLevel,
         gold: 0,
-        board: [minion(1, { cardId: 'MURLOC_1' })],
-        shop: [shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+        board: [minion(1, { cardId: 'MURLOC_3' })],
+        shop: [shopMinion(10, 'MURLOC_3', { attack: 3, health: 4 })],
       });
 
     // На родном тире копия под тройку — по-прежнему повод.
@@ -681,8 +703,8 @@ describe('правило заморозки', () => {
     // карты не даст и новая витрина.
     const copyShop = {
       gold: 3,
-      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
-      shop: [bigStats, shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+      board: [shopMinion(1, 'MURLOC_3'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_3', { attack: 3, health: 4 })],
     };
     expect(freezeRule(state({ ...copyShop, techLevelUpTurn: 5 }), deps)?.reason).toContain(
       'копия',
@@ -907,7 +929,13 @@ describe('заклинания руки', () => {
       { id: 'GOLD', text: 'Gain 2 Gold.' },
       { id: 'NONE', text: 'Discover a minion.' },
     ]);
-    const plain = { destroysFriendly: false, destroyRace: null, transforms: false };
+    const plain = {
+      destroysFriendly: false,
+      destroyRace: null,
+      transforms: false,
+      grantsTaunt: false,
+      untargeted: false,
+    };
     expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
     expect(spellEffect('PH', [10, null], idx)).toEqual({
       gold: 0,
@@ -936,11 +964,80 @@ describe('заклинания руки', () => {
       destroysFriendly: true,
       destroyRace: 'UNDEAD',
       transforms: false,
+      grantsTaunt: false,
+      untargeted: false,
     });
     expect(spellEffect('ANYKILL', [], idx)).toMatchObject({
       destroysFriendly: true,
       destroyRace: null,
     });
+  });
+
+  it('заклинание без выбора цели советуется БЕЗ цели (part15, Misplaced Tea Set)', () => {
+    // «Give a friendly minion of each type +2/+2» — игра раздаёт сама,
+    // а совет писал «→ на Deathstrider», показывая выбор, которого нет.
+    const idx = createCardIndex([
+      { id: 'TEASET', name: 'Чайный сервиз', text: 'Give a friendly minion of each type +2/+2.' },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    ]);
+    const s = state({
+      board: [minion(1, { cardId: 'BODY', attack: 10, health: 10 })],
+      handSpells: [handSpell('TEASET')],
+    });
+    const rec = spellRules(s, { cards: idx })[0];
+    expect(rec).toBeDefined();
+    expect(rec?.targetMinion).toBeNull();
+    expect(rec?.reason).toContain('не выбирается');
+  });
+
+  it('провокация не вешается на миньона-«движка» (part15, Slimy Shield)', () => {
+    // «Give a minion +1/+1 and Taunt» целился в крупнейшего — Deathstrider
+    // («After a friendly Rally minion attacks…»), которого игрок как раз
+    // не хочет видеть в приоритете ударов. Цель — крупнейший из остальных.
+    const idx = createCardIndex([
+      { id: 'SHIELD_T', name: 'Склизкий щит', text: 'Give a minion +1/+1 and <b>Taunt</b>.' },
+      {
+        id: 'ENGINE',
+        name: 'Смертобег',
+        type: 'Minion',
+        techLevel: 6,
+        races: ['BEAST'],
+        isBaconPool: true,
+        text: '[x]After a friendly <b>Rally</b> minion attacks, trigger your left-most <b>Deathrattle</b>.',
+      },
+      {
+        id: 'AURA_M',
+        name: 'Тит',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        mechanics: ['AURA'],
+        text: 'Your <b>Deathrattles</b> trigger an extra time.',
+      },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    ]);
+    const s = state({
+      board: [
+        minion(1, { cardId: 'ENGINE', attack: 18, health: 11 }),
+        minion(2, { cardId: 'AURA_M', attack: 20, health: 20 }),
+        minion(3, { cardId: 'BODY', attack: 11, health: 15 }),
+      ],
+      handSpells: [handSpell('SHIELD_T')],
+    });
+    const rec = spellRules(s, { cards: idx })[0];
+    expect(rec?.targetMinion?.cardId).toBe('BODY');
+    expect(rec?.reason).toContain('провокация');
+
+    // Борд целиком из движков: выбор честно возвращается к крупнейшему.
+    const allEngines = state({
+      board: [
+        minion(1, { cardId: 'ENGINE', attack: 18, health: 11 }),
+        minion(2, { cardId: 'AURA_M', attack: 20, health: 20 }),
+      ],
+      handSpells: [handSpell('SHIELD_T')],
+    });
+    expect(spellRules(allEngines, { cards: idx })[0]?.targetMinion?.cardId).toBe('AURA_M');
   });
 
   it('монетка советуется, когда её золото открывает покупку (part10, ход 5)', () => {
@@ -1740,6 +1837,118 @@ describe('бесплатная сила героя', () => {
     expect(
       freeHeroPowerRule(state({ hero: chromie({ heroPowerCardId: 'DMG_P' }) }), chromieDeps),
     ).toBeNull();
+  });
+});
+
+describe('сила героя, дающая заклинание таверны (part15, Холли\'дэй)', () => {
+  const holliCards = createCardIndex([
+    {
+      id: 'FROGS',
+      name: 'Благословение девяти лягушек',
+      text: 'Get a random Tavern spell.',
+    },
+    { id: 'DMG_P', name: 'Урон', text: 'Deal 3 damage to a minion.' },
+  ]);
+  const holli = (patch: Partial<Hero> = {}): Hero => ({
+    ...hero(30),
+    heroPowerCardId: 'FROGS',
+    heroPowerEntityId: 166,
+    heroPowerCost: 1,
+    heroPowerHasActivate: true,
+    ...patch,
+  });
+  const holliDeps = { cards: holliCards };
+
+  it('при остатке золота советуется: заклинание стоит дороже своей цены', () => {
+    // part15, ход 7: золото 1, совет молчал, и золото сгорало — на что
+    // игрок и указал.
+    const rec = heroPowerSpellRule(state({ hero: holli(), gold: 1 }), holliDeps);
+    expect(rec?.action).toBe('heroPower');
+    expect(rec?.cost).toBe(1);
+    expect(rec?.reason).toContain('заклинание таверны');
+    // Очки малые: напоминание к концу хода, а не конкурент покупкам.
+    expect(rec?.score).toBeLessThan(DEFAULT_TAVERN_RULES.value.perTechLevel * 3);
+  });
+
+  it('нажатая, запертая, не по карману или пассивная — молчание', () => {
+    expect(
+      heroPowerSpellRule(state({ hero: holli({ heroPowerUsedThisTurn: true }), gold: 1 }), holliDeps),
+    ).toBeNull();
+    expect(
+      heroPowerSpellRule(state({ hero: holli({ heroPowerUnplayable: true }), gold: 1 }), holliDeps),
+    ).toBeNull();
+    expect(heroPowerSpellRule(state({ hero: holli(), gold: 0 }), holliDeps)).toBeNull();
+    expect(
+      heroPowerSpellRule(state({ hero: holli({ heroPowerHasActivate: false }), gold: 1 }), holliDeps),
+    ).toBeNull();
+  });
+
+  it('платная сила вне «даёт заклинание» — по-прежнему не берёмся судить', () => {
+    expect(
+      heroPowerSpellRule(state({ hero: holli({ heroPowerCardId: 'DMG_P' }), gold: 5 }), holliDeps),
+    ).toBeNull();
+  });
+
+  it('сила дороже своей ценности — молчание: правило из данных', () => {
+    // Ценность 6 очков — два золота по курсу; сила за 2 съедает всю выгоду.
+    expect(
+      heroPowerSpellRule(state({ hero: holli({ heroPowerCost: 2 }), gold: 5 }), holliDeps),
+    ).toBeNull();
+  });
+});
+
+describe('синергия с механикой из текста (part15, Titus)', () => {
+  const mechCards = createCardIndex([
+    {
+      id: 'TITUS',
+      name: 'Тит Ривендер',
+      type: 'Minion',
+      techLevel: 5,
+      races: [],
+      isBaconPool: true,
+      mechanics: ['AURA'],
+      text: 'Your <b>Deathrattles</b> trigger an extra time.',
+    },
+    {
+      id: 'RATTLER',
+      name: 'Хрип',
+      type: 'Minion',
+      techLevel: 2,
+      races: ['BEAST'],
+      isBaconPool: true,
+      mechanics: ['DEATHRATTLE'],
+      text: '<b>Deathrattle:</b> Summon a 1/1.',
+    },
+    {
+      id: 'PLAIN_M',
+      name: 'Тело',
+      type: 'Minion',
+      techLevel: 2,
+      races: ['BEAST'],
+      isBaconPool: true,
+    },
+  ]);
+  const mechDeps = { cards: mechCards };
+
+  it('усилитель хрипов ценится за каждого своего хрипа', () => {
+    // Titus 5/9 на борде хрипов был слабейшим по голым статам, и советник
+    // предлагал продать его — на что игрок и указал (part15, ход 17).
+    const board = [
+      minion(1, { cardId: 'RATTLER' }),
+      minion(2, { cardId: 'RATTLER' }),
+      minion(3, { cardId: 'PLAIN_M' }),
+    ];
+    const titus = minion(9, { cardId: 'TITUS', attack: 5, health: 9 });
+    const value = minionValue(titus, state({ board }), mechDeps);
+    expect(value.textMechMates).toBe(2);
+    expect(value.textMech).toBe(2 * DEFAULT_TAVERN_RULES.value.perTextMechMate);
+  });
+
+  it('своя механика синергией не считается: хрип про свой же хрип молчит', () => {
+    // Buzzing Vermin пишет «Deathrattle:» о себе — это описание, не связь.
+    const board = [minion(1, { cardId: 'RATTLER' })];
+    const rattler = minion(9, { cardId: 'RATTLER' });
+    expect(minionValue(rattler, state({ board }), mechDeps).textMechMates).toBe(0);
   });
 });
 
