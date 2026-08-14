@@ -78,6 +78,8 @@ export interface ViewInput {
     readonly result: BuyCheckResult;
     readonly target: PositionTarget;
   } | null;
+  /** Предупреждение продукта (снапшот отстал от патча); держится всю партию. */
+  readonly warning?: string | null;
 }
 
 export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
@@ -102,12 +104,19 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   }
   if (state.hero === null) return EMPTY_VIEW;
 
+  // Предупреждение продукта — первой строкой и поверх лимита советов:
+  // «снапшот отстал от патча» обесценивает советы ниже, и прятать его
+  // за ними нельзя.
+  const warning = input.warning ?? null;
+  const actions = actionLines(input, cards);
+  if (warning !== null) actions.unshift({ text: warning, tone: 'warn' });
+
   return {
     active: true,
     header: situationLine(state),
     board: state.board.map((m) => minionLabel(m, cards)),
     shop: state.shop.map((m) => minionLabel(m, cards)),
-    actions: actionLines(input, cards),
+    actions,
     position: positionView(input, cards),
   };
 }

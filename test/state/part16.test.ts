@@ -58,10 +58,14 @@ describe('part16: прокрутка, бафф соседям, нецелево�
     finalState = reducer.snapshot();
   }, 240_000);
 
-  it('партия дочитывается до конца: 4-е место', () => {
+  it('партия дочитывается до конца: 4-е место, билд из лога', () => {
     expect(finalState.phase).toBe('gameOver');
     expect(finalState.finalPlace).toBe(4);
     expect(finalState.hero?.cardId).toBe('BG33_HERO_001');
+    // Номер билда — строка `BuildNumber=…` канала метаданных (239-я строка
+    // партии): по нему предупреждение о снапшоте называет патч, а датасет
+    // отличает партии разных билдов.
+    expect(finalState.buildNumber).toBe(248348);
   });
 
   it('ход 5: прокрутка Oozeling первым советом, с покупкой следом (жалоба 1)', () => {

@@ -149,6 +149,7 @@ export function createReducer(players: Players): Reducer {
   let goldSpent = 0;
   let anomalyCardId: string | null = null;
   let finalPlace: number | null = null;
+  let buildNumber: number | null = null;
   let heroEntityId: number | null = null;
   let nextOpponentPlayerId: number | null = null;
   let currentOpponentPlayerId: number | null = null;
@@ -532,6 +533,14 @@ export function createReducer(players: Players): Reducer {
   const step = (event: PowerEvent): void => {
     const { content } = event.line;
 
+    // Номер билда — из канала метаданных, одной строкой после CREATE_GAME.
+    // По нему приложение узнаёт, не отстал ли снапшот карт от патча.
+    if (content.startsWith('BuildNumber=')) {
+      const n = Number(content.slice('BuildNumber='.length));
+      if (Number.isFinite(n)) buildNumber = n;
+      return;
+    }
+
     // Каналы модальных выборов идут отдельно от DebugPrintPower и не трогают
     // ни `current`, ни стек блоков: их строки вклиниваются между блоками.
     if (event.line.source !== SOURCE_OF_TRUTH) {
@@ -912,6 +921,7 @@ export function createReducer(players: Players): Reducer {
       // обхода, а состояние обязано быть воспроизводимым до байта.
       seenShopCardIds: [...seenShopCardIds].sort(),
       finalPlace,
+      buildNumber,
       playerBattleTag: players.selfName,
       playerId: self,
       board: mine('PLAY'),

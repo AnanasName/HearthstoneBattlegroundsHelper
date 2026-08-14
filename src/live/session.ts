@@ -1,4 +1,5 @@
 import type { CardIndex } from '../data/cards.js';
+import type { GameState } from '../state/types.js';
 import {
   LiveAdvisor,
   type BuyCheckSource,
@@ -6,6 +7,7 @@ import {
   type LiveAdvisorOptions,
   type PositionSource,
 } from './advisor.js';
+import { CardsFreshness } from './freshness.js';
 import { LiveWatcher, type LiveNotice, type LiveWatcherOptions } from './watcher.js';
 
 /**
@@ -33,10 +35,23 @@ export interface LiveSessionDeps {
   readonly position: PositionSource;
   /** Досчёт покупок боем; без него покупки живут одной эвристикой. */
   readonly buys?: BuyCheckSource;
+  /**
+   * Накопитель датасета партий (фаза 6): каждое обновление состояния
+   * и сброс на новой партии. Без него партии в датасет не пишутся.
+   */
+  readonly dataset?: {
+    update: (state: GameState) => void;
+    reset: () => void;
+  };
 }
 
 export interface LiveSessionHandlers extends LiveAdvisorHandlers {
   readonly onNotice?: (notice: LiveNotice) => void;
+  /**
+   * Снапшот карт отстал от патча: в партии слишком много незнакомых карт,
+   * и советы по ним слепые. Раз за партию (`CardsFreshness`).
+   */
+  readonly onFreshness?: (warning: string) => void;
 }
 
 export interface LiveSessionOptions {
@@ -53,15 +68,27 @@ export function startLiveSession(
   handlers: LiveSessionHandlers,
   options: Partial<LiveSessionOptions> = {},
 ): LiveSession {
-  const { onNotice, ...advisorHandlers } = handlers;
+  const { onNotice, onFreshness, ...advisorHandlers } = handlers;
 
   const advisor = new LiveAdvisor(deps, advisorHandlers, options.advisor);
+  const freshness = new CardsFreshness(deps.cards);
   const watcher = new LiveWatcher(
     {
       onUpdate: ({ state }) => {
         advisor.update(state);
+        if (state === null) return;
+        deps.dataset?.update(state);
+        const warning = freshness.update(state);
+        if (warning !== null) onFreshness?.(warning);
       },
-      onNotice,
+      onNotice: (notice) => {
+        // Новая партия: незнакомые карты и точки решения — прошлой.
+        if (notice.kind === 'newGame') {
+          freshness.reset();
+          deps.dataset?.reset();
+        }
+        onNotice?.(notice);
+      },
     },
     options.watcher,
   );

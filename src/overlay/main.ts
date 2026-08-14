@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 
 import { loadCardIndex } from '../data/cards.js';
+import { DATASET_DIR, DatasetRecorder } from '../dataset/recorder.js';
 import { PositionWorker } from '../live/position/client.js';
 import { startLiveSession, type LiveSession } from '../live/session.js';
 import type { LiveNotice } from '../live/watcher.js';
@@ -139,15 +140,27 @@ function start(): void {
   let thinking = false;
   let last: ViewInput['position'] = null;
   let buyCheck: ViewInput['buyCheck'] = null;
+  // Предупреждение продукта держится до конца партии: оно про данные,
+  // а не про положение дел, и гаснуть с новым советом не должно.
+  let warning: string | null = null;
 
   const show = (): void => {
     if (latest === null) return;
-    send(buildView({ state: latest, tavern, thinking, position: last, buyCheck }, cards));
+    send(buildView({ state: latest, tavern, thinking, position: last, buyCheck, warning }, cards));
   };
 
   session = startLiveSession(
-    { cards, position: worker, buys: worker },
     {
+      cards,
+      position: worker,
+      buys: worker,
+      dataset: new DatasetRecorder({ dir: DATASET_DIR }),
+    },
+    {
+      onFreshness: (text) => {
+        warning = text;
+        show();
+      },
       onTavern: (advice, state) => {
         latest = state;
         tavern = advice;
@@ -188,6 +201,8 @@ function start(): void {
         send({ ...lastView, header: `сбой советника: ${error.message}` });
       },
       onNotice: (notice) => {
+        // Новая партия — предупреждение прошлой гаснет: оно пересчитается.
+        if (notice.kind === 'newGame') warning = null;
         const view = describeNotice(notice);
         if (view !== null) send(view);
       },

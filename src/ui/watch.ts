@@ -19,6 +19,7 @@ import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { PositionTarget } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
+import { DATASET_DIR, DatasetRecorder } from '../dataset/recorder.js';
 import { LiveAdvisor, type LiveAdvisorHandlers } from '../live/advisor.js';
 import { PositionWorker } from '../live/position/client.js';
 import { replayLog } from '../live/replay.js';
@@ -247,8 +248,21 @@ async function main(): Promise<void> {
   if (problem !== null) console.log(problem.text);
 
   const session = startLiveSession(
-    { cards, position, buys: position },
-    { ...handlers, onNotice: printNotice },
+    {
+      cards,
+      position,
+      buys: position,
+      // Каждая живая партия копится в датасет фазы 6 — сыгранное
+      // и не записанное потеряно навсегда.
+      dataset: new DatasetRecorder({ dir: DATASET_DIR }),
+    },
+    {
+      ...handlers,
+      onNotice: printNotice,
+      onFreshness: (warning) => {
+        console.log(`   ⚠ ${warning}`);
+      },
+    },
     {
       watcher: { logsRoot: args.logsRoot },
       advisor: { search: searchOptions(args) },

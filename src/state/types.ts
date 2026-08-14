@@ -423,6 +423,12 @@ export interface GameState {
    * до конца партии нельзя.
    */
   readonly finalPlace: number | null;
+  /**
+   * Номер билда игры — строка `BuildNumber=…` канала метаданных сразу
+   * после CREATE_GAME (part16: 248348 на 239-й строке партии). Нужен
+   * предупреждению о снапшоте, отставшем от патча, и датасету.
+   */
+  readonly buildNumber: number | null;
   /** BattleTag игрока — самый надёжный якорь «кто я». */
   readonly playerBattleTag: string | null;
   /** Номер контроллера игрока. */
@@ -463,6 +469,7 @@ export const EMPTY_STATE: GameState = {
   trinketsByPlayer: {},
   seenShopCardIds: [],
   finalPlace: null,
+  buildNumber: null,
   playerBattleTag: null,
   playerId: null,
 };

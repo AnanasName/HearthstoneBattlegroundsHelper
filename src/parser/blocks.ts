@@ -47,6 +47,15 @@ export const SOURCE_OF_TRUTH = 'GameState.DebugPrintPower';
 export const SOURCE_ENTITY_CHOICES = 'GameState.DebugPrintEntityChoices';
 export const SOURCE_SEND_CHOICES = 'GameState.SendChoices';
 
+/**
+ * Канал метаданных партии: `BuildNumber=248348`, `GameType=…` — приходит
+ * одним заходом сразу после CREATE_GAME. Пропускается только строка
+ * с номером билда: по ней приложение узнаёт, не отстал ли снапшот карт
+ * от патча (part16: BuildNumber виден на 239-й строке каждой партии).
+ * Тот же канал несёт имена игроков — их читает `readPlayers` отдельно.
+ */
+export const SOURCE_GAME_INFO = 'GameState.DebugPrintGame';
+
 export interface BlockContext {
   /** TRIGGER, POWER, PLAY, ATTACK, DEATHS, MOVE_MINION. */
   readonly blockType: string;
@@ -103,6 +112,12 @@ export class PowerEventAssembler {
     // отношения не имеет.
     if (line.source === SOURCE_ENTITY_CHOICES || line.source === SOURCE_SEND_CHOICES) {
       return { line, blocks: [] };
+    }
+
+    // Из канала метаданных пропускается только номер билда — остальное там
+    // либо читается отдельно (имена игроков), либо не нужно вовсе.
+    if (line.source === SOURCE_GAME_INFO) {
+      return line.content.startsWith('BuildNumber=') ? { line, blocks: [] } : null;
     }
 
     if (line.source !== SOURCE_OF_TRUTH) return null;
