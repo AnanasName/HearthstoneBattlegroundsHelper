@@ -294,6 +294,14 @@ function isMagnetic(minion: Minion, cards: CardIndex): boolean {
   return cards.info(minion.cardId)?.magnetic === true;
 }
 
+/**
+ * Энчант «умрёт, если разыграть в этот ход» — вешается на карту, добытую
+ * «Восстанием из гробницы» (BG34_888) и родственными эффектами. Подтверждено
+ * на part11: выбранный миньон уходит в руку с приаттаченным
+ * TB_BaconShopBadsongE от сущности заклинания.
+ */
+const DOOMED_ENCHANTMENT = 'TB_BaconShopBadsongE';
+
 /** Здоровье с бронёй — то, чем игрок реально расплачивается за слабый ход. */
 function effectiveHp(state: GameState): number {
   const hero = state.hero;
@@ -374,14 +382,18 @@ export function levelUpRule(
         : bestBuy + behind * rules.levellingUrgencyPerTier;
   }
 
-  // Остаток, которого не хватит на покупку, — не мёртвое золото: обновление
-  // витрины стоит 1, и после подъёма оно показывает карты уже нового тира.
-  // Игрок указал на совет «подъём за 5 из 6» без слова про судьбу шестой
-  // монеты (part10, ход 7).
+  // Судьба остатка, которого не хватит на покупку, зависит от стадии.
+  // Поздно (от lateRerollTier) обновление за 1 — полноценная трата: идёт
+  // поиск конкретных карт. Рано реролл на сдачу — пустая трата: найденное
+  // пришлось бы морозить, теряя бесплатное обновление, и честнее назвать
+  // остаток ценой подъёма (указано игроком, part10 ход 7 и part11).
   const leftover = state.gold - cost;
+  const late = (state.tavernUpgradeTarget ?? state.techLevel + 1) >= rules.lateRerollTier;
   const leftoverTail =
     leftover >= rules.rerollCost && leftover < rules.minionCost
-      ? `; остаток ${String(leftover)} — на обновление витрины нового тира`
+      ? late
+        ? `; остаток ${String(leftover)} — на обновление витрины нового тира`
+        : `; остаток ${String(leftover)} сгорит — это цена подъёма`
       : '';
 
   return {
@@ -559,6 +571,22 @@ export function playRules(
     // с замком на два хода, — тег LITERALLY_UNPLAYABLE, тикает и снимается.
     if ((minion.tags['LITERALLY_UNPLAYABLE'] ?? 0) > 0) return [];
 
+    // Карта-смертник из «Восстания из гробницы»: энчант Badsong означает
+    // «умрёт, если разыграть в этот ход» (текст источника BG34_888, part11).
+    // Розыгрыш в ход получения оправдан только предсмертным хрипом или
+    // перерождением — иначе совет отдаёт карту в никуда, на что игрок
+    // и указал. NUM_TURNS_IN_HAND=1 отличает ход получения.
+    const doomed =
+      minion.enchantments.some((e) => e.cardId === DOOMED_ENCHANTMENT) &&
+      (minion.tags['NUM_TURNS_IN_HAND'] ?? 1) <= 1;
+    const doomedWorthIt =
+      minion.reborn ||
+      (deps.cards.info(minion.cardId)?.mechanics.some(
+        (m) => m === 'DEATHRATTLE' || m === 'REBORN',
+      ) ??
+        false);
+    if (doomed && !doomedWorthIt) return [];
+
     let value = minionValue(minion, state, deps, rules);
 
     // Магнитный мех при полном борде идёт не через продажу, а через
@@ -586,6 +614,7 @@ export function playRules(
 
     const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
     const notes: string[] = [];
+    if (doomed) notes.push('умрёт при розыгрыше в этот ход — но хрип/перерождение сработают');
     if (value.copiesOwned >= 2) notes.push('собирает тройку');
     else if (value.copiesOwned === 1) notes.push('вторая копия');
     if (minion.golden) notes.push('золотой');
@@ -747,10 +776,21 @@ export function freezeRule(
     }).length;
   };
 
+  // В ход подъёма таверны заморозка ради племени молчит: свежая витрина
+  // будет уже НОВОГО тира, и держать старую ради соплеменников — потеря
+  // (part11, ход 9: заморозка наги сразу после подъёма на третий тир).
+  // Копия под тройку — другое дело: копию не даст и новая витрина.
+  const justLevelled = state.techLevelUpTurn === state.turn;
+
   const valued = state.shop
     .map((m) => {
       const value = minionValue(m, state, deps, rules);
-      return { minion: m, value: value.total, copies: value.copiesOwned, mates: strictMates(m) };
+      return {
+        minion: m,
+        value: value.total,
+        copies: value.copiesOwned,
+        mates: justLevelled ? 0 : strictMates(m),
+      };
     })
     .sort((a, b) => b.value - a.value);
 
@@ -991,6 +1031,75 @@ export function spellRules(
         sellFirst: null,
         reason:
           `${name} — усиление перед боем` +
+          (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
+          (effect.divineShield ? ' и щит' : '') +
+          `, цель — ${targetName}`,
+      },
+    ];
+  });
+}
+
+/**
+ * Правила покупки заклинаний из витрины.
+ *
+ * У заклинания витрины, в отличие от миньона, цена в логе есть — тег COST
+ * (part11: монетка у бармена за 1). Оцениваются те же два случая, что
+ * у заклинаний руки: золото и усиление; про остальное совет молчит.
+ * Золотое заклинание с чистой прибылью — покупка без раздумий; в ноль
+ * (монетка за 1 даёт 1) — маленький банк на будущее, советуется последним.
+ */
+export function shopSpellRules(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation[] {
+  return state.shopSpells.flatMap((spell) => {
+    if (spell.unplayable || spell.cost > state.gold) return [];
+    const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards);
+    if (effect === null) return [];
+    const name = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
+
+    if (effect.gold > 0) {
+      const net = effect.gold - spell.cost;
+      if (net < 0) return [];
+      const score = net > 0 ? net * rules.goldPointValue : 0.5;
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score,
+          cost: spell.cost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            net > 0
+              ? `${name} за ${String(spell.cost)} даёт ${String(effect.gold)} золота — чистая прибыль`
+              : `${name} за ${String(spell.cost)} — золото про запас, потратится в нужный ход`,
+        },
+      ];
+    }
+
+    if (state.board.length === 0) return [];
+    const score =
+      effect.stats * rules.value.perStatPoint +
+      (effect.divineShield ? rules.value.divineShield : 0);
+    if (score <= 0) return [];
+    const target = state.board.reduce((a, b) =>
+      (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+    );
+    const targetName = deps.cards.info(target.cardId)?.name ?? target.cardId;
+    return [
+      {
+        action: 'buy' as const,
+        minion: null,
+        spellCardId: spell.cardId,
+        score,
+        cost: spell.cost,
+        requiresSlot: false,
+        sellFirst: null,
+        reason:
+          `${name} за ${String(spell.cost)} — усиление` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
           `, цель — ${targetName}`,
@@ -1302,6 +1411,7 @@ export function adviseTavern(
     ...buys,
     ...plays,
     ...spellRules(state, deps, rules),
+    ...shopSpellRules(state, deps, rules),
     levelUpRule(state, rules, buys),
     heroPowerRule(state, deps, rules),
     darkGiftRule(state, rules),
@@ -1319,8 +1429,32 @@ export function adviseTavern(
     },
   ].filter((r): r is Recommendation => r !== null);
 
+  const sorted = recommendations.sort((a, b) => b.score - a.score);
+
+  // «Делать нечего, а золото есть»: когда лучший совет — «ничего», а на
+  // обновление витрины хватает, обновление и есть ход — поиск лучшего.
+  // Случай part11: борд полон и силён, все покупки отсеяны, 5 золота,
+  // совет «НИЧЕГО» — игрок справедливо заметил, что мог обновляться.
+  if (
+    sorted[0]?.action === 'pass' &&
+    state.gold >= rules.rerollCost &&
+    state.shop.some((m) => !m.frozen)
+  ) {
+    sorted.unshift({
+      action: 'reroll',
+      minion: null,
+      score: 0.5,
+      cost: rules.rerollCost,
+      requiresSlot: false,
+      sellFirst: null,
+      reason:
+        `покупать нечего и некуда, а золота ${String(state.gold)} — ` +
+        'обновление витрины в поиске лучшего',
+    });
+  }
+
   return {
-    recommendations: recommendations.sort((a, b) => b.score - a.score),
+    recommendations: sorted,
     gold: state.gold,
     targetTier: targetTier(state.turn, rules),
     shopValues: state.shop.map((minion) => ({

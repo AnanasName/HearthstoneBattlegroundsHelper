@@ -15,6 +15,7 @@ import {
   playRules,
   rerollRule,
   sellRule,
+  shopSpellRules,
   spellEffect,
   spellRules,
   tribeMates,
@@ -272,11 +273,15 @@ describe('правило подъёма таверны', () => {
     expect(levelUp?.score).toBeGreaterThan(Math.max(...buys.map((b) => b.score)));
   });
 
-  it('остаток, которого хватает лишь на обновление, назван вслух (part10, ход 7)', () => {
-    // Подъём за 5 из 6: судьба шестой монеты — обновление витрины уже
-    // нового тира, и совет обязан это сказать, а не оставлять золото молча.
-    const s = state({ gold: 6, tavernUpgradeCost: 5, tavernUpgradeTarget: 3 });
-    expect(levelUpRule(s)?.reason).toContain('остаток 1 — на обновление');
+  it('судьба остатка зависит от стадии: рано сгорает, поздно — на обновление', () => {
+    // part10 ход 7 и part11: рано реролл на сдачу — пустая трата (найденное
+    // пришлось бы морозить), честнее назвать остаток ценой подъёма. Поздно
+    // идёт поиск конкретных карт, и обновление — полноценная трата.
+    const early = state({ gold: 6, tavernUpgradeCost: 5, tavernUpgradeTarget: 3 });
+    expect(levelUpRule(early)?.reason).toContain('остаток 1 сгорит — это цена подъёма');
+
+    const late = state({ techLevel: 4, gold: 6, tavernUpgradeCost: 5, tavernUpgradeTarget: 5 });
+    expect(levelUpRule(late)?.reason).toContain('остаток 1 — на обновление');
 
     // Когда остатка хватает на покупку, хвост не нужен — покупки в списке.
     const rich = state({ gold: 8, tavernUpgradeCost: 5, tavernUpgradeTarget: 3 });
@@ -636,6 +641,148 @@ describe('правило заморозки', () => {
     expect(freezeRule(shopAndBoard(2), deps)).not.toBeNull();
     // На четвёртом тире та же карта порог не пробивает.
     expect(freezeRule(shopAndBoard(4), deps)).toBeNull();
+  });
+
+  it('в ход подъёма таверны племя витрину не держит (part11, ход 9)', () => {
+    // Сразу после подъёма свежая витрина будет уже нового тира — держать
+    // старую ради соплеменников значит отдать этот скачок даром.
+    const tribeShop = {
+      gold: 3,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_3', { attack: 4, health: 4 })],
+    };
+    expect(freezeRule(state(tribeShop), deps)).not.toBeNull();
+    expect(freezeRule(state({ ...tribeShop, techLevelUpTurn: 5 }), deps)).toBeNull();
+
+    // Копия под тройку держит витрину и в ход подъёма: копию именно этой
+    // карты не даст и новая витрина.
+    const copyShop = {
+      gold: 3,
+      board: [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')],
+      shop: [bigStats, shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+    };
+    expect(freezeRule(state({ ...copyShop, techLevelUpTurn: 5 }), deps)?.reason).toContain(
+      'копия',
+    );
+  });
+});
+
+describe('карты-смертники из гробницы (part11)', () => {
+  const doomCards = createCardIndex([
+    { id: 'PLAIN', name: 'Простой', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+    {
+      id: 'RATTLER',
+      name: 'Хрипун',
+      type: 'Minion',
+      techLevel: 2,
+      races: [],
+      isBaconPool: true,
+      mechanics: ['DEATHRATTLE'],
+    },
+  ]);
+  const doomDeps = { cards: doomCards };
+  const badsong = {
+    entityId: 999,
+    cardId: 'TB_BaconShopBadsongE',
+    timing: 999,
+    scriptDataNum1: null,
+    scriptDataNum2: null,
+  };
+  const doomedMinion = (cardId: string, turnsInHand: number) =>
+    minion(9, {
+      cardId,
+      enchantments: [badsong],
+      tags: { NUM_TURNS_IN_HAND: turnsInHand },
+    });
+
+  it('смертник без хрипа и перерождения не советуется в ход получения', () => {
+    const s = state({ hand: [doomedMinion('PLAIN', 1)] });
+    expect(playRules(s, doomDeps)).toHaveLength(0);
+  });
+
+  it('смертник с предсмертным хрипом советуется с пометкой', () => {
+    const s = state({ hand: [doomedMinion('RATTLER', 1)] });
+    const play = playRules(s, doomDeps)[0];
+    expect(play).toBeDefined();
+    expect(play?.reason).toContain('умрёт при розыгрыше');
+  });
+
+  it('со следующего хода карта безопасна и советуется как обычная', () => {
+    const s = state({ hand: [doomedMinion('PLAIN', 2)] });
+    const play = playRules(s, doomDeps)[0];
+    expect(play).toBeDefined();
+    expect(play?.reason).not.toContain('умрёт');
+  });
+});
+
+describe('покупка заклинаний витрины (part11)', () => {
+  const shopSpellCards = createCardIndex([
+    { id: 'S_BUFF', name: 'Хлеб победителя', type: 'Battleground_spell', text: 'Give a minion +{0}/+{1}.' },
+    { id: 'S_GOLD2', name: 'Нефть', type: 'Battleground_spell', text: 'Gain 2 Gold.' },
+    { id: 'S_COIN', name: 'Монетка', type: 'Battleground_spell', text: 'Gain 1 Gold.' },
+    { id: 'M_BODY', name: 'Тело', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+  ]);
+  const shopDeps = { cards: shopSpellCards };
+  const shopSpell = (
+    cardId: string,
+    cost: number,
+    scriptData: (number | null)[] = [null, null, null, null],
+  ) => ({ entityId: 800, cardId, cost, scriptData, unplayable: false });
+
+  it('бафф по карману советуется с целью', () => {
+    const s = state({
+      gold: 2,
+      board: [minion(1, { cardId: 'M_BODY', attack: 6, health: 6 })],
+      shopSpells: [shopSpell('S_BUFF', 1, [2, 2, null, null])],
+    });
+    const rec = shopSpellRules(s, shopDeps)[0];
+    expect(rec?.action).toBe('buy');
+    expect(rec?.spellCardId).toBe('S_BUFF');
+    expect(rec?.reason).toContain('+4 статов');
+    expect(rec?.reason).toContain('Тело');
+  });
+
+  it('золото с чистой прибылью — покупка, в ноль — про запас', () => {
+    const profit = state({ gold: 2, shopSpells: [shopSpell('S_GOLD2', 1)] });
+    expect(shopSpellRules(profit, shopDeps)[0]?.reason).toContain('чистая прибыль');
+
+    const parity = state({ gold: 2, shopSpells: [shopSpell('S_COIN', 1)] });
+    const rec = shopSpellRules(parity, shopDeps)[0];
+    expect(rec?.reason).toContain('про запас');
+    expect(rec?.score).toBeLessThan(1);
+  });
+
+  it('не по карману — молчание', () => {
+    const s = state({ gold: 0, shopSpells: [shopSpell('S_BUFF', 1, [2, 2, null, null])] });
+    expect(shopSpellRules(s, shopDeps)).toHaveLength(0);
+  });
+});
+
+describe('обновление от безделья', () => {
+  it('«делать нечего» с золотом превращается в обновление витрины (part11)', () => {
+    // Полный сильный борд: покупка не превосходит жертву, реролл молчит
+    // («витрина хороша»), и прежний совет был «НИЧЕГО» при золоте на руках.
+    const s = state({
+      gold: 5,
+      board: Array.from({ length: 7 }, (_, i) =>
+        shopMinion(i + 1, 'NEUTRAL', { attack: 5, health: 5 }),
+      ),
+      shop: [shopMinion(10, 'DRAGON_1', { attack: 6, health: 6 })],
+    });
+    const advice = adviseTavern(s, deps);
+    expect(advice?.recommendations[0]?.action).toBe('reroll');
+    expect(advice?.recommendations[0]?.reason).toContain('обновление витрины в поиске лучшего');
+  });
+
+  it('без золота и с замороженной витриной остаётся «ничего»', () => {
+    const frozen = state({
+      gold: 5,
+      board: Array.from({ length: 7 }, (_, i) =>
+        shopMinion(i + 1, 'NEUTRAL', { attack: 5, health: 5 }),
+      ),
+      shop: [shopMinion(10, 'DRAGON_1', { attack: 6, health: 6, frozen: true })],
+    });
+    expect(adviseTavern(frozen, deps)?.recommendations[0]?.action).toBe('pass');
   });
 });
 
