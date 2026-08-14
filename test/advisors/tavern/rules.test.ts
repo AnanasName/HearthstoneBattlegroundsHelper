@@ -442,6 +442,24 @@ describe('правило силы героя', () => {
     expect(rec?.reason).toContain('даёт миньона');
   });
 
+  it('сила E.T.C. «Discover a Buddy» — тоже даёт миньона (part12)', () => {
+    // Бадди и есть миньон-напарник, но слова «minion» в тексте силы нет,
+    // и при золоте на силу совет молчал.
+    const etc = createCardIndex([
+      {
+        id: 'BG25_HERO_105p',
+        name: 'Sign a New Artist',
+        text: '<b>Discover</b> a <b>Buddy</b>. <i>(Unlocks at Tier 2.)</i>',
+      },
+    ]);
+    const s = withPower('BG25_HERO_105p', { gold: 3 });
+    const powered = {
+      ...s,
+      hero: s.hero === null ? null : { ...s.hero, heroPowerCost: 3 },
+    };
+    expect(heroPowerRule(powered, { cards: etc })?.action).toBe('heroPower');
+  });
+
   it('сила Зиреллы даёт миньона местоимением — и всё равно советуется', () => {
     // Дословный текст из снапшота (part9): «minion» и глагол «add» стоят
     // в разных предложениях, объект глагола — «it». Шаблоны «глагол…minion»
@@ -1032,7 +1050,7 @@ describe('совет по выбору тринкета', () => {
   const trinketDeps = { cards: trinketCards };
 
   const offer = (...cardIds: string[]): Partial<GameState> => ({
-    trinketOffer: cardIds.map((cardId, i) => ({ entityId: 9000 + i, cardId })),
+    trinketOffer: cardIds.map((cardId, i) => ({ entityId: 9000 + i, cardId, subsetRaces: [] })),
   });
 
   it('без открытого предложения совет пуст', () => {
@@ -1067,6 +1085,28 @@ describe('совет по выбору тринкета', () => {
     expect(trinketAdvice(s, trinketDeps)[0]?.reason).toContain('своих таких нет');
   });
 
+  it('племя тринкета читается из тега BACON_SUBSET, когда в тексте плейсхолдер (part12)', () => {
+    // «Разноцветный компас»: в тексте «Get a random {0}» — племя подставляет
+    // клиент, а в снапшоте его нет. Тег BACON_SUBSET_DRAGON на сущности
+    // называет его прямо, и имена совпадают со строками races снапшота.
+    const compassCards = createCardIndex([
+      { id: 'DRAGON_D', name: 'Дракон', techLevel: 2, races: ['DRAGON'], isBaconPool: true },
+      {
+        id: 'TR_COMPASS',
+        dbfId: 1020,
+        name: 'Разноцветный компас',
+        text: '[x]Get a random {0}. At the start of each turn, get another.',
+      },
+    ]);
+    const s = state({
+      board: [minion(1, { cardId: 'DRAGON_D' }), minion(2, { cardId: 'DRAGON_D' })],
+      trinketOffer: [{ entityId: 9000, cardId: 'TR_COMPASS', subsetRaces: ['DRAGON'] }],
+    });
+    const advice = trinketAdvice(s, { cards: compassCards });
+    expect(advice[0]?.tribeMinions).toBe(2);
+    expect(advice[0]?.reason).toContain('DRAGON');
+  });
+
   it('племя механизмов называется MECH, как в снапшоте — регрессия part9', () => {
     // Ключ таблицы обязан совпадать со строкой races снапшота. Ключ
     // MECHANICAL не совпадал ни с чем, и Scraper Sticker при пяти мехах
@@ -1082,7 +1122,7 @@ describe('совет по выбору тринкета', () => {
     ]);
     const s = state({
       board: [minion(1, { cardId: 'MECH_M' }), minion(2, { cardId: 'MECH_M' })],
-      trinketOffer: [{ entityId: 9000, cardId: 'TR_MECH' }],
+      trinketOffer: [{ entityId: 9000, cardId: 'TR_MECH', subsetRaces: [] }],
     });
     const advice = trinketAdvice(s, { cards: mechCards });
     expect(advice[0]?.tribeMinions).toBe(2);

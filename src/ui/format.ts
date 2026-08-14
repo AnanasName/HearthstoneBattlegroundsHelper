@@ -74,7 +74,11 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   const victim = r.sellFirst === null ? '' : `, продав ${minionLabel(r.sellFirst, cards)}`;
   const magnet =
     r.magnetizeTo == null ? '' : `, примагнитив к ${minionLabel(r.magnetizeTo, cards)}`;
-  return `${ACTION_LABEL[r.action]}${what}${price}${victim}${magnet}`;
+  // Цель заклинания-усиления — прямо в строке действия: «РАЗЫГРАТЬ Fortify»
+  // без цели перекладывал выбор на игрока (part12).
+  const target =
+    r.targetMinion == null ? '' : ` → на ${minionLabel(r.targetMinion, cards)}`;
+  return `${ACTION_LABEL[r.action]}${what}${price}${victim}${magnet}${target}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

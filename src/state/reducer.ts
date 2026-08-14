@@ -750,7 +750,13 @@ export function createReducer(players: Players): Reducer {
           flag(e, 'BACON_TRINKET'),
       )
       .sort((a, b) => a.id - b.id)
-      .map((e) => ({ entityId: e.id, cardId: e.cardId }));
+      .map((e) => ({
+        entityId: e.id,
+        cardId: e.cardId,
+        subsetRaces: [...e.tags.entries()]
+          .filter(([tag, v]) => tag.startsWith('BACON_SUBSET_') && v > 0)
+          .map(([tag]) => tag.slice('BACON_SUBSET_'.length)),
+      }));
 
     // Взятые тринкеты всех игроков — теги на сущностях героев. Один игрок
     // может быть представлен несколькими сущностями героя (пересадки,

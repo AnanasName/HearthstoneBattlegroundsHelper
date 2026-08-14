@@ -92,6 +92,15 @@ export interface Minion {
 export interface TrinketOffer {
   readonly entityId: number;
   readonly cardId: string;
+  /**
+   * Племена тринкета из тегов `BACON_SUBSET_<RACE>` на его сущности.
+   *
+   * Надёжнее текста: у «Разноцветного компаса» племя стоит в тексте
+   * плейсхолдером `{0}`, а тег `BACON_SUBSET_DRAGON=1` называет его прямо
+   * (part12). Имена совпадают со строками `races` снапшота — включая
+   * `MECH`, а не `MECHANICAL` (part9, Scraper Sticker).
+   */
+  readonly subsetRaces: readonly string[];
 }
 
 /** Один вариант открытого модального выбора. */

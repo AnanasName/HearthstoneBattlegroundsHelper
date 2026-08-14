@@ -290,6 +290,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     // «Choose a minion … add it to your hand» — Зирелла, part9. Миньон и
     // глагол здесь в разных предложениях, поэтому [\s\S], а не [^.].
     'minion[\\s\\S]*add (?:it|them) to your hand',
+    // «Discover a Buddy» — E.T.C., part12. Бадди и есть миньон-напарник,
+    // слова «minion» в тексте силы нет вовсе.
+    'discover[^.]*\\bbuddy\\b',
   ],
 
   goldPointValue: 3,

@@ -65,6 +65,14 @@ export interface Recommendation {
   readonly magnetizeTo?: Minion | null;
   /** Заклинание, к которому относится совет «разыграть». У миньонов пусто. */
   readonly spellCardId?: string | null;
+  /**
+   * Цель заклинания-усиления — свой миньон, на которого его кастовать.
+   *
+   * Отдельным полем, а не только словами в reason: оверлей показывает
+   * короткую строку действия, и совет «РАЗЫГРАТЬ Fortify» без цели
+   * перекладывал выбор на игрока (part12).
+   */
+  readonly targetMinion?: Minion | null;
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -1025,6 +1033,7 @@ export function spellRules(
         action: 'play' as const,
         minion: null,
         spellCardId: spell.cardId,
+        targetMinion: target,
         score,
         cost: spell.cost,
         requiresSlot: false,
@@ -1094,6 +1103,7 @@ export function shopSpellRules(
         action: 'buy' as const,
         minion: null,
         spellCardId: spell.cardId,
+        targetMinion: target,
         score,
         cost: spell.cost,
         requiresSlot: false,
@@ -1167,9 +1177,14 @@ export function trinketAdvice(
     const name = info?.name ?? offer.cardId;
     const text = info?.text ?? '';
 
-    const tribes = Object.entries(rules.tribeTextWords)
+    // Племя берётся из двух источников: теги BACON_SUBSET_<RACE> на сущности
+    // (надёжнее: у «Разноцветного компаса» племя в тексте — плейсхолдер {0},
+    // и текстовый разбор его не видел, part12) и слова текста — для
+    // тринкетов без тега.
+    const fromText = Object.entries(rules.tribeTextWords)
       .filter(([, word]) => new RegExp(`\\b(?:${word})\\b`, 'i').test(text))
       .map(([race]) => race);
+    const tribes = [...new Set([...offer.subsetRaces, ...fromText])];
 
     const tribeMinions =
       tribes.length === 0
