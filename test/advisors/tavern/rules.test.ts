@@ -14,6 +14,7 @@ import {
   minionValue,
   playPlan,
   playRules,
+  poisonAmongSeen,
   rerollRule,
   sellRule,
   shopSpellRules,
@@ -1292,6 +1293,73 @@ describe('магнетизм', () => {
     // «Рука-протез» магнитится к нежити, обычный магнит — нет.
     expect(magnetizeTarget(giftMagnet, undeadOnly, giftCards)?.cardId).toBe('UNDEAD_1');
     expect(magnetizeTarget(magnetInHand, undeadOnly, magCards)).toBeNull();
+  });
+
+  it('при виденном яде носитель — со щитом, а не просто крупнейший (слово игрока)', () => {
+    const mechs = [
+      minion(1, { cardId: 'MECH_BIG', attack: 30, health: 30 }),
+      minion(2, { cardId: 'MECH_SMALL', attack: 5, health: 5, divineShield: true }),
+    ];
+    // Без угрозы — крупнейший, как раньше.
+    expect(magnetizeTarget(magnetInHand, mechs, magCards)?.cardId).toBe('MECH_BIG');
+    // С угрозой — щитоносец: яд убивает любым касанием, а щит его поглощает,
+    // и статы, сложенные в тело без щита, обнуляются об 1/1.
+    expect(magnetizeTarget(magnetInHand, mechs, magCards, true)?.cardId).toBe('MECH_SMALL');
+    // Щитоносцев нет вовсе — снова крупнейший: без носителя ещё хуже.
+    const bare = [
+      minion(1, { cardId: 'MECH_BIG', attack: 30, health: 30 }),
+      minion(3, { cardId: 'MECH_SMALL', attack: 5, health: 5 }),
+    ];
+    expect(magnetizeTarget(magnetInHand, bare, magCards, true)?.cardId).toBe('MECH_BIG');
+  });
+
+  it('магнит, дарящий щит, снимает угрозу яда — размер снова главный', () => {
+    const shieldCards = createCardIndex([
+      {
+        id: 'SHIELD_MAG',
+        name: 'Щитоносный магнит',
+        techLevel: 3,
+        races: ['MECH'],
+        isBaconPool: true,
+        mechanics: ['MODULAR', 'DIVINE_SHIELD'],
+        text: '<b>Magnetic</b> <b>Divine Shield</b>',
+      },
+      { id: 'MECH_SMALL', name: 'Мелкий мех', techLevel: 2, races: ['MECH'], isBaconPool: true },
+      { id: 'MECH_BIG', name: 'Большой мех', techLevel: 4, races: ['MECH'], isBaconPool: true },
+    ]);
+    const shieldMagnet = minion(9, { cardId: 'SHIELD_MAG', techLevel: 3 });
+    const mechs = [
+      minion(1, { cardId: 'MECH_BIG', attack: 30, health: 30 }),
+      minion(2, { cardId: 'MECH_SMALL', attack: 5, health: 5, divineShield: true }),
+    ];
+    // Носитель получит щит от самого магнита — предпочтение щитоносцу
+    // не нужно, а дар-фильтр и так уводит от того, у кого щит уже есть.
+    expect(magnetizeTarget(shieldMagnet, mechs, shieldCards, true)?.cardId).toBe('MECH_BIG');
+  });
+
+  it('яд читается из виденных бордов соперников', () => {
+    expect(poisonAmongSeen(state())).toBe(false);
+    expect(
+      poisonAmongSeen(state({ lastSeenBoards: { 4: [minion(50, { poisonous: true })] } })),
+    ).toBe(true);
+    // venomous — тот же смертельный контакт, только одноразовый.
+    expect(
+      poisonAmongSeen(state({ lastSeenBoards: { 4: [minion(50, { venomous: true })] } })),
+    ).toBe(true);
+  });
+
+  it('розыгрыш магнита при виденном яде называет щитоносца и говорит почему', () => {
+    const s = state({
+      board: [
+        minion(1, { cardId: 'MECH_BIG', attack: 30, health: 30 }),
+        minion(2, { cardId: 'MECH_SMALL', attack: 5, health: 5, divineShield: true }),
+      ],
+      hand: [minion(9, { cardId: 'MAGNET', techLevel: 3 })],
+      lastSeenBoards: { 4: [minion(50, { poisonous: true })] },
+    });
+    const play = playRules(s, magDeps)[0];
+    expect(play?.magnetizeTo?.cardId).toBe('MECH_SMALL');
+    expect(play?.reason).toContain('яд');
   });
 
   it('магнитному в руке носитель называется и на неполном борде (part13, ход 15)', () => {

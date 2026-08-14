@@ -290,12 +290,28 @@ const BINARY_KEYWORD_FLAGS: readonly (readonly [string, (m: Minion) => boolean])
 ];
 
 /**
+ * Виден ли яд у соперников — по накопленным бордам поля.
+ *
+ * Ядовитый миньон (poisonous/venomous) убивает любым касанием в обе
+ * стороны: и когда атакует сам, и когда об него разбиваются. Против него
+ * статы, сложенные магнитами в одно тело, обнуляются одним касанием —
+ * на это указал игрок после part13. Гадать тут не нужно: борды соперников
+ * мы уже видели, и яд в них — читаемый факт, а не оценка.
+ */
+export function poisonAmongSeen(state: GameState): boolean {
+  return Object.values(state.lastSeenBoards).some((board) =>
+    board.some((m) => m.poisonous || m.venomous),
+  );
+}
+
+/**
  * Лучший носитель для магнитного миньона.
  *
  * Магнитный миньон можно не ставить в отдельный слот, а присоединить
  * к своему миньону: статы и способности перейдут носителю.
  *
- * Кому магнититься — читается с карты магнита, не выдумывается:
+ * Кому магнититься — читается с карты магнита и из виденного, не
+ * выдумывается:
  *
  *  - **племена носителя** — поле `races` самого магнита: обычный магнит
  *    несёт `MECH`, а «Рука-протез» — `MECH, UNDEAD` («Can Magnetize to
@@ -303,17 +319,22 @@ const BINARY_KEYWORD_FLAGS: readonly (readonly [string, (m: Minion) => boolean])
  *  - **дар магнита** — его механики: если магнит дарит перерождение,
  *    носитель, у которого перерождение уже есть, получит его впустую.
  *    На part13 (ход 19) «Рука-протез» советовалась на Rescue Bot, уже
- *    перерождённого прошлой такой же рукой, — на что игрок и указал.
+ *    перерождённого прошлой такой же рукой, — на что игрок и указал;
+ *  - **яд у соперников** (`poisonThreat`) — при виденном яде носитель
+ *    со щитом предпочтительнее просто крупного: щит поглощает ядовитое
+ *    касание, а голые статы об него обнуляются. Если сам магнит дарит
+ *    щит, угроза для носителя снята и размер снова главный.
  *
- * Среди пригодных носителей: сперва самый крупный из тех, кому дар магнита
- * не пропадёт; если дар пропадает у всех (или дара нет) — просто самый
- * крупный: статы складываются всегда. Тонкости вроде «щит лучше на быстром»
- * правилам по-прежнему не известны — сказано в docs/tavern.md.
+ * Порядок предпочтений: пригодные по племени → кому дар не пропадёт →
+ * при яде со щитом → самый крупный. Каждый следующий фильтр отступает,
+ * если оставляет пусто: статы складываются всегда, и совсем без носителя
+ * магнит остаётся телом.
  */
 export function magnetizeTarget(
   magnet: Minion,
   board: readonly Minion[],
   cards: CardIndex,
+  poisonThreat = false,
 ): Minion | null {
   const magnetInfo = cards.info(magnet.cardId);
   const carrierRaces =
@@ -335,11 +356,19 @@ export function magnetizeTarget(
   const grants = BINARY_KEYWORD_FLAGS.filter(([mech]) =>
     magnetInfo?.mechanics.includes(mech) ?? false,
   );
+  let pool = eligible;
   if (grants.length > 0) {
-    const keepsGift = eligible.filter((m) => grants.some(([, has]) => !has(m)));
-    if (keepsGift.length > 0) return largest(keepsGift);
+    const keepsGift = pool.filter((m) => grants.some(([, has]) => !has(m)));
+    if (keepsGift.length > 0) pool = keepsGift;
   }
-  return largest(eligible);
+
+  const magnetGivesShield = magnetInfo?.mechanics.includes('DIVINE_SHIELD') ?? false;
+  if (poisonThreat && !magnetGivesShield) {
+    const shielded = pool.filter((m) => m.divineShield);
+    if (shielded.length > 0) pool = shielded;
+  }
+
+  return largest(pool);
 }
 
 /** Магнитный ли миньон — механика MODULAR в справочнике. */
@@ -520,7 +549,7 @@ export function buyRules(
       // перекладывал половину решения на него (part13, ход 15). На полном
       // борде носитель ещё и освобождает от продажи: слот магниту не нужен.
       const host = isMagnetic(minion, deps.cards)
-        ? magnetizeTarget(minion, state.board, deps.cards)
+        ? magnetizeTarget(minion, state.board, deps.cards, poisonAmongSeen(state))
         : null;
 
       // Сколько копий кандидата стоит на борде: тройка сливает их в золотого,
@@ -575,10 +604,12 @@ export function buyRules(
       if (minion.golden) notes.push('золотой');
       if (host !== null) {
         const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
+        const shieldHint =
+          poisonAmongSeen(state) && host.divineShield ? ' (у соперников яд — носитель со щитом)' : '';
         notes.push(
           full
-            ? `борд полон, но магнитится — примагнитить к ${hostName}`
-            : `магнитный — носитель ${hostName}`,
+            ? `борд полон, но магнитится — примагнитить к ${hostName}${shieldHint}`
+            : `магнитный — носитель ${hostName}${shieldHint}`,
         );
       }
 
@@ -654,7 +685,7 @@ export function playRules(
     // неполном борде — игрок решает «телом или примагнитить», и совет без
     // носителя перекладывал половину решения на него (part13, ход 15).
     const host = isMagnetic(minion, deps.cards)
-      ? magnetizeTarget(minion, state.board, deps.cards)
+      ? magnetizeTarget(minion, state.board, deps.cards, poisonAmongSeen(state))
       : null;
 
     // На полном борде розыгрыш идёт через продажу. Ценность кандидата
@@ -684,7 +715,13 @@ export function playRules(
     }
     if (host !== null) {
       const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
-      notes.push(full ? `борд полон, но магнитится — к ${hostName}` : `магнитный — носитель ${hostName}`);
+      const shieldHint =
+        poisonAmongSeen(state) && host.divineShield ? ' (у соперников яд — носитель со щитом)' : '';
+      notes.push(
+        full
+          ? `борд полон, но магнитится — к ${hostName}${shieldHint}`
+          : `магнитный — носитель ${hostName}${shieldHint}`,
+      );
     } else if (full && victim !== null) {
       const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
       notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
@@ -1545,11 +1582,13 @@ export function playPlan(
 
   // Магниты после тел: только что разыгранный мех — тоже кандидат в носители.
   const magnetSteps: PlanStep[] = [];
+  const poison = poisonAmongSeen(state);
   for (const { rec, minion } of magnets) {
     const host = magnetizeTarget(
       minion,
       boardAfter.filter((m) => m.entityId !== minion.entityId),
       deps.cards,
+      poison,
     );
     if (host !== null) {
       magnetSteps.push({ minion, magnetizeTo: host, sellFirst: null, score: rec.score });
