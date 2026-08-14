@@ -15,6 +15,8 @@ import {
   playRules,
   rerollRule,
   sellRule,
+  spellEffect,
+  spellRules,
   tribeMates,
   trinketAdvice,
 } from '../../../src/advisors/tavern/advisor.js';
@@ -270,6 +272,17 @@ describe('правило подъёма таверны', () => {
     expect(levelUp?.score).toBeGreaterThan(Math.max(...buys.map((b) => b.score)));
   });
 
+  it('остаток, которого хватает лишь на обновление, назван вслух (part10, ход 7)', () => {
+    // Подъём за 5 из 6: судьба шестой монеты — обновление витрины уже
+    // нового тира, и совет обязан это сказать, а не оставлять золото молча.
+    const s = state({ gold: 6, tavernUpgradeCost: 5, tavernUpgradeTarget: 3 });
+    expect(levelUpRule(s)?.reason).toContain('остаток 1 — на обновление');
+
+    // Когда остатка хватает на покупку, хвост не нужен — покупки в списке.
+    const rich = state({ gold: 8, tavernUpgradeCost: 5, tavernUpgradeTarget: 3 });
+    expect(levelUpRule(rich)?.reason).not.toContain('остаток');
+  });
+
   it('на низком здоровье подъём не советуется, и сказано почему', () => {
     const hurt = levelUpRule(upgradable({ gold: 10, hero: hero(40, 30) }));
     expect(hurt?.score).toBe(0);
@@ -295,15 +308,25 @@ describe('правило покупки', () => {
     expect(buys.every((b) => b.cost === DEFAULT_TAVERN_RULES.minionCost)).toBe(true);
   });
 
-  it('на полном борде помечает, что нужно освободить место', () => {
+  it('на полном борде — через продажу, и только ради явного превосходства', () => {
     const s = state({
       gold: 6,
       board: Array.from({ length: 7 }, (_, i) => shopMinion(i + 1, 'NEUTRAL')),
-      shop: [shopMinion(9, 'MURLOC_1')],
+      shop: [
+        shopMinion(9, 'MURLOC_1', { attack: 10, health: 10 }),
+        shopMinion(10, 'MURLOC_1'),
+      ],
     });
-    const buy = buyRules(s, deps)[0];
-    expect(buy?.requiresSlot).toBe(true);
-    expect(buy?.reason).toContain('борд полон');
+    const buys = buyRules(s, deps);
+
+    const strong = buys.find((b) => b.minion?.attack === 10);
+    expect(strong?.requiresSlot).toBe(true);
+    expect(strong?.sellFirst).not.toBeNull();
+    expect(strong?.reason).toContain('борд полон');
+
+    // Почти равный жертве кандидат больше не советуется вовсе: менять
+    // равного на равного с доплатой хода — потеря (part10, ход 11).
+    expect(buys.find((b) => b.minion?.attack === 3)).toBeUndefined();
   });
 });
 
@@ -576,9 +599,202 @@ describe('правило заморозки', () => {
     });
     const strict = {
       ...DEFAULT_TAVERN_RULES,
-      freeze: { ...DEFAULT_TAVERN_RULES.freeze, minValue: 1000 },
+      freeze: { ...DEFAULT_TAVERN_RULES.freeze, marginOverTier: 1000 },
     };
     expect(freezeRule(s, deps, strict)).toBeNull();
+  });
+
+  it('золотая копия своей же карты и амальгама — не повод морозить (part10, ход 3)', () => {
+    // На борде золотая Aureate Laureate и амальгама; в витрине такая же
+    // золотая. «Своих по племени 2» складывались из неё же и амальгамы —
+    // мнимая синергия, заморозка отнимала бесплатное обновление.
+    const s = state({
+      gold: 0,
+      board: [
+        minion(1, { cardId: 'MURLOC_1', golden: true }),
+        minion(2, { cardId: 'AMALGAM' }),
+      ],
+      shop: [
+        shopMinion(10, 'MURLOC_1', { golden: true, divineShield: true, attack: 2, health: 2 }),
+      ],
+    });
+    expect(freezeRule(s, deps)).toBeNull();
+  });
+
+  it('порог растёт с тиром: вторая копия дешёвки на высоком тире не морозится (part10, ход 13)', () => {
+    // Snow Baller второго тира при таверне 4: заморозка всей витрины ради
+    // дешёвой второй копии — отказ от карт четвёртого тира даром.
+    const shopAndBoard = (techLevel: number): GameState =>
+      state({
+        techLevel,
+        gold: 0,
+        board: [minion(1, { cardId: 'MURLOC_1' })],
+        shop: [shopMinion(10, 'MURLOC_1', { attack: 3, health: 4 })],
+      });
+
+    // На родном тире копия под тройку — по-прежнему повод.
+    expect(freezeRule(shopAndBoard(2), deps)).not.toBeNull();
+    // На четвёртом тире та же карта порог не пробивает.
+    expect(freezeRule(shopAndBoard(4), deps)).toBeNull();
+  });
+});
+
+describe('полный борд: продажа только ради явного превосходства', () => {
+  it('кандидат не получает бонусов от жертвы: дракон не продаёт дракона (part10, ход 11)', () => {
+    // В руке дракончик, на борде такой же — слабейший. Прежний счёт давал
+    // руке бонус «вторая копия» ЗА СЧЁТ той самой карты, которую предлагал
+    // продать, и советовал бессмысленный размен один в один.
+    const board = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        minion(i + 1, { cardId: 'MURLOC_2', attack: 5, health: 5 }),
+      ),
+      minion(7, { cardId: 'DRAGON_1', attack: 2, health: 2 }),
+    ];
+    const same = state({ board, hand: [minion(9, { cardId: 'DRAGON_1', attack: 2, health: 3 })] });
+    expect(playRules(same, deps)).toHaveLength(0);
+
+    // А явное превосходство продажу по-прежнему оправдывает.
+    const better = state({
+      board,
+      hand: [minion(9, { cardId: 'DRAGON_1', attack: 8, health: 8 })],
+    });
+    const play = playRules(better, deps)[0];
+    expect(play?.sellFirst?.cardId).toBe('DRAGON_1');
+  });
+
+  it('покупка, собирающая тройку с копией на борде, не требует продажи (part10, ход 13)', () => {
+    // Тройка сольёт три копии в золотого — место освободится само.
+    const s = state({
+      gold: 3,
+      board: [
+        minion(1, { cardId: 'MURLOC_1' }),
+        ...Array.from({ length: 6 }, (_, i) => minion(i + 2, { cardId: 'NEUTRAL' })),
+      ],
+      hand: [minion(9, { cardId: 'MURLOC_1' })],
+      shop: [shopMinion(10, 'MURLOC_1')],
+    });
+    const buy = buyRules(s, deps).find((r) => r.minion?.cardId === 'MURLOC_1');
+    expect(buy).toBeDefined();
+    expect(buy?.sellFirst).toBeNull();
+    expect(buy?.requiresSlot).toBe(false);
+    expect(buy?.reason).toContain('место освободится само');
+  });
+
+  it('вторая копия при полном борде покупается в руку, без продажи (part10, ход 11)', () => {
+    const s = state({
+      gold: 3,
+      board: [
+        minion(1, { cardId: 'MURLOC_1' }),
+        ...Array.from({ length: 6 }, (_, i) => minion(i + 2, { cardId: 'NEUTRAL' })),
+      ],
+      shop: [shopMinion(10, 'MURLOC_1')],
+    });
+    const buy = buyRules(s, deps).find((r) => r.minion?.cardId === 'MURLOC_1');
+    expect(buy?.sellFirst).toBeNull();
+    expect(buy?.reason).toContain('в руку, под тройку');
+  });
+
+  it('покупка без явного превосходства над жертвой не советуется вовсе', () => {
+    const s = state({
+      gold: 3,
+      board: Array.from({ length: 7 }, (_, i) =>
+        minion(i + 1, { cardId: 'MURLOC_2', attack: 5, health: 5 }),
+      ),
+      shop: [shopMinion(10, 'NEUTRAL', { attack: 2, health: 2 })],
+    });
+    expect(buyRules(s, deps).find((r) => r.minion?.cardId === 'NEUTRAL')).toBeUndefined();
+  });
+});
+
+describe('заклинания руки', () => {
+  const spellCards = createCardIndex([
+    { id: 'COIN', name: 'Монетка таверны', type: 'Battleground_spell', text: 'Gain 1 Gold.' },
+    {
+      id: 'BUFF',
+      name: 'Тавматургия',
+      type: 'Spell',
+      text: '[x]Give a minion +{1}/+{1}\nuntil next turn.',
+    },
+    { id: 'MINION_X', name: 'Миньон', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+  ]);
+  const spellDeps = { cards: spellCards };
+  const handSpell = (
+    cardId: string,
+    patch: Partial<GameState['handSpells'][number]> = {},
+  ): GameState['handSpells'][number] => ({
+    entityId: 900,
+    cardId,
+    cost: 0,
+    scriptData: [null, null],
+    unplayable: false,
+    ...patch,
+  });
+
+  it('spellEffect: литералы, плейсхолдеры из тегов, золото, пусто', () => {
+    const idx = createCardIndex([
+      { id: 'LIT', text: 'Give a minion +1/+1.' },
+      { id: 'PH', text: 'Give a friendly minion +{0} Attack and <b>Divine Shield</b>.' },
+      { id: 'GOLD', text: 'Gain 2 Gold.' },
+      { id: 'NONE', text: 'Discover a minion.' },
+    ]);
+    expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false });
+    expect(spellEffect('PH', [10, null], idx)).toEqual({ gold: 0, stats: 10, divineShield: true });
+    expect(spellEffect('GOLD', [], idx)).toEqual({ gold: 2, stats: 0, divineShield: false });
+    expect(spellEffect('NONE', [], idx)).toBeNull();
+  });
+
+  it('монетка советуется, когда её золото открывает покупку (part10, ход 5)', () => {
+    // Два золота, монетка и витрина: прежний совет — «НИЧЕГО», хотя монетка
+    // превращала два золота в покупку.
+    const s = state({
+      gold: 2,
+      shop: [minion(10, { cardId: 'MINION_X', attack: 3, health: 4 })],
+      handSpells: [handSpell('COIN')],
+    });
+    const recs = spellRules(s, spellDeps);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]?.spellCardId).toBe('COIN');
+    expect(recs[0]?.reason).toContain('откроется покупка');
+  });
+
+  it('монетка молчит, когда добавка ничего не открывает (part10, ход 9)', () => {
+    const s = state({
+      gold: 0,
+      shop: [minion(10, { cardId: 'MINION_X' })],
+      handSpells: [handSpell('COIN')],
+    });
+    expect(spellRules(s, spellDeps)).toHaveLength(0);
+  });
+
+  it('бафф-заклинание советуется с целью, числа — из тегов сущности (part10, ход 9)', () => {
+    // Тавматургия: «+{1}/+{1}», единица улучшения лежит в NUM_2.
+    const s = state({
+      board: [
+        minion(1, { cardId: 'MINION_X', attack: 2, health: 2 }),
+        minion(2, { cardId: 'MINION_X', attack: 6, health: 6 }),
+      ],
+      handSpells: [handSpell('BUFF', { scriptData: [4, 2] })],
+    });
+    const recs = spellRules(s, spellDeps);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]?.reason).toContain('+4 статов');
+    expect(recs[0]?.reason).toContain('Миньон');
+    expect(recs[0]?.score).toBeCloseTo(2);
+  });
+
+  it('заблокированное и не по карману заклинание не советуется', () => {
+    const locked = state({
+      board: [minion(1, { cardId: 'MINION_X' })],
+      handSpells: [handSpell('BUFF', { scriptData: [4, 2], unplayable: true })],
+    });
+    expect(spellRules(locked, spellDeps)).toHaveLength(0);
+
+    const expensive = state({
+      gold: 0,
+      board: [minion(1, { cardId: 'MINION_X' })],
+      handSpells: [handSpell('BUFF', { scriptData: [4, 2], cost: 2 })],
+    });
+    expect(spellRules(expensive, spellDeps)).toHaveLength(0);
   });
 });
 
@@ -923,14 +1139,46 @@ describe('совет по открытому выбору', () => {
     expect(advice[0]?.reason).toContain('собирает тройку');
   });
 
-  it('не-миньон честно не оценивается и идёт в конец', () => {
+  it('не-миньон без понятного эффекта честно не оценивается и идёт в конец', () => {
     const advice = choiceAdvice(
       withChoice(['MECH_M'], 'PICK_SPELL', 'PICK_MECH'),
       choiceDeps,
     );
     expect(advice[0]?.name).toBe('Зачарованный часовой');
     expect(advice.at(-1)?.value).toBeNull();
+    expect(advice.at(-1)?.score).toBeNull();
     expect(advice.at(-1)?.reason).toContain('не берёмся');
+  });
+
+  it('заклинание-сокровище оценивается эффектом из текста (part10, ход 17)', () => {
+    // «Buy the Holy Light»: «+{0} Attack and Divine Shield», десятка в NUM_1.
+    // Прежде весь выбор из заклинаний молчал, и оверлей советовал покупки,
+    // будто модального экрана нет.
+    const treasureCards = createCardIndex([
+      {
+        id: 'HOLY',
+        name: 'Именем Света',
+        type: 'Spell',
+        text: 'Give a friendly minion +{0} Attack and <b>Divine Shield</b>.',
+      },
+      { id: 'BAN', name: 'Бананы', type: 'Spell', text: 'Fill your hand with Bananas.' },
+    ]);
+    const s = state({
+      openChoice: {
+        id: 6,
+        sourceCardId: 'SRC',
+        options: [
+          { entityId: 1, cardId: 'BAN' },
+          { entityId: 2, cardId: 'HOLY', scriptData: [10, null] },
+        ],
+      },
+    });
+    const advice = choiceAdvice(s, { cards: treasureCards });
+
+    expect(advice[0]?.name).toBe('Именем Света');
+    expect(advice[0]?.score).toBeCloseTo(8); // 10 статов × 0.5 + щит 3
+    expect(advice[0]?.reason).toContain('щит');
+    expect(advice.at(-1)?.score).toBeNull();
   });
 });
 

@@ -83,22 +83,23 @@ describe('советник таверны на фикстурах', () => {
     expect(turnOf(part3, 9).state.maxTechLevel).toBe(6);
   });
 
-  it('на полном борде совет покупки называет, кого продать', () => {
-    // part2, ход 17: семь миньонов на борде, витрина сильная.
+  it('на полном борде покупка либо в руку под тройку, либо через явную продажу', () => {
+    // part2, ход 17: семь миньонов на борде, в витрине вторая копия
+    // Fire Baller. Копии слот не нужен — она ждёт тройку в руке; обмен
+    // с бордом остаётся отдельной рекомендацией продажи с именем жертвы.
     const { state } = turnOf(part2, 17);
     expect(state.board).toHaveLength(DEFAULT_TAVERN_RULES.boardSize);
 
     const advice = adviseTavern(state, { cards });
     const buy = advice?.recommendations.find((r) => r.action === 'buy');
-    expect(buy?.requiresSlot).toBe(true);
-    // Совет «купи, но борд полон» без имени жертвы перекладывает работу
-    // обратно на игрока — ровно ту, ради которой советник и нужен.
-    expect(buy?.sellFirst).not.toBeNull();
-    expect(buy?.reason).toContain('продать');
+    expect(buy?.requiresSlot).toBe(false);
+    expect(buy?.sellFirst).toBeNull();
+    expect(buy?.reason).toContain('в руку, под тройку');
 
-    // Отдельная рекомендация продажи тоже есть, и жертва в ней та же.
+    // Рекомендация продажи называет и жертву, и кандидата из витрины.
     const sell = advice?.recommendations.find((r) => r.action === 'sell');
-    expect(sell?.minion?.entityId).toBe(buy?.sellFirst?.entityId);
+    expect(sell?.minion).not.toBeNull();
+    expect(sell?.reason).toContain('слабейший');
   });
 
   it('слабейший свой ищется с учётом племенной синергии, а не в пустоте', () => {

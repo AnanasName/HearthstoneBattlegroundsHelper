@@ -63,6 +63,8 @@ export interface Recommendation {
    * тому, кто дольше живёт в бою.
    */
   readonly magnetizeTo?: Minion | null;
+  /** Заклинание, к которому относится совет «разыграть». У миньонов пусто. */
+  readonly spellCardId?: string | null;
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -372,6 +374,16 @@ export function levelUpRule(
         : bestBuy + behind * rules.levellingUrgencyPerTier;
   }
 
+  // Остаток, которого не хватит на покупку, — не мёртвое золото: обновление
+  // витрины стоит 1, и после подъёма оно показывает карты уже нового тира.
+  // Игрок указал на совет «подъём за 5 из 6» без слова про судьбу шестой
+  // монеты (part10, ход 7).
+  const leftover = state.gold - cost;
+  const leftoverTail =
+    leftover >= rules.rerollCost && leftover < rules.minionCost
+      ? `; остаток ${String(leftover)} — на обновление витрины нового тира`
+      : '';
+
   return {
     action: 'levelUp',
     minion: null,
@@ -380,10 +392,11 @@ export function levelUpRule(
     requiresSlot: false,
     sellFirst: null,
     reason:
-      behind > 0
+      (behind > 0
         ? `таверна ${String(state.techLevel)} при ожидаемых ${String(wanted)} к ходу ${String(state.turn)}` +
           `, подъём до ${String(target)} стоит ${String(cost)} из ${String(state.gold)}${widerShop}`
-        : `таверна ${String(state.techLevel)} и так по графику, подъём до ${String(target)} за ${String(cost)} — на опережение${widerShop}`,
+        : `таверна ${String(state.techLevel)} и так по графику, подъём до ${String(target)} за ${String(cost)} — на опережение${widerShop}`) +
+      leftoverTail,
   };
 }
 
@@ -433,8 +446,8 @@ export function buyRules(
 
   return state.shop
     .filter(() => rules.minionCost <= state.gold)
-    .map((minion) => {
-      const value = minionValue(minion, state, deps, rules);
+    .flatMap((minion) => {
+      let value = minionValue(minion, state, deps, rules);
       const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
 
       // Магнитный мех на полном борде места не требует: его примагничивают
@@ -443,9 +456,50 @@ export function buyRules(
         ? magnetizeTarget(state.board, deps.cards)
         : null;
 
+      // Сколько копий кандидата стоит на борде: тройка сливает их в золотого,
+      // и место освобождается само.
+      const copiesOnBoard = minion.golden
+        ? 0
+        : state.board.filter((b) => b.cardId === minion.cardId && !b.golden).length;
+
       const notes: string[] = [];
-      if (value.copiesOwned >= 2) notes.push('собирает тройку');
-      else if (value.copiesOwned === 1) notes.push('вторая копия');
+      let sellFirst: Minion | null = null;
+      let requiresSlot = false;
+
+      if (full && host === null) {
+        if (value.copiesOwned >= 2 && copiesOnBoard >= 1) {
+          // Тройка собирается, и хотя бы одна копия на борде: слияние заберёт
+          // её и освободит слот — продавать никого не нужно (part10, ход 13:
+          // советник предлагал продать Тавматурга ради третьего дракончика).
+          notes.push('соберёт тройку — место освободится само');
+        } else if (value.copiesOwned >= 1) {
+          // Вторая копия покупается В РУКУ, под будущую тройку: слот ей
+          // не нужен, пока её не разыгрываешь.
+          notes.push('борд полон — в руку, под тройку');
+        } else if (victim !== null) {
+          // Продажа оправдана только явным превосходством, и считать его надо
+          // против борда БЕЗ жертвы: иначе кандидат получает бонусы от
+          // миньона, которого сам же и продаёт, — на part10 дракончик
+          // предлагал продать такого же дракончика ради «второй копии».
+          const without = state.board.filter((x) => x.entityId !== victim.minion.entityId);
+          const replacing = minionValue(minion, { ...state, board: without }, deps, rules);
+          if (replacing.total <= victim.value + rules.sellMargin) return [];
+          value = replacing;
+          sellFirst = victim.minion;
+          requiresSlot = true;
+          const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
+          notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
+        } else {
+          notes.push('борд полон');
+        }
+      }
+
+      // Пометка про копии не дублирует ветку тройки на полном борде выше.
+      if (value.copiesOwned >= 2 && !notes.some((n) => n.includes('тройку'))) {
+        notes.unshift('собирает тройку');
+      } else if (value.copiesOwned === 1 && !notes.some((n) => n.includes('тройку'))) {
+        notes.unshift('вторая копия');
+      }
       if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
       if (value.textTribeMates > 0) {
         notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
@@ -455,11 +509,6 @@ export function buyRules(
       if (host !== null) {
         const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
         notes.push(`борд полон, но магнитится — примагнитить к ${hostName}`);
-      } else if (victim !== null) {
-        const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
-        notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
-      } else if (full) {
-        notes.push('борд полон');
       }
 
       // Тир берётся с тем же запасным вариантом, что и в оценке: у миньона
@@ -467,19 +516,21 @@ export function buyRules(
       // с посчитанной по тиру ценностью выглядела бы противоречием.
       const tier = minion.techLevel ?? deps.cards.info(minion.cardId)?.techLevel ?? null;
 
-      return {
-        action: 'buy' as const,
-        minion,
-        score: value.total,
-        cost: rules.minionCost,
-        requiresSlot: full && host === null,
-        sellFirst: host === null ? (victim?.minion ?? null) : null,
-        magnetizeTo: host,
-        reason:
-          `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
-          `тир ${tier === null ? '?' : String(tier)}, ценность ${value.total.toFixed(1)}` +
-          (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
-      };
+      return [
+        {
+          action: 'buy' as const,
+          minion,
+          score: value.total,
+          cost: rules.minionCost,
+          requiresSlot,
+          sellFirst,
+          magnetizeTo: host,
+          reason:
+            `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
+            `тир ${tier === null ? '?' : String(tier)}, ценность ${value.total.toFixed(1)}` +
+            (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
+        },
+      ];
     });
 }
 
@@ -508,7 +559,7 @@ export function playRules(
     // с замком на два хода, — тег LITERALLY_UNPLAYABLE, тикает и снимается.
     if ((minion.tags['LITERALLY_UNPLAYABLE'] ?? 0) > 0) return [];
 
-    const value = minionValue(minion, state, deps, rules);
+    let value = minionValue(minion, state, deps, rules);
 
     // Магнитный мех при полном борде идёт не через продажу, а через
     // примагничивание: слот ему не нужен. Случай part9, ход 13: советник
@@ -518,9 +569,20 @@ export function playRules(
       ? magnetizeTarget(state.board, deps.cards)
       : null;
 
-    // На полном борде розыгрыш идёт через продажу, и жертва обязана быть
-    // слабее — менять равного на равного с доплатой хода смысла нет.
-    if (full && host === null && (victim === null || victim.value >= value.total)) return [];
+    // На полном борде розыгрыш идёт через продажу. Ценность кандидата
+    // считается против борда БЕЗ жертвы — иначе он получает бонусы от
+    // миньона, которого сам вытесняет: на part10 дракончик из руки
+    // предлагал «продать» такого же дракончика с борда, потому что тот
+    // числился его «второй копией». И превосходство обязано быть явным,
+    // с тем же порогом, что у правила продажи: менять почти равного
+    // на почти равного — потерянный ход.
+    if (full && host === null) {
+      if (victim === null) return [];
+      const without = state.board.filter((x) => x.entityId !== victim.minion.entityId);
+      const replacing = minionValue(minion, { ...state, board: without }, deps, rules);
+      if (replacing.total <= victim.value + rules.sellMargin) return [];
+      value = replacing;
+    }
 
     const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
     const notes: string[] = [];
@@ -534,7 +596,7 @@ export function playRules(
     if (host !== null) {
       const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
       notes.push(`борд полон, но магнитится — к ${hostName}`);
-    } else if (victim !== null) {
+    } else if (full && victim !== null) {
       const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
       notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
     }
@@ -546,7 +608,7 @@ export function playRules(
         score: value.total,
         cost: 0,
         requiresSlot: full && host === null,
-        sellFirst: host === null ? (victim?.minion ?? null) : null,
+        sellFirst: full && host === null ? (victim?.minion ?? null) : null,
         magnetizeTo: host,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
@@ -661,10 +723,34 @@ export function freezeRule(
   if (state.shop.every((m) => m.frozen)) return null;
 
   const affordable = Math.floor(state.gold / rules.minionCost);
+
+  // Порог относителен тиру таверны, как у реролла: плоский порог к четвёртому
+  // тиру пробивала любая дешёвка со статами (part10, Snow Baller).
+  const threshold = rules.value.perTechLevel * state.techLevel + rules.freeze.marginOverTier;
+
+  // «Собираемое племя» считается строго: без амальгам и без одноимённых.
+  // Амальгама своя для любого племени и потому не признак того, что племя
+  // собирается; одноимённая карта — это копия, у копий своя ветка. На part10
+  // (ход 3) золотая Aureate Laureate морозилась ради «своих по племени 2»,
+  // где свои — она же на борде и амальгама. Одноимённость сверяется по
+  // базовому cardId: золотая копия носит суффикс `_G` и без нормализации
+  // считалась «другой картой» (ход 13, дракончик при золотом дракончике).
+  const baseCardId = (id: string): string => (id.endsWith('_G') ? id.slice(0, -2) : id);
+  const strictMates = (candidate: Minion): number => {
+    const mine = racesOf(candidate, deps.cards).filter((r) => r !== RACE_ALL);
+    return state.board.filter((m) => {
+      if (baseCardId(m.cardId) === baseCardId(candidate.cardId)) return false;
+      const theirs = racesOf(m, deps.cards).filter((r) => r !== RACE_ALL);
+      if (theirs.length === 0) return false;
+      if (racesOf(candidate, deps.cards).includes(RACE_ALL)) return true;
+      return theirs.some((r) => mine.includes(r));
+    }).length;
+  };
+
   const valued = state.shop
     .map((m) => {
       const value = minionValue(m, state, deps, rules);
-      return { minion: m, value: value.total, copies: value.copiesOwned, mates: value.tribeMates };
+      return { minion: m, value: value.total, copies: value.copiesOwned, mates: strictMates(m) };
     })
     .sort((a, b) => b.value - a.value);
 
@@ -673,7 +759,7 @@ export function freezeRule(
     .slice(affordable)
     .filter(
       (v) =>
-        v.value >= rules.freeze.minValue &&
+        v.value >= threshold &&
         (v.copies >= 1 || v.mates >= rules.freeze.minTribeMates),
     );
   const best = keepers[0];
@@ -690,7 +776,7 @@ export function freezeRule(
   return {
     action: 'freeze',
     minion: best.minion,
-    score: best.value - rules.freeze.minValue,
+    score: best.value - threshold,
     cost: 0,
     requiresSlot: false,
     sellFirst: null,
@@ -751,6 +837,166 @@ export function heroPowerRule(
       `как средний из витрины (${average.toFixed(1)}), но на ` +
       `${String(rules.minionCost - cost)} золота дешевле покупки`,
   };
+}
+
+/**
+ * Эффект заклинания, восстановленный из текста карты и тегов сущности.
+ *
+ * Плейсхолдеры `{0}`/`{1}` в тексте снапшота — это индексы значений
+ * `TAG_SCRIPT_DATA_NUM_1..2` на сущности (part10: у «Buy the Holy Light»
+ * текст «+{0} Attack», а 10 лежит в NUM_1; у Тавматургии «+{1}/+{1}»
+ * и единица в NUM_2). Литеральные числа встречаются реже («+1/+1»).
+ * Что не разобралось — честный `null`: совет не берётся судить.
+ */
+export interface SpellEffect {
+  /** Золото, которое даст розыгрыш: «Gain 1 Gold» у монетки таверны. */
+  readonly gold: number;
+  /** Сумма статов усиления: «+{0} Attack», «+X/+Y». */
+  readonly stats: number;
+  /** Даёт ли божественный щит. */
+  readonly divineShield: boolean;
+}
+
+export function spellEffect(
+  cardId: string,
+  scriptData: readonly (number | null)[],
+  cards: CardIndex,
+): SpellEffect | null {
+  const text = cards.info(cardId)?.text ?? '';
+  if (text === '') return null;
+
+  const gold = /gain (\d+) gold/i.exec(text);
+
+  // Числа усиления: литерал или плейсхолдер-индекс в теги сущности.
+  let stats = 0;
+  for (const m of text.matchAll(/\+(?:\{(\d)\}|(\d+))/g)) {
+    const placeholder = m[1];
+    const literal = m[2];
+    if (placeholder !== undefined) stats += scriptData[Number(placeholder)] ?? 0;
+    else if (literal !== undefined) stats += Number(literal);
+  }
+  const shield = /divine shield/i.test(text);
+
+  if (gold === null && stats === 0 && !shield) return null;
+  return {
+    gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
+    stats,
+    divineShield: shield,
+  };
+}
+
+/**
+ * Правила розыгрыша заклинаний из руки.
+ *
+ * Бой заклинания не играет, но забытая в руке монетка — потерянное золото,
+ * а неразыгранный бафф — потерянные статы ближайшего боя (part10, ход 9:
+ * бесплатная Тавматургия +1/+1 лежала в руке при совете «НИЧЕГО»).
+ *
+ * Два случая, оба читаются из опубликованного текста и тегов:
+ *
+ * - **экономическое** («Gain N Gold»): советуется, только когда добавка
+ *   открывает действие, которое сейчас не по карману, — покупку или подъём.
+ *   Иначе монетка честно копится (part10, ход 9: золото 0, монетка молчит);
+ * - **усиление** («+X/+Y», «+{0} Attack», щит): советуется, когда по карману;
+ *   цель — самый крупный свой миньон, очки — те же веса статов и щита,
+ *   что у миньонов. Точечный выбор цели правила не судят — сказано в docs.
+ */
+export function spellRules(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation[] {
+  return state.handSpells.flatMap((spell) => {
+    if (spell.unplayable) return [];
+    const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards);
+    if (effect === null) return [];
+    const name = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
+
+    if (effect.gold > 0) {
+      const net = effect.gold - spell.cost;
+      if (net <= 0) return [];
+      const richer = { ...state, gold: state.gold + net };
+
+      // Покупка, которая откроется: сейчас золота не хватает, с монеткой — да.
+      if (state.gold < rules.minionCost && richer.gold >= rules.minionCost) {
+        const unlocked = buyRules(richer, deps, rules);
+        const best = unlocked.reduce(
+          (a: Recommendation | null, b) => (a === null || b.score > a.score ? b : a),
+          null,
+        );
+        if (best?.minion != null) {
+          const bestName = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
+          return [
+            {
+              action: 'play' as const,
+              minion: null,
+              spellCardId: spell.cardId,
+              score: best.score,
+              cost: spell.cost,
+              requiresSlot: false,
+              sellFirst: null,
+              reason:
+                `${name} даёт ${String(net)} золота — откроется покупка ` +
+                `${bestName} (${best.score.toFixed(1)})`,
+            },
+          ];
+        }
+      }
+
+      // Подъём таверны, до которого не хватает ровно этой добавки.
+      const upgrade = state.tavernUpgradeCost;
+      if (upgrade !== null && state.gold < upgrade && richer.gold >= upgrade) {
+        const levelled = levelUpRule(richer, rules, buyRules(richer, deps, rules));
+        if (levelled !== null && levelled.score > 0) {
+          return [
+            {
+              action: 'play' as const,
+              minion: null,
+              spellCardId: spell.cardId,
+              score: levelled.score,
+              cost: spell.cost,
+              requiresSlot: false,
+              sellFirst: null,
+              reason: `${name} даёт ${String(net)} золота — откроется подъём таверны`,
+            },
+          ];
+        }
+      }
+
+      // Ничего не открывается — монетка честно копится.
+      return [];
+    }
+
+    // Усиление: бесплатные статы перед боем.
+    if (spell.cost > state.gold || state.board.length === 0) return [];
+    const score =
+      effect.stats * rules.value.perStatPoint +
+      (effect.divineShield ? rules.value.divineShield : 0) -
+      spell.cost * rules.goldPointValue;
+    if (score <= 0) return [];
+
+    const target = state.board.reduce((a, b) =>
+      (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+    );
+    const targetName = deps.cards.info(target.cardId)?.name ?? target.cardId;
+
+    return [
+      {
+        action: 'play' as const,
+        minion: null,
+        spellCardId: spell.cardId,
+        score,
+        cost: spell.cost,
+        requiresSlot: false,
+        sellFirst: null,
+        reason:
+          `${name} — усиление перед боем` +
+          (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
+          (effect.divineShield ? ' и щит' : '') +
+          `, цель — ${targetName}`,
+      },
+    ];
+  });
 }
 
 /**
@@ -846,16 +1092,23 @@ export interface ChoiceAdvice {
   readonly name: string;
   /** Оценка той же функцией, что у витрины. `null` у не-миньонов. */
   readonly value: ValueBreakdown | null;
+  /**
+   * Очки для ранжирования: у миньонов — `value.total`, у заклинаний —
+   * оценка эффекта из текста. `null` — оценить не взялись.
+   */
+  readonly score: number | null;
   readonly reason: string;
 }
 
 /**
- * Совет по открытому выбору: награда за тройку, раскопка карт.
+ * Совет по открытому выбору: награда за тройку, раскопка карт, сокровища.
  *
  * Варианты-миньоны оцениваются той же функцией, что и витрина, — тир, статы,
  * племя, копии. Именно здесь копии решают: выбор, собирающий тройку, стоит
- * выше любых статов. Про варианты не-миньоны (заклинания, дары) совет
- * честно говорит, что оценить их не берётся: у них нет ни статов, ни тира.
+ * выше любых статов. Варианты-заклинания оцениваются эффектом из текста
+ * (усиление, щит, золото) — так выбор сокровищ part10 («+{0} Attack and
+ * Divine Shield» против бананов) получает рекомендацию, а не молчание.
+ * Что не разобралось, честно помечено «оценить не берёмся».
  *
  * Тринкеты сюда не попадают: их выбор идёт отдельным полем `trinkets`
  * со своим ранжированием по племенам из текста.
@@ -873,7 +1126,30 @@ export function choiceAdvice(
     const name = info?.name ?? option.cardId;
 
     if (info === null || info.type !== 'MINION') {
-      return { option, name, value: null, reason: 'не миньон — оценить не берёмся' };
+      // Заклинание: оценка эффекта из текста и тегов варианта.
+      const effect =
+        info !== null && (info.type?.includes('SPELL') ?? false)
+          ? spellEffect(option.cardId, option.scriptData ?? [], deps.cards)
+          : null;
+      if (effect === null || (effect.stats === 0 && !effect.divineShield && effect.gold === 0)) {
+        return { option, name, value: null, score: null, reason: 'оценить не берёмся' };
+      }
+      const score =
+        effect.stats * rules.value.perStatPoint +
+        (effect.divineShield ? rules.value.divineShield : 0) +
+        effect.gold * rules.goldPointValue;
+      const parts = [
+        effect.stats > 0 ? `+${String(effect.stats)} статов` : '',
+        effect.divineShield ? 'щит' : '',
+        effect.gold > 0 ? `${String(effect.gold)} золота` : '',
+      ].filter((p) => p !== '');
+      return {
+        option,
+        name,
+        value: null,
+        score,
+        reason: `заклинание: ${parts.join(', ')} — очки ${score.toFixed(1)}`,
+      };
     }
 
     // Псевдо-миньон из справочника: у варианта выбора нет сущности с тегами,
@@ -915,6 +1191,7 @@ export function choiceAdvice(
       option,
       name,
       value,
+      score: value.total,
       reason:
         `тир ${info.techLevel === null ? '?' : String(info.techLevel)}, ` +
         `ценность ${value.total.toFixed(1)}` +
@@ -922,8 +1199,8 @@ export function choiceAdvice(
     };
   });
 
-  // Миньоны по убыванию ценности, не-миньоны в конце в исходном порядке.
-  return scored.sort((a, b) => (b.value?.total ?? -1) - (a.value?.total ?? -1));
+  // По убыванию очков; неоценённое — в конце в исходном порядке.
+  return scored.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 }
 
 /** Шаг плана розыгрыша. */
@@ -1024,6 +1301,7 @@ export function adviseTavern(
   const recommendations: Recommendation[] = [
     ...buys,
     ...plays,
+    ...spellRules(state, deps, rules),
     levelUpRule(state, rules, buys),
     heroPowerRule(state, deps, rules),
     darkGiftRule(state, rules),

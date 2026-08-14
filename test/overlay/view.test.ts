@@ -191,13 +191,15 @@ describe('вид оверлея', () => {
           option: { entityId: 1, cardId: 'A' },
           name: 'Часовой',
           value: breakdown(18),
+          score: 18,
           reason: 'тир 4, ценность 18.0',
         },
         {
           option: { entityId: 2, cardId: 'B' },
           name: 'Дар',
           value: null,
-          reason: 'не миньон — оценить не берёмся',
+          score: null,
+          reason: 'оценить не берёмся',
         },
       ],
     };
@@ -209,7 +211,9 @@ describe('вид оверлея', () => {
     expect(view.actions).toHaveLength(2);
   });
 
-  it('выбор из одних не-миньонов советы не вытесняет', () => {
+  it('выбор из одних неоценённых вариантов всё равно показывается', () => {
+    // part10, ход 17: три сокровища-заклинания, а оверлей советовал покупки,
+    // будто модального экрана нет. Открытый выбор доминирует всегда.
     const withSpells: TavernAdvice = {
       ...tavern,
       choice: [
@@ -217,12 +221,14 @@ describe('вид оверлея', () => {
           option: { entityId: 1, cardId: 'A' },
           name: 'Дар',
           value: null,
-          reason: 'не миньон — оценить не берёмся',
+          score: null,
+          reason: 'оценить не берёмся',
         },
       ],
     };
     const view = buildView(input({ tavern: withSpells }), cards);
-    expect(view.actions[0]?.text).not.toContain('ВЫБРАТЬ?');
+    expect(view.actions[0]?.text).toContain('ВЫБРАТЬ?');
+    expect(view.actions[0]?.tone).toBe('normal');
   });
 
   it('план на несколько розыгрышей заменяет отдельные строки «разыграть»', () => {

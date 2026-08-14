@@ -210,8 +210,16 @@ export interface TavernRules {
    * тройку или миньон нужного племени.
    */
   readonly freeze: {
-    /** Морозить только кандидата не дешевле этого — по общей шкале ценности. */
-    readonly minValue: number;
+    /**
+     * Порог ценности кандидата ОТНОСИТЕЛЬНО тира таверны:
+     * порог = perTechLevel × тир + этот запас.
+     *
+     * Плоский порог 10 к четвёртому тиру пропускал дешёвку: вторая копия
+     * миньона второго тира пробивала его statами и бонусом копии, и советник
+     * морозил всю витрину ради карты на два тира ниже лавки (part10, ход 13,
+     * Snow Baller) — на что игрок и указал. Тот же урок, что у реролла.
+     */
+    readonly marginOverTier: number;
     /** Либо копия под тройку, либо своих того же племени не меньше стольких. */
     readonly minTribeMates: number;
   };
@@ -294,7 +302,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   rerollMarginOverTier: 2,
   freeze: {
-    minValue: 10,
+    marginOverTier: 4,
     minTribeMates: 2,
   },
   sellMargin: 3,

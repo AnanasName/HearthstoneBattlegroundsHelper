@@ -64,7 +64,12 @@ export function situationLine(state: GameState): string {
 
 /** Совет по таверне одной строкой. */
 export function recommendationLine(r: Recommendation, cards: CardIndex): string {
-  const what = r.minion === null ? '' : ` ${minionLabel(r.minion, cards)}`;
+  const what =
+    r.minion !== null
+      ? ` ${minionLabel(r.minion, cards)}`
+      : r.spellCardId != null
+        ? ` ${cards.info(r.spellCardId)?.name ?? r.spellCardId}`
+        : '';
   const price = r.cost > 0 ? ` за ${String(r.cost)}` : '';
   const victim = r.sellFirst === null ? '' : `, продав ${minionLabel(r.sellFirst, cards)}`;
   const magnet =
