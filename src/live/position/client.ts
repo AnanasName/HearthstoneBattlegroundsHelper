@@ -3,18 +3,32 @@ import { Worker } from 'node:worker_threads';
 import type { BattleSetup } from '../../advisors/battle/mapper.js';
 import type { PositionAdvice } from '../../advisors/position/advisor.js';
 import type { SearchOptions } from '../../advisors/position/search.js';
-import { NO_TASK, type WorkerMessage, type WorkerRequest, type WorkerSetup } from './protocol.js';
+import {
+  DEFAULT_BUY_CHECK_OPTIONS,
+  type BuyCandidate,
+  type BuyCheckOptions,
+  type BuyCheckResult,
+} from '../../advisors/tavern/simulated.js';
+import {
+  BUYS_SLOT,
+  NO_TASK,
+  POSITION_SLOT,
+  type WorkerMessage,
+  type WorkerRequest,
+  type WorkerSetup,
+} from './protocol.js';
 
 /**
- * Советник расстановки в отдельном потоке.
+ * Советники в отдельном потоке: расстановка и досчёт покупок.
  *
  * Заводится один раз при старте и живёт до конца работы: смысл именно в том,
- * чтобы справочник карт грузился однажды. Новый совет автоматически отменяет
- * незаконченный предыдущий — устройство отмены описано в protocol.ts.
+ * чтобы справочник карт грузился однажды. Новый запрос своего вида
+ * автоматически отменяет незаконченный предыдущий; виды друг друга
+ * не отменяют — устройство слотов описано в protocol.ts.
  */
 
-interface Waiting {
-  readonly resolve: (advice: PositionAdvice | null) => void;
+interface Waiting<T> {
+  readonly resolve: (value: T | null) => void;
   readonly reject: (error: Error) => void;
 }
 
@@ -43,8 +57,9 @@ function workerExecArgv(url: URL): string[] {
 }
 
 export class PositionWorker {
-  readonly #pending = new Int32Array(new SharedArrayBuffer(4));
-  readonly #waiting = new Map<number, Waiting>();
+  readonly #pending = new Int32Array(new SharedArrayBuffer(8));
+  readonly #waitingPosition = new Map<number, Waiting<PositionAdvice>>();
+  readonly #waitingBuys = new Map<number, Waiting<BuyCheckResult>>();
   readonly #worker: Worker;
   readonly #ready: Promise<number>;
   #nextId = 1;
@@ -70,7 +85,7 @@ export class PositionWorker {
       this.#failAll(error);
     });
     this.#worker.on('exit', (code) => {
-      if (!this.#closed) this.#failAll(new Error(`воркер расстановки умер, код ${String(code)}`));
+      if (!this.#closed) this.#failAll(new Error(`воркер советников умер, код ${String(code)}`));
     });
   }
 
@@ -80,7 +95,7 @@ export class PositionWorker {
   }
 
   /**
-   * Посчитать совет, бросив предыдущий незаконченный.
+   * Посчитать совет по расстановке, бросив предыдущий незаконченный.
    *
    * `null` означает, что счёт прерван более свежим запросом или отменой:
    * состояние ушло вперёд, и ответ относился бы уже не к нему.
@@ -89,51 +104,96 @@ export class PositionWorker {
     setups: readonly BattleSetup[],
     overrides: Partial<SearchOptions> = {},
   ): Promise<PositionAdvice | null> {
-    if (this.#closed) return Promise.reject(new Error('воркер расстановки закрыт'));
+    if (this.#closed) return Promise.reject(new Error('воркер советников закрыт'));
 
     const id = this.#nextId++;
     // Объявление себя и отмена предыдущего — одно действие, поэтому
     // между ними ничего не вклинится.
-    Atomics.store(this.#pending, 0, id);
+    Atomics.store(this.#pending, POSITION_SLOT, id);
 
     return new Promise<PositionAdvice | null>((resolve, reject) => {
-      this.#waiting.set(id, { resolve, reject });
+      this.#waitingPosition.set(id, { resolve, reject });
       const request: WorkerRequest = { type: 'advise', id, setups, overrides };
       this.#worker.postMessage(request);
     });
   }
 
-  /** Бросить счёт: ответ больше не нужен. */
+  /**
+   * Досчитать покупки боем, бросив предыдущий незаконченный досчёт.
+   * Расстановку этот запрос не отменяет — у него свой слот.
+   */
+  checkBuys(
+    setups: readonly BattleSetup[],
+    candidates: readonly BuyCandidate[],
+    options: BuyCheckOptions = DEFAULT_BUY_CHECK_OPTIONS,
+  ): Promise<BuyCheckResult | null> {
+    if (this.#closed) return Promise.reject(new Error('воркер советников закрыт'));
+
+    const id = this.#nextId++;
+    Atomics.store(this.#pending, BUYS_SLOT, id);
+
+    return new Promise<BuyCheckResult | null>((resolve, reject) => {
+      this.#waitingBuys.set(id, { resolve, reject });
+      const request: WorkerRequest = { type: 'checkBuys', id, setups, candidates, options };
+      this.#worker.postMessage(request);
+    });
+  }
+
+  /** Бросить весь счёт: ответы больше не нужны. */
   cancel(): void {
-    Atomics.store(this.#pending, 0, NO_TASK);
+    Atomics.store(this.#pending, POSITION_SLOT, NO_TASK);
+    Atomics.store(this.#pending, BUYS_SLOT, NO_TASK);
   }
 
   /** Идёт ли счёт, которого ещё ждут. */
   get busy(): boolean {
-    return this.#waiting.size > 0;
+    return this.#waitingPosition.size > 0 || this.#waitingBuys.size > 0;
   }
 
   async close(): Promise<void> {
     this.#closed = true;
     this.cancel();
     await this.#worker.terminate();
-    this.#failAll(new Error('воркер расстановки закрыт'));
+    this.#failAll(new Error('воркер советников закрыт'));
   }
 
   #receive(message: WorkerMessage): void {
     if (message.type === 'ready') return;
 
-    const waiting = this.#waiting.get(message.id);
-    if (waiting === undefined) return;
-    this.#waiting.delete(message.id);
+    if (message.type === 'advice') {
+      const waiting = this.#waitingPosition.get(message.id);
+      this.#waitingPosition.delete(message.id);
+      waiting?.resolve(message.advice);
+      return;
+    }
+    if (message.type === 'buys') {
+      const waiting = this.#waitingBuys.get(message.id);
+      this.#waitingBuys.delete(message.id);
+      waiting?.resolve(message.result);
+      return;
+    }
 
-    if (message.type === 'advice') waiting.resolve(message.advice);
-    else if (message.type === 'aborted') waiting.resolve(null);
-    else waiting.reject(new Error(message.message));
+    // Брошенный счёт и сбой не говорят, какого вида была задача, —
+    // номер задачи уникален на оба вида, ищем в обеих очередях.
+    const position = this.#waitingPosition.get(message.id);
+    if (position !== undefined) {
+      this.#waitingPosition.delete(message.id);
+      if (message.type === 'aborted') position.resolve(null);
+      else position.reject(new Error(message.message));
+      return;
+    }
+    const buys = this.#waitingBuys.get(message.id);
+    if (buys !== undefined) {
+      this.#waitingBuys.delete(message.id);
+      if (message.type === 'aborted') buys.resolve(null);
+      else buys.reject(new Error(message.message));
+    }
   }
 
   #failAll(error: Error): void {
-    for (const waiting of this.#waiting.values()) waiting.reject(error);
-    this.#waiting.clear();
+    for (const waiting of this.#waitingPosition.values()) waiting.reject(error);
+    this.#waitingPosition.clear();
+    for (const waiting of this.#waitingBuys.values()) waiting.reject(error);
+    this.#waitingBuys.clear();
   }
 }

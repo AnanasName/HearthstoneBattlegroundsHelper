@@ -1,9 +1,11 @@
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { PositionTarget, ResolvedOpponent } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
+import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState } from '../state/types.js';
 import {
+  buyCheckLine,
   choiceLine,
   minionLabel,
   noOpponentReason,
@@ -71,6 +73,11 @@ export interface ViewInput {
     | { readonly kind: 'dropped' }
     | { readonly kind: 'noOpponent'; readonly opponent: ResolvedOpponent }
     | null;
+  /** Досчёт покупок боем; `null` — не считался или брошен. */
+  readonly buyCheck?: {
+    readonly result: BuyCheckResult;
+    readonly target: PositionTarget;
+  } | null;
 }
 
 export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
@@ -151,6 +158,18 @@ function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
   const shown: OverlayLine[] = lines
     .slice(0, MAX_ACTIONS)
     .map((text, i) => ({ text, tone: i === 0 ? 'good' : 'normal' }));
+
+  // Досчёт покупок боем — строкой поверх лимита, как и напоминание ниже:
+  // это дополнение к эвристике, а не её замена. Несогласие боя с эвристикой
+  // выделено тоном — ради него досчёт и существует; разброс в шуме
+  // приглушён: «лучший» там случаен.
+  const buyCheck = input.buyCheck ?? null;
+  if (buyCheck !== null) {
+    shown.push({
+      text: buyCheckLine(buyCheck.result, buyCheck.target, cards),
+      tone: !buyCheck.result.decisive ? 'muted' : buyCheck.result.agreed ? 'normal' : 'warn',
+    });
+  }
 
   // Напоминание о тринкетах — приглушённой строкой ПОВЕРХ лимита советов:
   // это подготовка борда к следующему ходу (тьюторинг, docs/jeefhs.md),

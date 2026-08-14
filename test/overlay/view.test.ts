@@ -189,6 +189,78 @@ describe('вид оверлея', () => {
     expect(view.actions[0]?.text).toContain('продав');
   });
 
+  it('досчёт покупок: несогласие боя выделено, шум приглушён', () => {
+    const target = single();
+    const outcome = (cardId: string, outcome: number) => ({
+      cardId,
+      entityId: 1,
+      sims: 800,
+      outcome,
+    });
+
+    // Бой предпочёл другую покупку — ради этого досчёт и существует.
+    const disagree = buildView(
+      input({
+        buyCheck: {
+          target,
+          result: {
+            outcomes: [outcome('BG_B', 62), outcome('BG_A', 48)],
+            spread: 14,
+            noise: 5,
+            decisive: true,
+            agreed: false,
+            elapsedMs: 400,
+          },
+        },
+      }),
+      cards,
+    );
+    const line = disagree.actions[disagree.actions.length - 1];
+    expect(line?.text).toContain('ПО БОЮ ЛУЧШЕ');
+    expect(line?.tone).toBe('warn');
+
+    // Разброс в шуме: «лучший» случаен, строка приглушена.
+    const noisy = buildView(
+      input({
+        buyCheck: {
+          target,
+          result: {
+            outcomes: [outcome('BG_B', 51), outcome('BG_A', 50)],
+            spread: 1,
+            noise: 5,
+            decisive: false,
+            agreed: true,
+            elapsedMs: 400,
+          },
+        },
+      }),
+      cards,
+    );
+    const noisyLine = noisy.actions[noisy.actions.length - 1];
+    expect(noisyLine?.text).toContain('неразличимы');
+    expect(noisyLine?.tone).toBe('muted');
+
+    // Насыщенный исход — не «кандидаты равны», а «цель уже не соперник».
+    const saturated = buildView(
+      input({
+        buyCheck: {
+          target,
+          result: {
+            outcomes: [outcome('BG_B', 100), outcome('BG_A', 100)],
+            spread: 0,
+            noise: 5,
+            decisive: false,
+            agreed: true,
+            elapsedMs: 400,
+          },
+        },
+      }),
+      cards,
+    );
+    const saturatedLine = saturated.actions[saturated.actions.length - 1];
+    expect(saturatedLine?.text).toContain('выигрывается любой покупкой');
+  });
+
   it('напоминание о тринкетах — приглушённой строкой поверх лимита советов', () => {
     // Напоминание — подготовка борда к следующему ходу (тьюторинг,
     // docs/jeefhs.md); спрятанное за тремя покупками оно не видно никогда.

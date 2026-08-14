@@ -138,14 +138,15 @@ function start(): void {
   let tavern: ViewInput['tavern'] = null;
   let thinking = false;
   let last: ViewInput['position'] = null;
+  let buyCheck: ViewInput['buyCheck'] = null;
 
   const show = (): void => {
     if (latest === null) return;
-    send(buildView({ state: latest, tavern, thinking, position: last }, cards));
+    send(buildView({ state: latest, tavern, thinking, position: last, buyCheck }, cards));
   };
 
   session = startLiveSession(
-    { cards, position: worker },
+    { cards, position: worker, buys: worker },
     {
       onTavern: (advice, state) => {
         latest = state;
@@ -153,7 +154,17 @@ function start(): void {
         // Новое положение — прошлый совет по расстановке к нему не относится.
         last = null;
         thinking = false;
+        // Досчёт покупок тоже про прошлое положение: строка гасится
+        // до прихода свежего результата.
+        buyCheck = null;
         show();
+      },
+      onBuyCheck: (result, target) => {
+        // Брошенный досчёт ничего не меняет: строка уже погашена onTavern.
+        if (result !== null) {
+          buyCheck = { result, target };
+          show();
+        }
       },
       onThinking: () => {
         thinking = true;

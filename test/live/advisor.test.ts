@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BattleSetup } from '../../src/advisors/battle/mapper.js';
 import type { PositionAdvice } from '../../src/advisors/position/advisor.js';
-import { LiveAdvisor, situationKey, type PositionSource } from '../../src/live/advisor.js';
+import type { BuyCandidate, BuyCheckResult } from '../../src/advisors/tavern/simulated.js';
+import {
+  LiveAdvisor,
+  situationKey,
+  type BuyCheckSource,
+  type PositionSource,
+} from '../../src/live/advisor.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Minion } from '../../src/state/types.js';
 import { board, minion } from '../minions.js';
@@ -37,6 +43,33 @@ class FakePosition implements PositionSource {
     const resolve = this.#resolve;
     this.#resolve = null;
     resolve?.(advice);
+  }
+}
+
+/** Досчёт покупок, которым можно управлять из теста. */
+class FakeBuys implements BuyCheckSource {
+  readonly calls: { setups: readonly BattleSetup[]; candidates: readonly BuyCandidate[] }[] = [];
+  cancels = 0;
+  #resolve: ((result: BuyCheckResult | null) => void) | null = null;
+
+  checkBuys(
+    setups: readonly BattleSetup[],
+    candidates: readonly BuyCandidate[],
+  ): Promise<BuyCheckResult | null> {
+    this.calls.push({ setups, candidates });
+    return new Promise((resolve) => {
+      this.#resolve = resolve;
+    });
+  }
+
+  cancel(): void {
+    this.cancels += 1;
+  }
+
+  finish(result: BuyCheckResult | null): void {
+    const resolve = this.#resolve;
+    this.#resolve = null;
+    resolve?.(result);
   }
 }
 
@@ -187,6 +220,54 @@ describe('живой советник: когда звать и когда бр�
       expect(onTavern).toHaveBeenCalledTimes(1);
     });
     expect(position.calls).toHaveLength(0);
+  });
+
+  it('досчёт покупок зовётся при выборе из двух и цели, кандидаты — верхние покупки', async () => {
+    const buys = new FakeBuys();
+    const advisor = new LiveAdvisor({ cards, position, buys }, {}, { quietMs: QUIET });
+    const state = withSeenOpponent(tavernState({ shop: board([201, 202]) }), board([301]));
+
+    advisor.update(state);
+    await vi.waitFor(() => {
+      expect(buys.calls).toHaveLength(1);
+    });
+    expect(buys.calls[0]?.candidates.length).toBeGreaterThanOrEqual(2);
+    // Кандидат несёт борд «как выйдет в бой»: свои плюс покупка в конце.
+    expect(buys.calls[0]?.candidates[0]?.boardAfter).toHaveLength(3);
+  });
+
+  it('без цели и при одной покупке досчёт молчит', async () => {
+    const buys = new FakeBuys();
+    const advisor = new LiveAdvisor({ cards, position, buys }, {}, { quietMs: QUIET });
+
+    // Цели нет: ни одного виденного борда.
+    advisor.update(tavernState({ shop: board([201, 202]) }));
+    // Покупка одна: сравнивать нечего.
+    advisor.update(withSeenOpponent(tavernState({ shop: board([201]) }), board([301])));
+
+    await new Promise((resolve) => setTimeout(resolve, QUIET * 3));
+    expect(buys.calls).toHaveLength(0);
+  });
+
+  it('устаревший досчёт покупок отдаётся как брошенный', async () => {
+    const onBuyCheck = vi.fn();
+    const buys = new FakeBuys();
+    const advisor = new LiveAdvisor({ cards, position, buys }, { onBuyCheck }, { quietMs: QUIET });
+    const state = withSeenOpponent(tavernState({ shop: board([201, 202]) }), board([301]));
+
+    advisor.update(state);
+    await vi.waitFor(() => {
+      expect(buys.calls).toHaveLength(1);
+    });
+
+    // Игрок купил, пока считалось: отмена немедленная, результат — брошен.
+    advisor.update({ ...state, board: board([101, 102, 103]) });
+    expect(buys.cancels).toBeGreaterThan(0);
+    buys.finish({ decisive: true } as unknown as BuyCheckResult);
+
+    await vi.waitFor(() => {
+      expect(onBuyCheck).toHaveBeenCalledWith(null, expect.anything(), expect.anything());
+    });
   });
 
   it('ключ положения ловит покупку и не ловит служебные события', () => {

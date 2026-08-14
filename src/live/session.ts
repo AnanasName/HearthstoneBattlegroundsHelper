@@ -1,6 +1,7 @@
 import type { CardIndex } from '../data/cards.js';
 import {
   LiveAdvisor,
+  type BuyCheckSource,
   type LiveAdvisorHandlers,
   type LiveAdvisorOptions,
   type PositionSource,
@@ -30,6 +31,8 @@ import { LiveWatcher, type LiveNotice, type LiveWatcherOptions } from './watcher
 export interface LiveSessionDeps {
   readonly cards: CardIndex;
   readonly position: PositionSource;
+  /** Досчёт покупок боем; без него покупки живут одной эвристикой. */
+  readonly buys?: BuyCheckSource;
 }
 
 export interface LiveSessionHandlers extends LiveAdvisorHandlers {

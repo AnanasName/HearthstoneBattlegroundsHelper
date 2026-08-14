@@ -67,4 +67,41 @@ describe('воркер расстановки', () => {
     await expect(running).resolves.toBeNull();
     expect(worker.busy).toBe(false);
   }, 120_000);
+
+  it('досчитывает покупки и не отменяет расстановку', async () => {
+    // Кандидаты — реальные борды эпизода: полный и без последнего миньона.
+    const candidates = [
+      { cardId: 'FULL', entityId: 1, boardAfter: episode.playerBoard },
+      { cardId: 'SHORT', entityId: 2, boardAfter: episode.playerBoard.slice(0, -1) },
+    ];
+
+    // Оба вида работы в одной очереди, но со своими слотами отмены:
+    // досчёт покупок не бросает счёт расстановки.
+    const positionAdvice = worker.advise([episode], { budgetMs: 1500, screenBudgetMs: 700 });
+    const buys = worker.checkBuys([episode], candidates, { simulations: 200, maxCandidates: 3 });
+
+    const result = await buys;
+    expect(result).not.toBeNull();
+    expect(result?.outcomes).toHaveLength(2);
+    expect(result?.outcomes[0]?.sims).toBeGreaterThan(0);
+    // Полный борд не слабее себя без миньона.
+    const full = result?.outcomes.find((o) => o.cardId === 'FULL');
+    const short = result?.outcomes.find((o) => o.cardId === 'SHORT');
+    expect((full?.outcome ?? 0) + 1e-9).toBeGreaterThanOrEqual(short?.outcome ?? 0);
+
+    await expect(positionAdvice).resolves.not.toBeNull();
+  }, 120_000);
+
+  it('новый досчёт покупок бросает незаконченный предыдущий', async () => {
+    const candidates = [
+      { cardId: 'FULL', entityId: 1, boardAfter: episode.playerBoard },
+      { cardId: 'SHORT', entityId: 2, boardAfter: episode.playerBoard.slice(0, -1) },
+    ];
+
+    const stale = worker.checkBuys([episode], candidates, { simulations: 3000, maxCandidates: 3 });
+    const fresh = worker.checkBuys([episode], candidates, { simulations: 200, maxCandidates: 3 });
+
+    await expect(stale).resolves.toBeNull();
+    await expect(fresh).resolves.not.toBeNull();
+  }, 120_000);
 });

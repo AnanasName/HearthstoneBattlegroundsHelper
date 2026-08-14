@@ -6,6 +6,7 @@ import type {
   Recommendation,
   TrinketAdvice,
 } from '../advisors/tavern/advisor.js';
+import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState, Minion } from '../state/types.js';
 
@@ -85,6 +86,46 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
 /** Вариант выбора тринкета одной строкой. */
 export function trinketLine(t: TrinketAdvice): string {
   return `${t.name} — ${t.reason}`;
+}
+
+/**
+ * Досчёт покупок боем — одной строкой.
+ *
+ * Три исхода, и различать их обязана сама строка: разброс в шуме
+ * («лучший» случаен, полагаться не на что), бой подтвердил эвристику,
+ * бой предпочёл ДРУГУЮ покупку — последнее и есть то, ради чего досчёт
+ * существует, и оно выделено словами. Давность цели — та же честная
+ * оговорка, что у расстановки: числа против старой картинки слабее.
+ */
+export function buyCheckLine(
+  result: BuyCheckResult,
+  target: PositionTarget,
+  cards: CardIndex,
+): string {
+  const name = (id: string): string => cards.info(id)?.name ?? id;
+  const best = result.outcomes[0];
+  if (best === undefined) return 'по бою: считать нечего';
+
+  const chain = result.outcomes
+    .map((o) => `${name(o.cardId)} ${o.outcome.toFixed(0)}%`)
+    .join(' > ');
+  const source = ` (${opponentSource(target)})`;
+
+  if (!result.decisive) {
+    // Нулевой разброс при насыщенном исходе — не «кандидаты равны»,
+    // а «цель уже не соперник»: против устаревших бордов бой выигрывается
+    // любым (тот же симптом, что в оффлайн-сверке против старых картинок).
+    const worstOutcome = result.outcomes[result.outcomes.length - 1]?.outcome ?? 0;
+    if (worstOutcome >= 99.5) return `по бою этот бой выигрывается любой покупкой${source}`;
+    if (best.outcome <= 0.5) return `по бою этот бой проигрывается любой покупкой${source}`;
+    return (
+      `по бою покупки неразличимы: разброс ${result.spread.toFixed(1)} п.п. ` +
+      `при шуме ${result.noise.toFixed(0)}${source}`
+    );
+  }
+  return result.agreed
+    ? `по бою подтверждено: ${chain}${source}`
+    : `ПО БОЮ ЛУЧШЕ ${name(best.cardId)}: ${chain}${source}`;
 }
 
 /** Вариант открытого выбора одной строкой. */

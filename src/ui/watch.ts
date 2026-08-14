@@ -26,6 +26,7 @@ import { startLiveSession } from '../live/session.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import {
+  buyCheckLine,
   choiceLine,
   minionLabel,
   noOpponentReason,
@@ -199,6 +200,11 @@ async function main(): Promise<void> {
     onTavern: (advice, state) => {
       printSituation(state, advice, cards);
     },
+    onBuyCheck: (result, target) => {
+      // Брошенный досчёт молчит: он бросается на каждом действии игрока,
+      // а эвристика уже напечатана — шуметь «брошено» тут не о чем.
+      if (result !== null) console.log(`   ⚔ ${buyCheckLine(result, target, cards)}`);
+    },
     onPosition: (advice, target) => {
       printPosition(advice, target, cards);
     },
@@ -211,7 +217,7 @@ async function main(): Promise<void> {
   };
 
   if (args.replay !== null) {
-    const advisor = new LiveAdvisor({ cards, position }, handlers, {
+    const advisor = new LiveAdvisor({ cards, position, buys: position }, handlers, {
       search: searchOptions(args),
     });
     console.log(`проигрываю ${args.replay} со скоростью ×${String(args.speed)}`);
@@ -240,10 +246,14 @@ async function main(): Promise<void> {
   const problem = checkGameSetup(args.logsRoot);
   if (problem !== null) console.log(problem.text);
 
-  const session = startLiveSession({ cards, position }, { ...handlers, onNotice: printNotice }, {
-    watcher: { logsRoot: args.logsRoot },
-    advisor: { search: searchOptions(args) },
-  });
+  const session = startLiveSession(
+    { cards, position, buys: position },
+    { ...handlers, onNotice: printNotice },
+    {
+      watcher: { logsRoot: args.logsRoot },
+      advisor: { search: searchOptions(args) },
+    },
+  );
 
   process.on('SIGINT', () => {
     session.stop();

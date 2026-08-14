@@ -2,12 +2,18 @@ import { parentPort, workerData } from 'node:worker_threads';
 
 import { createBattleSimulator } from '../../advisors/battle/simulator.js';
 import { advisePosition, SearchAborted } from '../../advisors/position/advisor.js';
-import type { WorkerMessage, WorkerRequest, WorkerSetup } from './protocol.js';
+import { BuyCheckAborted, checkBuysWithBattle } from '../../advisors/tavern/simulated.js';
+import {
+  BUYS_SLOT,
+  POSITION_SLOT,
+  type WorkerMessage,
+  type WorkerRequest,
+  type WorkerSetup,
+} from './protocol.js';
 
 /**
- * Воркер расстановки: держит справочник карт и считает советы.
- *
- * Устройство разговора и почему отмена идёт через общую память — в protocol.ts.
+ * Воркер советников: держит справочник карт, считает расстановку и досчёт
+ * покупок. Устройство разговора и слоты отмены — в protocol.ts.
  */
 
 const port = parentPort;
@@ -27,18 +33,31 @@ port.on('message', (request: WorkerRequest) => {
   };
 
   try {
+    if (request.type === 'checkBuys') {
+      const result = checkBuysWithBattle(
+        request,
+        {
+          simulator,
+          // Ждут не нас — значит, ответ уже никому не нужен.
+          aborted: () => Atomics.load(pending, BUYS_SLOT) !== request.id,
+        },
+        request.options,
+      );
+      reply({ type: 'buys', id: request.id, result });
+      return;
+    }
+
     const advice = advisePosition(
       request.setups,
       {
         simulator,
-        // Ждут не нас — значит, ответ уже никому не нужен.
-        aborted: () => Atomics.load(pending, 0) !== request.id,
+        aborted: () => Atomics.load(pending, POSITION_SLOT) !== request.id,
       },
       request.overrides,
     );
     reply({ type: 'advice', id: request.id, advice });
   } catch (error) {
-    if (error instanceof SearchAborted) {
+    if (error instanceof SearchAborted || error instanceof BuyCheckAborted) {
       reply({ type: 'aborted', id: request.id });
       return;
     }

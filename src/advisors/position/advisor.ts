@@ -197,15 +197,16 @@ export interface PositionQuestion {
 }
 
 /**
- * Против чего считать — или `null`, если считать нечего.
+ * Цель боя и сетапы против неё — или `null`, если считать не с кем.
  *
- * Вынесено отдельно, потому что спрашивают из двух мест: пакетный
- * `advisePositionForState` считает тут же, а живой режим отправляет те же
- * `setups` в воркер. Собирать их дважды — верный способ разойтись.
+ * Общая часть двух вопросов: расстановки (которой нужен ещё и непустой
+ * борд — переставлять нечего) и досчёта покупок (которому пустой борд
+ * не помеха: покупка и есть его наполнение). Собирать сетапы дважды —
+ * верный способ разойтись.
  */
-export function positionQuestion(state: GameState): PositionQuestion | null {
+export function battleQuestion(state: GameState): PositionQuestion | null {
   const target = resolveTarget(state);
-  if (target === null || state.hero === null || state.board.length === 0) return null;
+  if (target === null || state.hero === null) return null;
   const hero = state.hero;
 
   const setupAgainst = (
@@ -232,6 +233,17 @@ export function positionQuestion(state: GameState): PositionQuestion | null {
         ? [setupAgainst(target.opponent.board, target.opponent.playerId)]
         : target.boards.map((seen) => setupAgainst(seen.board, seen.playerId)),
   };
+}
+
+/**
+ * Против чего считать расстановку — или `null`, если считать нечего.
+ *
+ * Спрашивают из двух мест: пакетный `advisePositionForState` считает тут же,
+ * а живой режим отправляет те же `setups` в воркер.
+ */
+export function positionQuestion(state: GameState): PositionQuestion | null {
+  if (state.board.length === 0) return null;
+  return battleQuestion(state);
 }
 
 /**

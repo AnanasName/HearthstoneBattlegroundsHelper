@@ -9,6 +9,11 @@ import {
 import type { SearchOptions } from '../advisors/position/search.js';
 import { adviseTavern, type TavernAdvice } from '../advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from '../advisors/tavern/rules.js';
+import {
+  buyCheckQuestion,
+  type BuyCandidate,
+  type BuyCheckResult,
+} from '../advisors/tavern/simulated.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState, Minion } from '../state/types.js';
 
@@ -45,9 +50,23 @@ export interface PositionSource {
   cancel(): void;
 }
 
+/**
+ * Кто досчитывает покупки боем. Тот же воркер, что и расстановка, —
+ * интерфейс отдельный по той же причине, что у PositionSource.
+ */
+export interface BuyCheckSource {
+  checkBuys(
+    setups: readonly BattleSetup[],
+    candidates: readonly BuyCandidate[],
+  ): Promise<BuyCheckResult | null>;
+  cancel(): void;
+}
+
 export interface LiveAdvisorDeps {
   readonly cards: CardIndex;
   readonly position: PositionSource;
+  /** Необязателен: без него покупки живут одной эвристикой. */
+  readonly buys?: BuyCheckSource;
 }
 
 export interface LiveAdvisorOptions {
@@ -68,6 +87,16 @@ export const DEFAULT_LIVE_ADVISOR_OPTIONS: LiveAdvisorOptions = {
 export interface LiveAdvisorHandlers {
   /** Быстрый совет по таверне; готов сразу. */
   readonly onTavern?: (advice: TavernAdvice | null, state: GameState) => void;
+  /**
+   * Досчёт покупок боем закончен. `null` — брошен, положение ушло вперёд.
+   * Приходит ПОСЛЕ onTavern того же положения: досчёт дополняет эвристику
+   * строкой «по бою», а не подменяет её порядок.
+   */
+  readonly onBuyCheck?: (
+    result: BuyCheckResult | null,
+    target: PositionTarget,
+    state: GameState,
+  ) => void;
   /** Счёт расстановки начат — интерфейсу пора показать, что он думает. */
   readonly onThinking?: (state: GameState) => void;
   /** Счёт расстановки закончен. `null` — бросили, положение ушло вперёд. */
@@ -172,6 +201,7 @@ export class LiveAdvisor {
     // Отмена идёт сразу, не дожидаясь затишья: то, что считается сейчас,
     // уже относится к прошлому положению, и досчитывать его незачем.
     this.#deps.position.cancel();
+    this.#deps.buys?.cancel();
 
     this.#pending = state;
     if (this.#timer !== null) clearTimeout(this.#timer);
@@ -190,13 +220,37 @@ export class LiveAdvisor {
     if (this.#timer !== null) clearTimeout(this.#timer);
     this.#timer = null;
     this.#deps.position.cancel();
+    this.#deps.buys?.cancel();
   }
 
   #advise(state: GameState, key: string): void {
-    this.#handlers.onTavern?.(adviseTavern(state, this.#deps, this.#options.rules), state);
+    const tavern = adviseTavern(state, this.#deps, this.#options.rules);
+    this.#handlers.onTavern?.(tavern, state);
 
     // Расстановка нужна в таверне: в бою переставлять уже нечего.
     if (state.phase !== 'tavern') return;
+
+    // Досчёт покупок идёт ПЕРЕД расстановкой: очередь воркера одна,
+    // покупки считаются в полсекунды против секунд расстановки —
+    // короткий счёт не должен ждать длинного.
+    const buys = this.#deps.buys;
+    if (buys !== undefined && tavern !== null) {
+      const question = buyCheckQuestion(state, tavern, this.#options.rules);
+      if (question !== null) {
+        buys
+          .checkBuys(question.setups, question.candidates)
+          .then((result) => {
+            this.#handlers.onBuyCheck?.(
+              key === this.#key ? result : null,
+              question.target,
+              state,
+            );
+          })
+          .catch((error: unknown) => {
+            this.#handlers.onError?.(error instanceof Error ? error : new Error(String(error)));
+          });
+      }
+    }
 
     const question = positionQuestion(state);
     if (question === null) {

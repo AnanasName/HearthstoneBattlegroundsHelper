@@ -1,6 +1,11 @@
 import type { BattleSetup } from '../../advisors/battle/mapper.js';
 import type { PositionAdvice } from '../../advisors/position/advisor.js';
 import type { SearchOptions } from '../../advisors/position/search.js';
+import type {
+  BuyCandidate,
+  BuyCheckOptions,
+  BuyCheckResult,
+} from '../../advisors/tavern/simulated.js';
 
 /**
  * Разговор с воркером расстановки.
@@ -26,7 +31,19 @@ import type { SearchOptions } from '../../advisors/position/search.js';
  * совпадать с его собственным. Новая задача отменяет предыдущую тем же
  * действием, которым объявляет себя, и отменить «не ту» задачу нельзя.
  * Ноль означает, что не ждут ничего.
+ *
+ * ## Два вида работы — два слота отмены
+ *
+ * Воркер считает и расстановку, и досчёт покупок: снапшот карт один,
+ * грузить его дважды незачем. Задачи разного вида не отменяют друг друга —
+ * у каждого вида своя ячейка в общей памяти (слот 0 — расстановка,
+ * слот 1 — покупки). Очередь всё же одна: покупки (полсекунды) советник
+ * шлёт ПЕРЕД расстановкой (секунды), чтобы короткий счёт не ждал длинного.
  */
+
+/** Слоты в общей памяти отмены. */
+export const POSITION_SLOT = 0;
+export const BUYS_SLOT = 1;
 
 export interface AdviseRequest {
   readonly type: 'advise';
@@ -36,7 +53,15 @@ export interface AdviseRequest {
   readonly overrides: Partial<SearchOptions>;
 }
 
-export type WorkerRequest = AdviseRequest;
+export interface CheckBuysRequest {
+  readonly type: 'checkBuys';
+  readonly id: number;
+  readonly setups: readonly BattleSetup[];
+  readonly candidates: readonly BuyCandidate[];
+  readonly options: BuyCheckOptions;
+}
+
+export type WorkerRequest = AdviseRequest | CheckBuysRequest;
 
 export interface ReadyMessage {
   readonly type: 'ready';
@@ -50,6 +75,12 @@ export interface AdviceMessage {
   readonly advice: PositionAdvice;
 }
 
+export interface BuysMessage {
+  readonly type: 'buys';
+  readonly id: number;
+  readonly result: BuyCheckResult;
+}
+
 export interface AbortedMessage {
   readonly type: 'aborted';
   readonly id: number;
@@ -61,10 +92,15 @@ export interface FailureMessage {
   readonly message: string;
 }
 
-export type WorkerMessage = ReadyMessage | AdviceMessage | AbortedMessage | FailureMessage;
+export type WorkerMessage =
+  | ReadyMessage
+  | AdviceMessage
+  | BuysMessage
+  | AbortedMessage
+  | FailureMessage;
 
 export interface WorkerSetup {
-  /** Одно 32-битное число: номер задачи, которую ждут. */
+  /** Два 32-битных числа: номера ждущихся задач по слотам видов работы. */
   readonly pending: SharedArrayBuffer;
   readonly cardsPath?: string;
 }
