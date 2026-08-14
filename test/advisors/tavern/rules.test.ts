@@ -294,6 +294,37 @@ describe('правило подъёма таверны', () => {
     expect(levelUpRule(rich)?.reason).not.toContain('остаток');
   });
 
+  it('витрина из мусора — довод подняться и без отставания (JeefHS)', () => {
+    // Тир 3 по графику хода 5, но лучший кандидат витрины много ниже порога
+    // «покупать нечего»: прежде подъём на графике получал ноль очков
+    // и проигрывал любой слабой покупке (docs/jeefhs.md: «если в таверне
+    // только мусор — повышайте уровень»).
+    const trash = upgradable({
+      turn: 5,
+      techLevel: 3,
+      gold: 10,
+      tavernUpgradeTarget: 4,
+      shop: [shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 })],
+    });
+    const buys = buyRules(trash, deps);
+    const levelUp = levelUpRule(trash, DEFAULT_TAVERN_RULES, buys);
+    expect(levelUp?.score).toBeGreaterThan(Math.max(...buys.map((b) => b.score)));
+    expect(levelUp?.reason).toContain('вместо слабой покупки');
+
+    // Достойная витрина оставляет подъём «на опережение» с нулём очков.
+    const decent = upgradable({
+      turn: 5,
+      techLevel: 3,
+      gold: 10,
+      tavernUpgradeTarget: 4,
+      shop: [shopMinion(9, 'AMALGAM', { attack: 8, health: 8 })],
+    });
+    const decentBuys = buyRules(decent, deps);
+    const onTrack = levelUpRule(decent, DEFAULT_TAVERN_RULES, decentBuys);
+    expect(onTrack?.score).toBe(0);
+    expect(onTrack?.reason).toContain('на опережение');
+  });
+
   it('на низком здоровье подъём не советуется, и сказано почему', () => {
     const hurt = levelUpRule(upgradable({ gold: 10, hero: hero(40, 30) }));
     expect(hurt?.score).toBe(0);
@@ -398,8 +429,27 @@ describe('правило обновления витрины', () => {
     });
     expect(rerollRule(s, deps)).toBeNull();
 
-    // А с запасом — советует.
-    expect(rerollRule({ ...s, gold: 7 }, deps)).not.toBeNull();
+    // До лейта реролл не соревнуется с подъёмом и с запасом золота:
+    // мусорная витрина — довод подняться, а не крутить (JeefHS,
+    // docs/jeefhs.md; прежде с запасом советовался реролл).
+    expect(rerollRule({ ...s, gold: 7 }, deps)).toBeNull();
+
+    // В лейте (от lateRerollTier) запас возвращает прежнее поведение:
+    // идёт поиск конкретных карт, обновление — полноценная трата (part11).
+    expect(rerollRule({ ...s, techLevel: 4, gold: 7 }, deps)).not.toBeNull();
+  });
+
+  it('ранний реролл молчит только при доступном подъёме', () => {
+    // Подъём недоступен по здоровью — реролл ранней партией остаётся:
+    // блокировать его нечем, золото иначе сгорит.
+    const hurt = state({
+      gold: 7,
+      hero: hero(40, 30),
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 3,
+      shop: [shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 })],
+    });
+    expect(rerollRule(hurt, deps)).not.toBeNull();
   });
 
   it('молчит без золота', () => {

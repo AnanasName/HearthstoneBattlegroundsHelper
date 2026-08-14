@@ -638,8 +638,15 @@ export function levelUpRule(
   const widerShop = widens ? `, витрина расширится до ${String(rules.shopSizeByTier[target])}` : '';
 
   let score = behind * rules.levellingUrgencyPerTier;
-  if (behind > 0 && buys.length > 0) {
-    const bestBuy = Math.max(...buys.map((b) => b.score));
+  // Витрина из мусора — довод подняться, а не покупать: лучший кандидат
+  // ниже порога «покупать нечего» (тот же порог, что у реролла), и слабая
+  // покупка выигрывала у подъёма только тем, что подъём по графику получал
+  // ноль очков. Правило из базы знаний JeefHS («если в таверне только
+  // мусор — повышайте уровень», docs/jeefhs.md), внесено по указанию игрока.
+  const trashThreshold = rules.value.perTechLevel * state.techLevel + rules.rerollMarginOverTier;
+  const bestBuy = buys.length > 0 ? Math.max(...buys.map((b) => b.score)) : null;
+  const shopIsTrash = bestBuy !== null && bestBuy < trashThreshold;
+  if (behind > 0 && bestBuy !== null) {
     const triple = buys
       .filter((b) => b.minion !== null && copiesOwned(b.minion, state) >= 2)
       .reduce((best: number | null, b) => (best === null || b.score > best ? b.score : best), null);
@@ -650,6 +657,8 @@ export function levelUpRule(
         ? // Золота на одно: тройку упускать нельзя, подъём сразу за ней.
           triple - 0.5
         : bestBuy + behind * rules.levellingUrgencyPerTier;
+  } else if (behind === 0 && bestBuy !== null && shopIsTrash) {
+    score = bestBuy + rules.levellingUrgencyPerTier;
   }
 
   // Судьба остатка, которого не хватит на покупку, зависит от стадии.
@@ -677,7 +686,11 @@ export function levelUpRule(
       (behind > 0
         ? `таверна ${String(state.techLevel)} при ожидаемых ${String(wanted)} к ходу ${String(state.turn)}` +
           `, подъём до ${String(target)} стоит ${String(cost)} из ${String(state.gold)}${widerShop}`
-        : `таверна ${String(state.techLevel)} и так по графику, подъём до ${String(target)} за ${String(cost)} — на опережение${widerShop}`) +
+        : shopIsTrash
+          ? `таверна ${String(state.techLevel)} по графику, но витрина без покупок ` +
+            `(лучшее ${(bestBuy ?? 0).toFixed(1)} при пороге ${trashThreshold.toFixed(0)}) — ` +
+            `подъём до ${String(target)} за ${String(cost)} вместо слабой покупки${widerShop}`
+          : `таверна ${String(state.techLevel)} и так по графику, подъём до ${String(target)} за ${String(cost)} — на опережение${widerShop}`) +
       leftoverTail,
   };
 }
@@ -1017,6 +1030,22 @@ export function rerollRule(
   // хватает — реролл дороже, чем кажется.
   const upgrade = state.tavernUpgradeCost;
   if (upgrade !== null && state.gold >= upgrade && state.gold - rules.rerollCost < upgrade) {
+    return null;
+  }
+
+  // До лейта реролл не соревнуется с подъёмом. Мусорная витрина в ранней
+  // партии — довод подняться, а не крутить (JeefHS: роллы до лейта
+  // запрещены, docs/jeefhs.md; тот же вывод игрока в part11 — «ценны
+  // рероллы позже»). Пока подъём доступен и по карману, ход — подъём;
+  // обновление советуется уже сдачей после него. Условия зеркалят входные
+  // проверки levelUpRule: недоступный подъём реролл не блокирует.
+  if (
+    state.techLevel < rules.lateRerollTier &&
+    upgrade !== null &&
+    state.gold >= upgrade &&
+    (state.maxTechLevel === null || state.techLevel < state.maxTechLevel) &&
+    effectiveHp(state) >= rules.levellingHpFloor
+  ) {
     return null;
   }
 
