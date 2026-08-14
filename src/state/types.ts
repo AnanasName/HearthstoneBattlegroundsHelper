@@ -98,6 +98,37 @@ export interface TrinketOffer {
 export interface ChoiceOption {
   readonly entityId: number;
   readonly cardId: string;
+  /**
+   * Теги `TAG_SCRIPT_DATA_NUM_1..2` сущности варианта, если она известна.
+   *
+   * Ими клиент заполняет плейсхолдеры `{0}`/`{1}` в тексте карты: у сокровища
+   * «Buy the Holy Light» текст «+{0} Attack», а 10 лежит в NUM_1 (part10).
+   * Сущность варианта не всегда находится — в part9 id вариантов не совпадали
+   * с id зонных копий, — тогда здесь `null`.
+   */
+  readonly scriptData?: readonly (number | null)[];
+}
+
+/**
+ * Заклинание в руке: монетка таверны, тавматургия, кровавый самоцвет.
+ *
+ * `CARDTYPE=SPELL` в зоне `HAND` под своим контроллером (part10: монетка
+ * BG28_810 создаётся именно так). Бой их не играет, но фаза таверны — да:
+ * забытая в руке монетка — это потерянное золото, забытый бафф — потерянные
+ * статы ближайшего боя.
+ */
+export interface HandSpell {
+  readonly entityId: number;
+  readonly cardId: string;
+  /**
+   * Тег `COST`, живое значение: монетка создаётся с COST=1 и падает до нуля —
+   * читать надо тег, а не снапшот карт.
+   */
+  readonly cost: number;
+  /** `TAG_SCRIPT_DATA_NUM_1..2` — значения плейсхолдеров `{0}`/`{1}` текста. */
+  readonly scriptData: readonly (number | null)[];
+  /** `LITERALLY_UNPLAYABLE` — замок, как у карт-миньонов. */
+  readonly unplayable: boolean;
 }
 
 /**
@@ -225,8 +256,10 @@ export interface GameState {
   readonly hero: Hero | null;
   /** Свой борд, слева направо. */
   readonly board: readonly Minion[];
-  /** Своя рука. */
+  /** Своя рука: миньоны. */
   readonly hand: readonly Minion[];
+  /** Своя рука: заклинания. Отдельно — у них нет ни статов, ни борда. */
+  readonly handSpells: readonly HandSpell[];
   /**
    * Магазин таверны. Непуст только в фазе `tavern`.
    *
@@ -339,6 +372,7 @@ export const EMPTY_STATE: GameState = {
   hero: null,
   board: [],
   hand: [],
+  handSpells: [],
   shop: [],
   opponentBoard: [],
   anomalyCardId: null,

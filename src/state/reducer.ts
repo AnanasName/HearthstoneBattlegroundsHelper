@@ -753,7 +753,20 @@ export function createReducer(players: Players): Reducer {
           : {
               id: openChoice.id,
               sourceCardId: openChoice.sourceCardId,
-              options: [...openChoice.options],
+              // Значения плейсхолдеров текста — с сущности варианта, когда
+              // она известна. Id из канала выбора не всегда совпадает
+              // с зонной копией (part9), тогда чисел просто нет.
+              options: openChoice.options.map((o) => {
+                const e = entities.get(o.entityId);
+                return e === undefined
+                  ? o
+                  : {
+                      ...o,
+                      scriptData: [1, 2].map(
+                        (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
+                      ),
+                    };
+              }),
             },
       trinketsByPlayer,
       finalPlace,
@@ -761,6 +774,30 @@ export function createReducer(players: Players): Reducer {
       playerId: self,
       board: mine('PLAY'),
       hand: mine('HAND'),
+      // Заклинания руки — отдельным списком: белый список CARDTYPE=SPELL,
+      // как у миньонов. Подтверждено на part10: монетка таверны BG28_810
+      // создаётся в HAND с CARDTYPE=SPELL и живым тегом COST.
+      handSpells:
+        self === null
+          ? []
+          : [...entities.values()]
+              .filter(
+                (e) =>
+                  e.cardType === 'SPELL' &&
+                  e.zone === 'HAND' &&
+                  e.controller === self &&
+                  e.cardId !== '',
+              )
+              .sort((a, b) => a.zonePos - b.zonePos)
+              .map((e) => ({
+                entityId: e.id,
+                cardId: e.cardId,
+                cost: e.tags.get('COST') ?? 0,
+                scriptData: [1, 2].map(
+                  (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
+                ),
+                unplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
+              })),
       shop: phase === 'tavern' ? theirs : [],
       opponentBoard: phase === 'combat' ? theirs : [],
       hero:
