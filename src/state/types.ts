@@ -385,7 +385,24 @@ export interface GameState {
    * как в логе; в cardId его переводит справочник карт.
    */
   readonly trinketsByPlayer: Readonly<Record<number, readonly number[]>>;
-  /** Финальное место, появляется на `FINAL_GAMEOVER`. */
+  /**
+   * Карты миньонов, виденные в витрине за партию, без повторов.
+   *
+   * Единственный найденный источник состава племён партии: витрина
+   * предлагает только пул. Племена из этого выводит советник по снапшоту
+   * карт — однoплеменный миньон витрины доказывает своё племя, двуплеменные
+   * («Рука-протез» MECH/UNDEAD была в пуле part11 без мехов) и амальгамы
+   * доказательством не являются. Тег `CARDRACE` для состава не годится:
+   * он строковый и показывает одно племя даже у двуплеменной карты.
+   */
+  readonly seenShopCardIds: readonly string[];
+  /**
+   * Место в таблице лобби — тег `PLAYER_LEADERBOARD_PLACE` на своём герое.
+   *
+   * Живёт всю партию как ТЕКУЩЕЕ место (part1, сегмент 1: 3-е посреди игры),
+   * финальным становится на `FINAL_GAMEOVER`. Показывать его как «финальное»
+   * до конца партии нельзя.
+   */
   readonly finalPlace: number | null;
   /** BattleTag игрока — самый надёжный якорь «кто я». */
   readonly playerBattleTag: string | null;
@@ -423,6 +440,7 @@ export const EMPTY_STATE: GameState = {
   trinketOffer: [],
   openChoice: null,
   trinketsByPlayer: {},
+  seenShopCardIds: [],
   finalPlace: null,
   playerBattleTag: null,
   playerId: null,

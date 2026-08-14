@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   adviseTavern,
+  buyCostOf,
   buyRules,
   choiceAdvice,
   copiesOwned,
@@ -10,6 +11,7 @@ import {
   freezeRule,
   heroPowerRule,
   levelUpRule,
+  lobbyRaces,
   magnetizeTarget,
   minionValue,
   playPlan,
@@ -1735,5 +1737,71 @@ describe('бесплатная сила героя', () => {
     expect(
       freeHeroPowerRule(state({ hero: chromie({ heroPowerCardId: 'DMG_P' }) }), chromieDeps),
     ).toBeNull();
+  });
+});
+
+describe('изменённая цена покупки', () => {
+  it('скидка читается с миньона витрины (part3: 9999 — даром, part4: 2 — цена 1)', () => {
+    expect(buyCostOf(minion(1, { tags: { BACON_REDUCE_BUY_COST: 2 } }))).toBe(1);
+    // 9999 — «бесплатно»: цена клампится в ноль, а не уходит в минус.
+    expect(buyCostOf(minion(2, { tags: { BACON_REDUCE_BUY_COST: 9999 } }))).toBe(0);
+    expect(buyCostOf(minion(3))).toBe(3);
+  });
+
+  it('покупка со скидкой советуется при золоте меньше трёх — с её ценой и вслух', () => {
+    const s = state({
+      gold: 1,
+      shop: [
+        shopMinion(9, 'MURLOC_1', { tags: { BACON_REDUCE_BUY_COST: 2 } }),
+        shopMinion(8, 'MURLOC_2'),
+      ],
+    });
+    const buys = buyRules(s, deps);
+    // Полная цена не по карману, скидочный миньон — по карману.
+    expect(buys).toHaveLength(1);
+    expect(buys[0]?.minion?.cardId).toBe('MURLOC_1');
+    expect(buys[0]?.cost).toBe(1);
+    expect(buys[0]?.reason).toContain('скидка — за 1 вместо 3');
+  });
+});
+
+describe('состав племён партии по витрине', () => {
+  const lobbyCards = createCardIndex([
+    { id: 'U1', name: 'Нежить', techLevel: 1, races: ['UNDEAD'], isBaconPool: true },
+    { id: 'N1', name: 'Нага', techLevel: 1, races: ['NAGA'], isBaconPool: true },
+    { id: 'Q1', name: 'Свинобраз', techLevel: 1, races: ['QUILBOAR'], isBaconPool: true },
+    // «Рука-протез»: двуплеменная карта в пуле part11 БЕЗ мехов — мехов
+    // она не доказывает.
+    { id: 'DUAL', name: 'Рука', techLevel: 3, races: ['MECH', 'UNDEAD'], isBaconPool: true },
+    { id: 'AM', name: 'Амальгама', techLevel: 4, races: ['ALL'], isBaconPool: true },
+    { id: 'NEUT', name: 'Нейтрал', techLevel: 2, races: [], isBaconPool: true },
+  ]);
+
+  it('однoплеменные миньоны доказывают племя, двуплеменные и амальгамы — нет', () => {
+    const s = state({ seenShopCardIds: ['U1', 'N1', 'DUAL', 'AM', 'NEUT'] });
+    expect([...lobbyRaces(s, lobbyCards)].sort()).toEqual(['NAGA', 'UNDEAD']);
+  });
+
+  it('тринкет для недоказанного племени говорит об этом вслух', () => {
+    // Амальгама числится «своей» для дракона — и это правда, бафф на неё
+    // ляжет. Но драконов партия не видела ни разу, и об этом сказано.
+    const s = state({
+      seenShopCardIds: ['U1', 'N1', 'Q1'],
+      board: [minion(1, { cardId: 'AM' })],
+      trinketOffer: [{ entityId: 900, cardId: 'TRINK_D', subsetRaces: ['DRAGON'] }],
+    });
+    const advice = trinketAdvice(s, { cards: lobbyCards });
+    expect(advice[0]?.tribeMinions).toBe(1);
+    expect(advice[0]?.reason).toContain('DRAGON в витринах партии не встречалось');
+  });
+
+  it('пока состав недонабран, молчание данных не считается отсутствием племени', () => {
+    const s = state({
+      seenShopCardIds: ['U1'],
+      board: [minion(1, { cardId: 'AM' })],
+      trinketOffer: [{ entityId: 900, cardId: 'TRINK_D', subsetRaces: ['DRAGON'] }],
+    });
+    const advice = trinketAdvice(s, { cards: lobbyCards });
+    expect(advice[0]?.reason).not.toContain('не встречалось');
   });
 });

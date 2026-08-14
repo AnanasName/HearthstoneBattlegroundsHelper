@@ -190,6 +190,16 @@ export interface TavernRules {
   readonly freeHeroPowerValue: number;
 
   /**
+   * Со скольких доказанных племён состав партии считается «известным».
+   *
+   * Состав накапливается по однoплеменным миньонам витрины (`lobbyRaces`)
+   * и полноты не обещает: редкое племя может долго не выпадать. Пока
+   * племён меньше этого числа, сверяться с составом рано — молчание
+   * данных не означает отсутствия племени.
+   */
+  readonly lobbyRacesKnownAfter: number;
+
+  /**
    * Очков ценности в одном золотом.
    *
    * Курс выводится из самих правил, а не выдуман: покупка за 3 золота даёт
@@ -315,6 +325,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   heroPowerRefreshWords: ['refresh[^.]*tavern'],
   freeHeroPowerValue: 2,
+
+  lobbyRacesKnownAfter: 3,
 
   goldPointValue: 3,
 

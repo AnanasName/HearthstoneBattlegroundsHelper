@@ -377,6 +377,45 @@ function isMagnetic(minion: Minion, cards: CardIndex): boolean {
 }
 
 /**
+ * Сколько стоит купить именно этого миньона.
+ *
+ * Цена покупки — правило игры (3 золота, тега цены у миньонов витрины нет),
+ * но герои, дары и тринкеты её меняют, и скидка видна на самом миньоне:
+ * тег `BACON_REDUCE_BUY_COST` — сколько золота скинуто; парный
+ * `BACON_SHOW_OVERRIDEN_MINION_COST=1` велит клиенту рисовать новую цену.
+ * Фактура: part3 — 9999 на ранних витринах (миньоны бесплатны, кламп
+ * в ноль), part4 — скидка 2 на части витрины (цена 1). По окончании
+ * эффекта тег сбрасывается в 0.
+ */
+export function buyCostOf(minion: Minion, rules: TavernRules = DEFAULT_TAVERN_RULES): number {
+  const reduce = minion.tags['BACON_REDUCE_BUY_COST'] ?? 0;
+  return Math.max(0, rules.minionCost - reduce);
+}
+
+/**
+ * Племена, доказанные витриной, — состав партии, накопленный по факту.
+ *
+ * Прямого тега состава в логе нет. Витрина предлагает только пул партии,
+ * поэтому ОДНОПЛЕМЕННЫЙ миньон витрины доказывает своё племя. Двуплеменные
+ * доказательством не являются: «Рука-протез» (MECH/UNDEAD) была в пуле
+ * part11 из-за нежити — мехов в той партии не было. Амальгамы (ALL) тоже
+ * мимо. Тег `CARDRACE` не годится вдвойне: он строковый и показывает одно
+ * племя даже у двуплеменной карты (part11: MECHANICAL на руке-протезе).
+ *
+ * Множество растёт по ходу партии и полноты не обещает: редкое племя может
+ * долго не выпадать. Поэтому потребители сверяются с ним только когда
+ * накоплено хотя бы `rules.lobbyRacesKnownAfter` племён.
+ */
+export function lobbyRaces(state: GameState, cards: CardIndex): ReadonlySet<string> {
+  const races = new Set<string>();
+  for (const cardId of state.seenShopCardIds) {
+    const own = (cards.info(cardId)?.races ?? []).filter((r) => r !== RACE_ALL);
+    if (own.length === 1 && own[0] !== undefined) races.add(own[0]);
+  }
+  return races;
+}
+
+/**
  * Энчант «умрёт, если разыграть в этот ход» — вешается на карту, добытую
  * «Восстанием из гробницы» (BG34_888) и родственными эффектами. Подтверждено
  * на part11: выбранный миньон уходит в руку с приаттаченным
@@ -539,8 +578,11 @@ export function buyRules(
   const victim = full ? weakestOwn(state, deps, rules) : null;
 
   return state.shop
-    .filter(() => rules.minionCost <= state.gold)
+    // Цена у каждого миньона своя: скидки героев и даров видны тегом
+    // на самом миньоне, и «не по карману» решается по ней, а не по трём.
+    .filter((m) => buyCostOf(m, rules) <= state.gold)
     .flatMap((minion) => {
+      const cost = buyCostOf(minion, rules);
       let value = minionValue(minion, state, deps, rules);
       const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
 
@@ -613,6 +655,12 @@ export function buyRules(
         );
       }
 
+      // Скидка — не деталь: покупка за 0–1 меняет весь план хода, и совет
+      // обязан говорить о ней вслух, а не прятать в поле cost.
+      if (cost < rules.minionCost) {
+        notes.push(`скидка — за ${String(cost)} вместо ${String(rules.minionCost)}`);
+      }
+
       // Тир берётся с тем же запасным вариантом, что и в оценке: у миньона
       // витрины тега `TECH_LEVEL` может ещё не быть, и подпись «тир ?» рядом
       // с посчитанной по тиру ценностью выглядела бы противоречием.
@@ -623,7 +671,7 @@ export function buyRules(
           action: 'buy' as const,
           minion,
           score: value.total,
-          cost: rules.minionCost,
+          cost,
           requiresSlot,
           sellFirst,
           magnetizeTo: host,
@@ -758,11 +806,14 @@ export function sellRule(
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): Recommendation | null {
   if (state.board.length < rules.boardSize) return null;
-  if (state.shop.length === 0 || rules.minionCost > state.gold) return null;
+  if (state.shop.length === 0) return null;
 
   const best = state.shop
     .map((m) => ({ minion: m, value: minionValue(m, state, deps, rules).total }))
     .reduce((a, b) => (b.value > a.value ? b : a));
+  // По карману ли лучший — по его собственной цене: скидка на него видна
+  // тегом на миньоне, и трёх золотых может не понадобиться.
+  if (buyCostOf(best.minion, rules) > state.gold) return null;
 
   const worst = weakestOwn(state, deps, rules);
   if (worst === null) return null;
@@ -1387,6 +1438,19 @@ export function trinketAdvice(
             return races.includes(RACE_ALL) || races.some((r) => tribes.includes(r));
           }).length;
 
+    // Сверка с составом партии: свои миньоны племени X обычно доказывают X
+    // сами (куплены из витрины), но амальгамы и карты, полученные вне
+    // магазина, создают фантомные племена — «Рука-протез» приносит мехов
+    // в партию без мехов (part11). Пока состав недонабран, молчание данных
+    // не считается отсутствием племени.
+    const proven = lobbyRaces(state, cards);
+    const unseen =
+      proven.size >= rules.lobbyRacesKnownAfter
+        ? tribes.filter((t) => !proven.has(t))
+        : [];
+    const unseenNote =
+      unseen.length > 0 ? ` (${unseen.join('/')} в витринах партии не встречалось)` : '';
+
     return {
       offer,
       name,
@@ -1395,8 +1459,8 @@ export function trinketAdvice(
         tribes.length === 0
           ? 'эффект вне племён — оценить не берёмся'
           : tribeMinions === 0
-            ? `для племени ${tribes.join('/')}, а своих таких нет`
-            : `упоминает ${tribes.join('/')} — своих ${String(tribeMinions)}`,
+            ? `для племени ${tribes.join('/')}, а своих таких нет${unseenNote}`
+            : `упоминает ${tribes.join('/')} — своих ${String(tribeMinions)}${unseenNote}`,
     };
   });
 

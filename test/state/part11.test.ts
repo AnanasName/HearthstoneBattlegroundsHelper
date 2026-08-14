@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { adviseTavern, freezeRule, playRules } from '../../src/advisors/tavern/advisor.js';
+import { adviseTavern, freezeRule, lobbyRaces, playRules } from '../../src/advisors/tavern/advisor.js';
 import { readTavernTurns, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
@@ -132,5 +132,18 @@ describe('part11: заряды дара, смертники из гробниц�
     );
     expect(state.techLevelUpTurn).toBe(9);
     expect(freezeRule(state, { cards })).toBeNull();
+  });
+
+  it('состав племён по витрине: пять племён партии, фантомы отсеяны', () => {
+    // Сырые теги CARDRACE в part11 называют и MECHANICAL, и DRAGON — оба
+    // фантомы от двуплеменных карт пула: «Рука-протез» (MECH/UNDEAD, в пуле
+    // из-за нежити) и Firescale Hoarder (DRAGON/NAGA, в пуле из-за наг).
+    // Состав по однoплеменным миньонам витрины даёт ровно пять настоящих
+    // племён партии.
+    const state = reduceTo(text);
+    expect(state.seenShopCardIds.length).toBeGreaterThan(10);
+
+    const races = lobbyRaces(state, cards);
+    expect([...races].sort()).toEqual(['DEMON', 'MURLOC', 'NAGA', 'QUILBOAR', 'UNDEAD']);
   });
 });

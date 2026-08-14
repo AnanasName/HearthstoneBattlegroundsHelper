@@ -195,6 +195,11 @@ export function createReducer(players: Players): Reducer {
 
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
+  /**
+   * Текущий блок — `GameEntity` дампа: его теги (TURN, BOARD_VISUAL_STATE…)
+   * глобальные, а не сущностные, и адресат у них `{kind: 'game'}`.
+   */
+  let currentIsGameEntity = false;
 
   /**
    * Открытый модальный выбор и его сборка.
@@ -247,6 +252,24 @@ export function createReducer(players: Players): Reducer {
     }
   };
 
+  /**
+   * Карты, виденные в витрине за партию, — сырьё для состава племён.
+   *
+   * Копится в step, а не в snapshot: живой путь снимает состояние на каждое
+   * чтение, пакетный — однажды в конце, и накопление на снимках молча
+   * разошлось бы между ними. Условие членства то же, что у магазина
+   * в снимке: чужой миньон в PLAY в фазе таверны. В бою те же признаки
+   * носит борд противника, а там бывают токены вне пула — фаза обязательна.
+   */
+  const seenShopCardIds = new Set<string>();
+  const noteShopMinion = (e: Entity): void => {
+    if (phase !== 'tavern' || e.cardId === '') return;
+    if (e.cardType !== 'MINION' || e.zone !== 'PLAY') return;
+    const self = players.selfPlayerId;
+    if (self === null || e.controller === null || e.controller === self) return;
+    seenShopCardIds.add(e.cardId);
+  };
+
   const touch = (id: number, cardId?: string, authoritative = false): Entity => {
     const found = entities.get(id);
     if (found !== undefined) {
@@ -254,6 +277,7 @@ export function createReducer(players: Players): Reducer {
       // дело: это раскрытие карты, оно авторитетнее того, что было известно.
       if (cardId !== undefined && cardId !== '' && (authoritative || found.cardId === '')) {
         found.cardId = cardId;
+        noteShopMinion(found);
       }
       return found;
     }
@@ -287,12 +311,14 @@ export function createReducer(players: Players): Reducer {
     switch (tag) {
       case 'ZONE':
         e.zone = value;
+        noteShopMinion(e);
         return;
       case 'ZONE_POSITION':
         if (n !== null) e.zonePos = n;
         return;
       case 'CONTROLLER':
         if (n !== null) e.controller = n;
+        noteShopMinion(e);
         return;
       case 'ATTACHED':
         if (n !== null) e.attached = n;
@@ -300,6 +326,7 @@ export function createReducer(players: Players): Reducer {
       case 'CARDTYPE':
         e.cardType = value;
         if (value === 'BATTLEGROUND_ANOMALY' && e.cardId !== '') anomalyCardId = e.cardId;
+        noteShopMinion(e);
         return;
       default:
         if (n !== null) e.tags.set(tag, n);
@@ -359,6 +386,13 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'PLAYER_LEADERBOARD_PLACE':
         if (subject.kind === 'entity' && subject.id === heroEntityId) finalPlace = n;
+        return;
+      case 'HERO_ENTITY':
+        // Свой герой. Ветка TAG_CHANGE обрабатывает этот тег отдельно (там
+        // есть ещё чужой слот), но в дампе переподключения тег приходит
+        // строкой-продолжением блока Player — и до этой ветки не доходил:
+        // part1, сегменты 2–4 оставались без героя.
+        if (subject.kind === 'self' && n !== null) heroEntityId = n;
         return;
       case 'NEXT_OPPONENT_PLAYER_ID':
         if (subject.kind === 'self' && n !== null) nextOpponentPlayerId = n;
@@ -508,8 +542,23 @@ export function createReducer(players: Players): Reducer {
       ? parseEntityDescriptor(content)
       : null;
 
+    // Блоки дампа CREATE_GAME: «GameEntity EntityID=16», «Player EntityID=17
+    // PlayerID=6 …» — заголовки с тегами-продолжениями. При обычном старте
+    // в них лишь начальные значения, но дамп ПЕРЕПОДКЛЮЧЕНИЯ несёт ими всё
+    // состояние партии: TURN, PLAYER_TECH_LEVEL, HERO_ENTITY. Без этой ветки
+    // заголовок не подходил ни под один шаблон, current сбрасывался, и теги
+    // дампа выбрасывались целиком — part1, сегменты 2–4: помощник после
+    // реконнекта не знал ни героя, ни тира, пока их не тронет живое событие.
+    const dumpHeader = /^(GameEntity|Player) EntityID=(\d+)/.exec(content);
+    if (dumpHeader !== null && dumpHeader[2] !== undefined) {
+      current = touch(Number(dumpHeader[2]));
+      currentIsGameEntity = dumpHeader[1] === 'GameEntity';
+      return;
+    }
+
     if (content.startsWith('FULL_ENTITY') || content.startsWith('SHOW_ENTITY')) {
       const revealing = content.startsWith('SHOW_ENTITY');
+      currentIsGameEntity = false;
 
       if (descriptorHere !== null) {
         // У SHOW_ENTITY с дескриптором cardId стоит в хвосте, после `CardID=`,
@@ -544,6 +593,7 @@ export function createReducer(players: Players): Reducer {
         applyToEntity(touch(hidden.id, hidden.cardId), m[1], m[2]);
       }
       current = null;
+      currentIsGameEntity = false;
       return;
     }
 
@@ -556,15 +606,18 @@ export function createReducer(players: Players): Reducer {
         applyGlobal(
           tag,
           value,
-          selfPlayerEntityIds.has(current.id)
-            ? { kind: 'self' }
-            : { kind: 'entity', id: current.id },
+          currentIsGameEntity
+            ? { kind: 'game' }
+            : selfPlayerEntityIds.has(current.id)
+              ? { kind: 'self' }
+              : { kind: 'entity', id: current.id },
         );
       }
       return;
     }
 
     current = null;
+    currentIsGameEntity = false;
 
     const change = TAG_CHANGE_RE.exec(content);
     if (change === null) return;
@@ -824,6 +877,9 @@ export function createReducer(players: Players): Reducer {
               }),
             },
       trinketsByPlayer,
+      // Порядок фиксирован: множество недетерминированно только в порядке
+      // обхода, а состояние обязано быть воспроизводимым до байта.
+      seenShopCardIds: [...seenShopCardIds].sort(),
       finalPlace,
       playerBattleTag: players.selfName,
       playerId: self,
