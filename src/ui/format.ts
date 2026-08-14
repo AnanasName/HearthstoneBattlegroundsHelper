@@ -26,6 +26,7 @@ export const ACTION_LABEL: Readonly<Record<Recommendation['action'], string>> = 
   freeze: 'ЗАМОРОЗИТЬ',
   heroPower: 'СИЛА ГЕРОЯ',
   darkGift: 'ТЁМНЫЙ ДАР',
+  activate: 'АКТИВИРОВАТЬ',
   pass: 'НИЧЕГО',
 };
 

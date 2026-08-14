@@ -192,6 +192,7 @@ export function createReducer(players: Players): Reducer {
    */
   let heroPowerUsedThisTurn = false;
   let darkGiftUsedThisTurn = false;
+  const activatedEntityIds = new Set<number>();
 
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
@@ -365,6 +366,7 @@ export function createReducer(players: Players): Reducer {
           turn = n;
           heroPowerUsedThisTurn = false;
           darkGiftUsedThisTurn = false;
+          activatedEntityIds.clear();
         }
         return;
       case 'STEP':
@@ -527,15 +529,20 @@ export function createReducer(players: Players): Reducer {
       rememberOpponentBoard();
     }
 
-    // Нажатия силы героя и тёмного дара видны только по блокам PLAY на их
-    // сущностях — тега-расхода у них нет. Смотрим стек каждого события:
-    // блок открылся раньше, чем пришло его содержимое.
+    // Нажатия силы героя, тёмного дара и активаций миньонов видны только
+    // по блокам PLAY на их сущностях — тега-расхода у них нет. Смотрим стек
+    // каждого события: блок открылся раньше, чем пришло его содержимое.
     for (const block of event.blocks) {
       if (block.blockType !== 'PLAY' || block.entityId === null) continue;
       const pressed = entities.get(block.entityId);
       if (pressed === undefined || pressed.controller !== players.selfPlayerId) continue;
       if (pressed.cardType === 'HERO_POWER') heroPowerUsedThisTurn = true;
       else if (pressed.cardId === DARK_GIFT_BUTTON) darkGiftUsedThisTurn = true;
+      else if (pressed.cardType === 'MINION' && pressed.zone === 'PLAY') {
+        // Активация: блок PLAY на миньоне, уже СТОЯЩЕМ на борде, — розыгрыш
+        // из руки отличается зоной сущности (part14, Suspicious Prisonguard).
+        activatedEntityIds.add(pressed.id);
+      }
     }
 
     const descriptorHere = content.includes('[entityName=')
@@ -877,6 +884,7 @@ export function createReducer(players: Players): Reducer {
               }),
             },
       trinketsByPlayer,
+      activatedEntityIds: [...activatedEntityIds].sort((a, b) => a - b),
       // Порядок фиксирован: множество недетерминированно только в порядке
       // обхода, а состояние обязано быть воспроизводимым до байта.
       seenShopCardIds: [...seenShopCardIds].sort(),

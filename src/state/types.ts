@@ -359,6 +359,16 @@ export interface GameState {
   readonly darkGiftCost: number | null;
   /** Нажат ли дар в этом ходу — блок `BlockType=PLAY` на кнопке. */
   readonly darkGiftUsedThisTurn: boolean;
+  /**
+   * Свои миньоны, чья активация нажата в этом ходу.
+   *
+   * Активация («Activate (N): …», part14: Suspicious Prisonguard) видна
+   * так же, как сила героя: блоком `BlockType=PLAY` на сущности миньона,
+   * СТОЯЩЕГО в `PLAY`, — розыгрыш из руки отличается зоной сущности.
+   * Сброс — по смене `TURN`. Снимается ли доступность тегом после нажатия,
+   * в фикстурах не видно, поэтому счёт ведётся блоками.
+   */
+  readonly activatedEntityIds: readonly number[];
 
   /**
    * Открытое сейчас предложение тринкетов.
@@ -437,6 +447,7 @@ export const EMPTY_STATE: GameState = {
   lastSeenBoardTurns: {},
   darkGiftCost: null,
   darkGiftUsedThisTurn: false,
+  activatedEntityIds: [],
   trinketOffer: [],
   openChoice: null,
   trinketsByPlayer: {},

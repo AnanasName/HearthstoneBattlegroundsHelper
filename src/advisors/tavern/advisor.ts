@@ -33,6 +33,7 @@ export type TavernAction =
   | 'freeze'
   | 'heroPower'
   | 'darkGift'
+  | 'activate'
   | 'pass';
 
 export interface Recommendation {
@@ -258,10 +259,28 @@ export function minionValue(
   // Боевой эффект из текста: ралли и призывы делают миньона в бою сильнее
   // его статов, и сверка с симулятором показала это ценой до 100 п.п.
   // (part6, ход 1: Flittering Bat с «Rally: Summon a Beast»).
-  const battle =
-    text !== '' && rules.battleTextWords.some((word) => new RegExp(word, 'i').test(text))
-      ? w.battleEffect
-      : 0;
+  //
+  // Оговорка part14 (ход 21): эффект «вашим <племени>» («Rally: Your Undead
+  // have +1 Attack») пуст, когда своих этого племени нет, — на борде
+  // элементалей нежить-ралли не делает ничего. Племя после «your» ищется
+  // той же таблицей слов; призывов («Summon a Beast») это не касается —
+  // призыв приносит тело независимо от борда.
+  const battleMatch =
+    text !== '' && rules.battleTextWords.some((word) => new RegExp(word, 'i').test(text));
+  let battle = 0;
+  if (battleMatch) {
+    const yourRaces = Object.entries(rules.tribeTextWords)
+      .filter(([, word]) => new RegExp(`\\byour\\s+(?:${word})\\b`, 'i').test(text))
+      .map(([race]) => race);
+    const anyMates =
+      yourRaces.length === 0 ||
+      state.board.some((m) => {
+        if (m.entityId === candidate.entityId) return false;
+        const races = racesOf(m, cards);
+        return races.includes(RACE_ALL) || yourRaces.some((r) => races.includes(r));
+      });
+    if (anyMates) battle = w.battleEffect;
+  }
 
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
@@ -1088,6 +1107,90 @@ export function freeHeroPowerRule(
 }
 
 /**
+ * Правило активаций миньонов.
+ *
+ * «Activate (N): …» — способность своего миньона на борде за золото.
+ * Фактура part14 (Suspicious Prisonguard): активируемость — тег
+ * `HAS_ACTIVATE_POWER` на миньоне; цена — живой тег
+ * `INTERACTABLE_OBJECT_COST` (сходится с плейсхолдером «Activate ({2})» →
+ * `TAG_SCRIPT_DATA_NUM_3`); применение — блок `BlockType=PLAY` на сущности,
+ * СТОЯЩЕЙ в `PLAY`. Игрок указал, что активации не советовались вовсе —
+ * прежде они были отложены с фактурой part8.
+ *
+ * Эффект читается из текста тем же разбором, что у заклинаний: бафф-статы
+ * («Give another minion +{0}/+{1}», плейсхолдеры — теги NUM самого миньона)
+ * и получение миньона («Get a random Murloc»). Про остальное — кражи,
+ * поглощения, сложные симбиозы — совет честно не берётся судить, как
+ * и с силами героя.
+ */
+export function activationRules(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation[] {
+  return state.board.flatMap((minion) => {
+    if ((minion.tags['HAS_ACTIVATE_POWER'] ?? 0) <= 0) return [];
+    if (state.activatedEntityIds.includes(minion.entityId)) return [];
+    if ((minion.tags['LITERALLY_UNPLAYABLE'] ?? 0) > 0) return [];
+    const cost = minion.tags['INTERACTABLE_OBJECT_COST'] ?? 0;
+    if (cost > state.gold) return [];
+
+    const info = deps.cards.info(minion.cardId);
+    const text = info?.text ?? '';
+    const activate = /activate \([^)]*\):([\s\S]*)$/i.exec(text);
+    if (activate?.[1] === undefined) return [];
+    const effectText = activate[1];
+
+    // Тот же разбор, что у заклинаний: литералы и плейсхолдеры-индексы
+    // в теги NUM — только теги здесь живут на самом миньоне.
+    let stats = 0;
+    for (const m of effectText.matchAll(/\+(?:\{(\d)\}|(\d+))/g)) {
+      const placeholder = m[1];
+      const literal = m[2];
+      if (placeholder !== undefined) stats += minion.scriptData[Number(placeholder)] ?? 0;
+      else if (literal !== undefined) stats += Number(literal);
+    }
+    const givesMinion = /\b(?:get|summon|discover)\b/i.test(effectText);
+
+    const name = info?.name ?? minion.cardId;
+    let score = 0;
+    let what = '';
+    if (stats > 0) {
+      score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
+      what = `+${String(stats)} статов`;
+    } else if (givesMinion) {
+      // Приносимое тело оценивается как средний миньон текущего тира.
+      score = rules.value.perTechLevel * state.techLevel - cost * rules.goldPointValue;
+      what = 'принесёт миньона';
+    }
+    if (score <= 0) return [];
+
+    // Цель баффа — крупнейший свой, кроме самого активирующего:
+    // «Give another minion…».
+    const others = state.board.filter((m) => m.entityId !== minion.entityId);
+    const target =
+      stats > 0 && others.length > 0
+        ? others.reduce((a, b) =>
+            (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+          )
+        : null;
+
+    return [
+      {
+        action: 'activate' as const,
+        minion,
+        score,
+        cost,
+        requiresSlot: false,
+        sellFirst: null,
+        targetMinion: target,
+        reason: `активация ${name} за ${String(cost)}: ${what}`,
+      },
+    ];
+  });
+}
+
+/**
  * Эффект заклинания, восстановленный из текста карты и тегов сущности.
  *
  * Плейсхолдеры `{0}`/`{1}` в тексте снапшота — это индексы значений
@@ -1114,6 +1217,13 @@ export interface SpellEffect {
   readonly destroysFriendly: boolean;
   /** Племя жертвы — ключ `races` снапшота; `null` — любое. */
   readonly destroyRace: string | null;
+  /**
+   * Замена: уничтоженному взамен приходит новый миньон («…to get a random
+   * Undead»). Заклинание наклейки Тюремщика (part14): ни статов, ни золота
+   * в тексте нет, и прежний разбор возвращал null — совет молчал всю партию,
+   * хотя бесплатная замена слабейшей нежити на случайную почти всегда апгрейд.
+   */
+  readonly transforms: boolean;
 }
 
 export function spellEffect(
@@ -1150,13 +1260,18 @@ export function spellEffect(
     }
   }
 
-  if (gold === null && stats === 0 && !shield) return null;
+  // Замена: за уничтожением следует получение — «…to get a random Undead»
+  // (заклинание наклейки Тюремщика, part14).
+  const transforms = destroy !== null && /to (?:get|summon|discover)/i.test(text);
+
+  if (gold === null && stats === 0 && !shield && !transforms) return null;
   return {
     gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
     stats,
     divineShield: shield,
     destroysFriendly: destroy !== null,
     destroyRace,
+    transforms,
   };
 }
 
@@ -1188,7 +1303,12 @@ function spellTargetOn(
       (b.attack ?? 0) + (b.health ?? 0) < (a.attack ?? 0) + (a.health ?? 0) ? b : a,
     );
     const name = cards.info(victim.cardId)?.name ?? victim.cardId;
-    return { target: victim, note: `в жертву ${name} — наименьший свой подходящий` };
+    return {
+      target: victim,
+      note: effect.transforms
+        ? `заменит ${name} — наименьшего своего подходящего — на случайного нового`
+        : `в жертву ${name} — наименьший свой подходящий`,
+    };
   }
 
   const target = state.board.reduce((a, b) =>
@@ -1280,11 +1400,13 @@ export function spellRules(
       return [];
     }
 
-    // Усиление: бесплатные статы перед боем.
+    // Усиление или замена: бесплатная ценность перед боем.
     if (spell.cost > state.gold || state.board.length === 0) return [];
     const score =
-      effect.stats * rules.value.perStatPoint +
-      (effect.divineShield ? rules.value.divineShield : 0) -
+      (effect.transforms
+        ? rules.value.transform
+        : effect.stats * rules.value.perStatPoint +
+          (effect.divineShield ? rules.value.divineShield : 0)) -
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
@@ -1302,7 +1424,7 @@ export function spellRules(
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} — усиление перед боем` +
+          `${name} — ${effect.transforms ? 'замена' : 'усиление перед боем'}` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
           `, ${aimed.note}`,
@@ -1353,9 +1475,10 @@ export function shopSpellRules(
     }
 
     if (state.board.length === 0) return [];
-    const score =
-      effect.stats * rules.value.perStatPoint +
-      (effect.divineShield ? rules.value.divineShield : 0);
+    const score = effect.transforms
+      ? rules.value.transform
+      : effect.stats * rules.value.perStatPoint +
+        (effect.divineShield ? rules.value.divineShield : 0);
     if (score <= 0) return [];
     const aimed = spellTargetOn(effect, state, deps.cards);
     if (aimed === null) return [];
@@ -1370,7 +1493,7 @@ export function shopSpellRules(
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} за ${String(spell.cost)} — усиление` +
+          `${name} за ${String(spell.cost)} — ${effect.transforms ? 'замена' : 'усиление'}` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
           `, ${aimed.note}`,
@@ -1707,6 +1830,7 @@ export function adviseTavern(
     levelUpRule(state, rules, buys),
     heroPowerRule(state, deps, rules),
     freeHeroPowerRule(state, deps, rules),
+    ...activationRules(state, deps, rules),
     darkGiftRule(state, rules),
     sellRule(state, deps, rules),
     rerollRule(state, deps, rules),

@@ -907,7 +907,7 @@ describe('заклинания руки', () => {
       { id: 'GOLD', text: 'Gain 2 Gold.' },
       { id: 'NONE', text: 'Discover a minion.' },
     ]);
-    const plain = { destroysFriendly: false, destroyRace: null };
+    const plain = { destroysFriendly: false, destroyRace: null, transforms: false };
     expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
     expect(spellEffect('PH', [10, null], idx)).toEqual({
       gold: 0,
@@ -935,6 +935,7 @@ describe('заклинания руки', () => {
       divineShield: false,
       destroysFriendly: true,
       destroyRace: 'UNDEAD',
+      transforms: false,
     });
     expect(spellEffect('ANYKILL', [], idx)).toMatchObject({
       destroysFriendly: true,
@@ -1889,5 +1890,159 @@ describe('боевой эффект из текста и кап ключевых
       DEFAULT_TAVERN_RULES.value.divineShield + DEFAULT_TAVERN_RULES.value.windfury,
       5,
     );
+  });
+});
+
+describe('заклинание-замена: «Destroy … to get …»', () => {
+  const idx = createCardIndex([
+    {
+      id: 'JAILER_T',
+      name: 'Наклейка с Тюремщиком',
+      text: 'Destroy a friendly Undead to get a random Undead.',
+    },
+    { id: 'UND_BIG', name: 'Крупная нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 4 },
+    { id: 'UND_SMALL', name: 'Мелкая нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 1 },
+  ]);
+
+  it('распознаётся без статов и золота в тексте (part14, наклейка Тюремщика)', () => {
+    // Прежний разбор возвращал null — совет молчал всю партию.
+    const effect = spellEffect('JAILER_T', [], idx);
+    expect(effect).not.toBeNull();
+    expect(effect?.transforms).toBe(true);
+    expect(effect?.destroyRace).toBe('UNDEAD');
+  });
+
+  it('советуется на наименьшую нежить, а без нежити молчит', () => {
+    const spell = { entityId: 50, cardId: 'JAILER_T', cost: 0, scriptData: [], unplayable: false };
+    const s = state({
+      gold: 0,
+      board: [
+        minion(1, { cardId: 'UND_BIG', attack: 20, health: 20 }),
+        minion(2, { cardId: 'UND_SMALL', attack: 2, health: 2 }),
+      ],
+      handSpells: [spell],
+    });
+    const rec = spellRules(s, { cards: idx })[0];
+    expect(rec?.action).toBe('play');
+    expect(rec?.targetMinion?.cardId).toBe('UND_SMALL');
+    expect(rec?.reason).toContain('замен');
+
+    const noUndead = state({ board: [minion(1, { cardId: 'MURLOC_1' })], handSpells: [spell] });
+    expect(spellRules(noUndead, { cards: idx })).toHaveLength(0);
+  });
+});
+
+describe('активации миньонов', () => {
+  const idx = createCardIndex([
+    {
+      id: 'GUARD',
+      name: 'Надзиратель',
+      races: [],
+      isBaconPool: true,
+      techLevel: 2,
+      text: '[x]Activate ({2}): Give another minion +{0}/+{1}.',
+    },
+    {
+      id: 'FISHER',
+      name: 'Рыболов',
+      races: ['MURLOC'],
+      isBaconPool: true,
+      techLevel: 3,
+      text: 'Activate ({0}): Get a random Murloc.',
+    },
+    { id: 'BIG', name: 'Крупный', races: [], isBaconPool: true, techLevel: 3 },
+  ]);
+  const activatable = (id: number, cardId: string, cost: number, nums: (number | null)[]): Minion =>
+    minion(id, {
+      cardId,
+      scriptData: [...nums, null, null, null, null, null, null].slice(0, 6),
+      tags: { HAS_ACTIVATE_POWER: 1, INTERACTABLE_OBJECT_COST: cost },
+    });
+
+  it('бафф-активация советуется с целью и ценой из тегов (part14, фактура)', () => {
+    // «Activate ({2}): Give another minion +{0}/+{1}» — плейсхолдеры в NUM
+    // самого миньона, цена — INTERACTABLE_OBJECT_COST.
+    const s = state({
+      gold: 5,
+      board: [
+        activatable(1, 'GUARD', 1, [4, 4, 1]),
+        minion(2, { cardId: 'BIG', attack: 10, health: 10 }),
+      ],
+    });
+    const rec = adviseTavern(s, { cards: idx })?.recommendations.find(
+      (r) => r.action === 'activate',
+    );
+    expect(rec?.minion?.cardId).toBe('GUARD');
+    expect(rec?.cost).toBe(1);
+    // Цель — крупнейший ДРУГОЙ: «Give another minion».
+    expect(rec?.targetMinion?.cardId).toBe('BIG');
+    expect(rec?.reason).toContain('+8 статов');
+  });
+
+  it('«Get a random X» ценится телом тира; активированный в этом ходу молчит', () => {
+    const s = state({
+      gold: 5,
+      techLevel: 4,
+      board: [activatable(1, 'FISHER', 1, [1])],
+    });
+    const rec = adviseTavern(s, { cards: idx })?.recommendations.find(
+      (r) => r.action === 'activate',
+    );
+    expect(rec?.reason).toContain('принесёт миньона');
+
+    const used = { ...s, activatedEntityIds: [1] };
+    expect(
+      adviseTavern(used, { cards: idx })?.recommendations.some((r) => r.action === 'activate'),
+    ).toBe(false);
+  });
+
+  it('не по карману или без активации — молчание', () => {
+    const s = state({ gold: 0, board: [activatable(1, 'FISHER', 2, [2])] });
+    expect(
+      adviseTavern(s, { cards: idx })?.recommendations.some((r) => r.action === 'activate'),
+    ).toBe(false);
+    const plain = state({ gold: 5, board: [minion(1, { cardId: 'FISHER' })] });
+    expect(
+      adviseTavern(plain, { cards: idx })?.recommendations.some((r) => r.action === 'activate'),
+    ).toBe(false);
+  });
+});
+
+describe('боевой эффект «вашим племени» без своих того племени', () => {
+  const idx = createCardIndex([
+    {
+      id: 'DUSTBONE',
+      name: 'Ралли нежити',
+      techLevel: 3,
+      races: ['UNDEAD'],
+      isBaconPool: true,
+      text: 'Rally: Your Undead have +{0} Attack this game.',
+    },
+    {
+      id: 'BAT',
+      name: 'Мышь с призывом',
+      techLevel: 1,
+      races: ['BEAST'],
+      isBaconPool: true,
+      text: '<b>Rally:</b> Summon a {0}/{1} Beast.',
+    },
+    { id: 'ELEM', name: 'Элементаль', techLevel: 2, races: ['ELEMENTAL'], isBaconPool: true },
+    { id: 'UND', name: 'Нежить', techLevel: 2, races: ['UNDEAD'], isBaconPool: true },
+  ]);
+  const d = { cards: idx };
+  const dustbone = minion(9, { cardId: 'DUSTBONE', attack: 15, health: 6, techLevel: 3 });
+
+  it('«Rally: Your Undead…» на борде без нежити бонуса не даёт (part14, ход 21)', () => {
+    const elems = state({ board: [minion(1, { cardId: 'ELEM' }), minion(2, { cardId: 'ELEM' })] });
+    expect(minionValue(dustbone, elems, d).battle).toBe(0);
+
+    // Своя нежить есть — ралли снова ценится.
+    const withUndead = state({ board: [minion(1, { cardId: 'UND' })] });
+    expect(minionValue(dustbone, withUndead, d).battle).toBeGreaterThan(0);
+  });
+
+  it('призыв («Summon a Beast») от борда не зависит', () => {
+    const bat = minion(9, { cardId: 'BAT', attack: 1, health: 3, techLevel: 1 });
+    expect(minionValue(bat, state({ board: [] }), d).battle).toBeGreaterThan(0);
   });
 });
