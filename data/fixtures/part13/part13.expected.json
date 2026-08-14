@@ -1,0 +1,101 @@
+{
+  "$comment": [
+    "Партия 14.08.2026 (16:04–16:28) — пятая партия с работающим оверлеем,",
+    "первая после появления цели-поля у советника расстановки.",
+    "Пять пунктов обратной связи (4 скриншота из чата + жалоба на силу героя),",
+    "каждый закрыт тестом в test/state/part13.test.ts на срезах лога.",
+    "",
+    "Ценность фикстуры:",
+    " - Хроми («Исказительница Хроми», BG34_HERO_001): сила «Мана в минуту»",
+    "   (BG34_HERO_001p) — АКТИВНАЯ (HAS_ACTIVATE_POWER=1) и БЕСПЛАТНАЯ",
+    "   (тега COST нет). «Refresh the Tavern with Tavern spells» — нажатие",
+    "   силы кладёт в витрину заклинания таверны; 12 нажатий за партию;",
+    " - раскопка «Нового ростка» (BG33_101): модальный выбор открывается,",
+    "   не меняя ни золота, ни бордов, ни руки — единственная перемена",
+    "   состояния это openChoice;",
+    " - «Рука-протез» (BG_DEEP_015): Magnetic+Reborn, «Can Magnetize to",
+    "   Mechs or Undead» — дар и племена носителя видны в mechanics/races;",
+    " - «Разделка туши» (BG28_604): заклинание витрины «Destroy a friendly",
+    "   Undead. Your Undead have +{0}/+{1}» — цель заклинания это ЖЕРТВА.",
+    "",
+    "Пять жалоб игрока:",
+    " 1) сила Хроми (бесплатное обновление витрины) не советовалась все ходы;",
+    " 2) ход 5 (скриншот 16:07): раскопка открыта, а оверлей показывал",
+    "    «НИЧЕГО» — выбор не входил в ключ положения, советник не проснулся;",
+    " 3) ход 15 (скриншот 16:16): «РАЗЫГРАТЬ Auto Assembler» без носителя,",
+    "    хотя миньон магнитный;",
+    " 4) ход 19 (скриншот 16:21): «примагнитив к Rescue Bot 38/40 (перерожд)»",
+    "    — рука-протез дарит перерождение тому, у кого оно уже есть;",
+    " 5) ход 21 (скриншот 16:24): «КУПИТЬ Butchering → на Falling Sky Golem",
+    "    200/122» — совет уничтожить главную карту борда, к тому же не-нежить."
+  ],
+
+  "game": {
+    "mode": "battlegrounds",
+    "duos": false,
+    "clientLanguage": "ruRU",
+    "capturedAt": "2026-08-14T16:28:30+03:00",
+    "playerBattleTag": "AngryMem#2886",
+    "playerId": 1,
+    "hero": { "cardId": "BG34_HERO_001", "name": "Исказительница Хроми" },
+    "heroPower": {
+      "cardId": "BG34_HERO_001p",
+      "cost": null,
+      "hasActivate": true,
+      "text": "Refresh the Tavern with Tavern spells."
+    }
+  },
+
+  "log": {
+    "file": "game.log",
+    "bytes": 38179795,
+    "createGameBlocks": 1,
+    "endsWith": "finalGameOver"
+  },
+
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 14.08.2026",
+      "expect": { "phase": "gameOver", "finalPlace": 4 }
+    },
+    {
+      "id": "turn5-sprout-choice-open",
+      "turn": 5,
+      "sliceAt": "D 16:07:10.5417725",
+      "verifiedBy": "скриншот из чата (16:07), сверено 14.08.2026",
+      "expect": {
+        "openChoiceId": 2,
+        "openChoiceSource": "BG33_101",
+        "openChoiceOptions": ["BG26_146", "BG25_001", "BGS_127"],
+        "choiceAdvised": 3,
+        "heroPowerUsedThisTurn": false,
+        "freeHeroPowerAdvised": true,
+        "situationKeyChangesOnChoice": true
+      }
+    },
+    {
+      "id": "turn19-prosthetic-hand-carrier",
+      "turn": 19,
+      "sliceAt": "D 16:21:13.1844756",
+      "verifiedBy": "скриншот из чата (16:21), сверено 14.08.2026",
+      "expect": {
+        "handHas": "BG_DEEP_015",
+        "rescueBotAlreadyReborn": true,
+        "magnetizeToNamed": true,
+        "magnetizeToWithoutReborn": true
+      }
+    },
+    {
+      "id": "turn21-butchering-no-victim",
+      "turn": 21,
+      "sliceAt": "D 16:24:10.1798859",
+      "verifiedBy": "скриншот из чата (16:24), сверено 14.08.2026",
+      "expect": {
+        "shopSpellHas": "BG28_604",
+        "boardHasNoUndead": true,
+        "butcheringAdvised": false
+      }
+    }
+  ]
+}
