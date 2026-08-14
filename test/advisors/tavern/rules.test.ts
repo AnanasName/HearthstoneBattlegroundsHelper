@@ -30,7 +30,7 @@ import {
 } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, targetTier } from '../../../src/advisors/tavern/rules.js';
 import { createBgStats } from '../../../src/data/bgStats.js';
-import { createCardIndex } from '../../../src/data/cards.js';
+import { createCardIndex, loadCardIndex } from '../../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
 import { minion } from '../../minions.js';
 
@@ -1595,6 +1595,77 @@ describe('племя, названное в тексте карты', () => {
 
     // Как стало: розыгрыш чужого племени через продажу не советуется вовсе.
     expect(playRules(s, textDeps)).toHaveLength(0);
+  });
+});
+
+describe('связь по имени карты в тексте (Automaton Portrait)', () => {
+  const namedCards = createCardIndex([
+    {
+      id: 'PORTRAIT',
+      name: 'Automaton Portrait',
+      type: 'Minion',
+      techLevel: 3,
+      races: [],
+      isBaconPool: true,
+      // Перенос строки посреди имени — реальность снапшота (урок part16).
+      text: '<b>Start of Combat:</b> When you have space, summon an Ancestral\nAutomaton.',
+    },
+    {
+      id: 'AUTOMATON',
+      name: 'Ancestral Automaton',
+      type: 'Minion',
+      techLevel: 2,
+      races: ['MECH'],
+      isBaconPool: true,
+      text: "Has +3/+2 for each other Ancestral Automaton you've summoned this game.",
+    },
+    { id: 'PLAIN', name: 'Просто тело', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+  ]);
+  const namedDeps = { cards: namedCards };
+
+  it('кандидат, называющий карту своих, получает связь за каждый экземпляр', () => {
+    const s = state({
+      board: [
+        minion(1, { cardId: 'AUTOMATON' }),
+        minion(2, { cardId: 'AUTOMATON' }),
+        minion(3, { cardId: 'PLAIN' }),
+      ],
+    });
+    const v = minionValue(minion(9, { cardId: 'PORTRAIT' }), s, namedDeps);
+    expect(v.namedCardMates).toBe(2);
+    expect(v.namedCard).toBe(2 * DEFAULT_TAVERN_RULES.value.perNamedCardMate);
+  });
+
+  it('связь двусторонняя: автоматон из витрины ценнее при портрете на борде', () => {
+    const s = state({ board: [minion(1, { cardId: 'PORTRAIT' })] });
+    const v = minionValue(minion(9, { cardId: 'AUTOMATON' }), s, namedDeps);
+    expect(v.namedCardMates).toBe(1);
+  });
+
+  it('копии по имени не считаются — у них своя ветка тройки', () => {
+    // Текст автоматона называет его же имя («for each other Ancestral
+    // Automaton») — вторая копия не должна получать связь сверх бонуса копий.
+    const s = state({ board: [minion(1, { cardId: 'AUTOMATON' })] });
+    const v = minionValue(minion(9, { cardId: 'AUTOMATON' }), s, namedDeps);
+    expect(v.namedCardMates).toBe(0);
+  });
+
+  it('без связи в текстах — ноль', () => {
+    const s = state({ board: [minion(1, { cardId: 'PLAIN' })] });
+    expect(minionValue(minion(9, { cardId: 'PORTRAIT' }), s, namedDeps).namedCardMates).toBe(0);
+  });
+
+  it('реальный снапшот: портрет видит автоматонов', () => {
+    // Данные, а не выдуманная таблица пар: тексты обеих карт — в снапшоте.
+    const real = loadCardIndex();
+    const portrait = real.info('BG30_MagicItem_303');
+    const automaton = real.info('BG_TTN_401');
+    expect(portrait).not.toBeNull();
+    expect(automaton).not.toBeNull();
+
+    const s = state({ board: [minion(1, { cardId: 'BG_TTN_401' })] });
+    const v = minionValue(minion(9, { cardId: 'BG30_MagicItem_303' }), s, { cards: real });
+    expect(v.namedCardMates).toBe(1);
   });
 });
 

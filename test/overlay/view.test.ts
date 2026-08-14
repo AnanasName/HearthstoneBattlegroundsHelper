@@ -295,10 +295,12 @@ describe('вид оверлея', () => {
       battle: 0,
       textTribe: 0,
       textMech: 0,
+      namedCard: 0,
       total,
       tribeMates: 0,
       textTribeMates: 0,
       textMechMates: 0,
+      namedCardMates: 0,
       copiesOwned: 0,
     });
     const withChoice: TavernAdvice = {

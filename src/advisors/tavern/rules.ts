@@ -129,6 +129,22 @@ export interface TavernRules {
      */
     readonly perTextTribeMate: number;
     /**
+     * За каждого своего миньона, с которым карта связана ИМЕНЕМ: её текст
+     * называет его карту, или его текст называет её.
+     *
+     * Случай из ТЗ, отложенный до фактуры: Automaton Portrait («Start of
+     * Combat: … summon an Ancestral Automaton») при своих автоматонах —
+     * прямой множитель их роста, а правила видели только племена (у самого
+     * портрета племени нет вовсе). Связь двусторонняя: и портрет ценен
+     * при автоматонах, и автоматон из витрины ценнее при портрете.
+     * В снапшоте таких пар «миньон ↔ миньон» десятки (Auto Assembler,
+     * Eternal Summoner → Eternal Knight, Cousin Errgl → Mama Mrrglton) —
+     * это данные из опубликованных текстов, не выдуманная таблица пар.
+     *
+     * Вес выше племенного: связь по имени прямее принадлежности к племени.
+     */
+    readonly perNamedCardMate: number;
+    /**
      * За каждого своего миньона с механикой, которую карта называет СЛОВАМИ
      * в тексте, сама её не неся.
      *
@@ -454,6 +470,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     transform: 3,
     perTextTribeMate: 1,
     perTextMechMate: 1.5,
+    perNamedCardMate: 2,
   },
 
   economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],

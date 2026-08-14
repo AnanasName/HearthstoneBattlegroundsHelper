@@ -97,6 +97,8 @@ export interface ValueBreakdown {
   readonly textTribe: number;
   /** Синергия с механикой, названной словами в тексте (хрипы у Titus). */
   readonly textMech: number;
+  /** Связь по имени карты: текст называет карту своих — или их тексты его. */
+  readonly namedCard: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
@@ -104,6 +106,8 @@ export interface ValueBreakdown {
   readonly textTribeMates: number;
   /** Сколько своих миньонов с механиками, названными в тексте карты. */
   readonly textMechMates: number;
+  /** Сколько своих связано с картой по имени (в обе стороны). */
+  readonly namedCardMates: number;
   /** Сколько таких же карт уже есть на борде и в руке. */
   readonly copiesOwned: number;
 }
@@ -273,6 +277,36 @@ function boardMatesOfMechanics(
   }).length;
 }
 
+/**
+ * Свои миньоны, связанные с кандидатом ИМЕНЕМ карты, — в обе стороны:
+ * текст кандидата называет их карту, или их текст называет его.
+ *
+ * Automaton Portrait («…summon an Ancestral Automaton») при своих
+ * автоматонах — прямой множитель их роста; и наоборот, автоматон
+ * из витрины ценнее при портрете на борде. Имена и тексты — из снапшота,
+ * не выдуманная таблица пар. Копии (одно имя) не считаются — у них
+ * своя ветка тройки.
+ *
+ * Пробелы в текстах ненадёжны (урок part16: переносы строк посреди
+ * предложения), поэтому обе стороны сравнения приводятся к одиночным
+ * пробелам. Имена короче шести символов не ищутся: односложное имя
+ * в тексте — совпадение случайных слов, а не связь.
+ */
+function namedCardMates(candidate: Minion, board: readonly Minion[], cards: CardIndex): number {
+  const info = cards.info(candidate.cardId);
+  if (info === null) return 0;
+  const flatten = (text: string | null): string => (text ?? '').replace(/\s+/g, ' ');
+  const names = (name: string, text: string): boolean => name.length >= 6 && text.includes(name);
+  const candidateText = flatten(info.text);
+
+  return board.filter((m) => {
+    if (m.entityId === candidate.entityId) return false;
+    const theirs = cards.info(m.cardId);
+    if (theirs === null || theirs.name === info.name) return false;
+    return names(theirs.name, candidateText) || names(info.name, flatten(theirs.text));
+  }).length;
+}
+
 /** Сколько своих миньонов принадлежит хотя бы одному из племён. */
 function boardMatesOfTribes(
   tribes: readonly string[],
@@ -411,6 +445,11 @@ export function minionValue(
   );
   const textMech = textMechMates * w.perTextMechMate;
 
+  // Связь по ИМЕНИ карты — прямее племени: Automaton Portrait называет
+  // Ancestral Automaton, а племени у портрета нет вовсе.
+  const namedMates = namedCardMates(candidate, state.board, cards);
+  const namedCard = namedMates * w.perNamedCardMate;
+
   return {
     techLevel: tech,
     stats,
@@ -422,10 +461,23 @@ export function minionValue(
     battle,
     textTribe,
     textMech,
-    total: tech + stats + tribe + keywords + copies + golden + economy + battle + textTribe + textMech,
+    namedCard,
+    total:
+      tech +
+      stats +
+      tribe +
+      keywords +
+      copies +
+      golden +
+      economy +
+      battle +
+      textTribe +
+      textMech +
+      namedCard,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
+    namedCardMates: namedMates,
     copiesOwned: owned,
   };
 }
@@ -822,6 +874,9 @@ export function buyRules(
       if (value.textMechMates > 0) {
         notes.push(`механика из текста: своих ${String(value.textMechMates)}`);
       }
+      if (value.namedCardMates > 0) {
+        notes.push(`связана по имени: своих ${String(value.namedCardMates)}`);
+      }
       if (value.economy > 0) notes.push('вернёт часть цены при продаже');
       if (minion.golden) notes.push('золотой');
       if (host !== null) {
@@ -945,6 +1000,9 @@ export function playRules(
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
     if (value.textTribeMates > 0) {
       notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
+    }
+    if (value.namedCardMates > 0) {
+      notes.push(`связана по имени: своих ${String(value.namedCardMates)}`);
     }
     if (host !== null) {
       const hostName = deps.cards.info(host.cardId)?.name ?? host.cardId;
