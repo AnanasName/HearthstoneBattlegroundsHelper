@@ -850,6 +850,79 @@ describe('правило заморозки', () => {
       'копия',
     );
   });
+
+  it('на полном борде морозится только то, что мы бы купили (part17, ход 25)', () => {
+    // Борд полон и силён, кандидат витрины — своего племени, но слабее
+    // всех своих. Прежнее правило смотрело только на порог от тира,
+    // а он на поздней таверне пробивается статами: советник морозил
+    // витрину ради карты, покупку которой сам же и отверг бы.
+    const big = (id: number, cardId: string): Minion =>
+      shopMinion(id, cardId, { attack: 40, health: 40 });
+    const full = state({
+      techLevel: 5,
+      gold: 0,
+      board: [
+        big(1, 'MURLOC_1'),
+        big(2, 'MURLOC_2'),
+        big(3, 'MURLOC_3'),
+        big(4, 'DRAGON_1'),
+        big(5, 'NEUTRAL'),
+        big(6, 'NEUTRAL_2'),
+        big(7, 'AMALGAM'),
+      ],
+      shop: [shopMinion(10, 'SKIPPER', { attack: 5, health: 5 })],
+    });
+    expect(freezeRule(full, deps)).toBeNull();
+
+    // Тот же кандидат при месте на борде — по-прежнему повод: там его
+    // никто не вытесняет, и планка покупки к нему не применяется.
+    const room = { ...full, board: full.board.slice(0, 6) };
+    expect(freezeRule(room, deps)).not.toBeNull();
+  });
+
+  it('заклинание витрины, дающее миньона, держит витрину (part17, ход 1)', () => {
+    // «Steal a random minion from the Tavern» за 2 при нулевом золоте:
+    // со следующего хода это покупка и заклинание в один ход — два тела
+    // там, где две покупки стоят шесть.
+    const lassoCards = createCardIndex([
+      {
+        id: 'LASSO',
+        name: 'Зачарованное лассо',
+        type: 'Battleground_spell',
+        text: 'Steal a random minion from the Tavern.',
+      },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+      { id: 'FILLER', name: 'Наполнитель', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+    ]);
+    const lassoDeps = { cards: lassoCards };
+    const lasso = { entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false };
+    const shop = [
+      minion(10, { cardId: 'BODY', techLevel: 2, attack: 4, health: 4 }),
+      minion(11, { cardId: 'BODY', techLevel: 2, attack: 3, health: 5 }),
+    ];
+
+    const broke = state({ gold: 0, shop, shopSpells: [lasso] });
+    const freeze = freezeRule(broke, lassoDeps);
+    expect(freeze?.action).toBe('freeze');
+    expect(freeze?.spellCardId).toBe('LASSO');
+    expect(freeze?.minion).toBeNull();
+
+    // По карману — покупать, а не морозить.
+    expect(freezeRule({ ...broke, gold: 2 }, lassoDeps)).toBeNull();
+    // На полном борде телу неоткуда взяться места. Борд из чужих карт:
+    // копии витрины включили бы другую ветку заморозки.
+    expect(
+      freezeRule(
+        {
+          ...broke,
+          board: Array.from({ length: 7 }, (_, i) =>
+            minion(20 + i, { cardId: 'FILLER', attack: 20, health: 20 }),
+          ),
+        },
+        lassoDeps,
+      ),
+    ).toBeNull();
+  });
 });
 
 describe('карты-смертники: смертность — по тексту источника (part11, part16)', () => {
@@ -978,6 +1051,43 @@ describe('покупка заклинаний витрины (part11)', () => {
     const s = state({ gold: 0, shopSpells: [shopSpell('S_BUFF', 1, [2, 2, null, null])] });
     expect(shopSpellRules(s, shopDeps)).toHaveLength(0);
   });
+
+  it('заклинание, дающее миньона, — покупка дешевле трёх (part17)', () => {
+    // «Steal a random minion from the Tavern»: приходит случайный миньон
+    // ИЗ ЭТОЙ ЖЕ витрины, поэтому средняя ценность витрины — не приближение,
+    // а точное ожидание. Плюс сэкономленное золото по курсу.
+    const lassoCards = createCardIndex([
+      {
+        id: 'LASSO',
+        name: 'Зачарованное лассо',
+        type: 'Battleground_spell',
+        text: 'Steal a random minion from the Tavern.',
+      },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+    ]);
+    const s = state({
+      gold: 2,
+      shop: [
+        minion(10, { cardId: 'BODY', techLevel: 2, attack: 4, health: 4 }),
+        minion(11, { cardId: 'BODY', techLevel: 2, attack: 3, health: 5 }),
+      ],
+      shopSpells: [{ entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false }],
+    });
+    const rec = shopSpellRules(s, { cards: lassoCards })[0];
+    expect(rec?.action).toBe('buy');
+    expect(rec?.spellCardId).toBe('LASSO');
+    expect(rec?.reason).toContain('даёт миньона');
+    // Обе карты витрины стоят 8.0 очков. При двух золотых остаток нулевой:
+    // скидка не засчитывается — это просто дешёвое тело вместо лучшего.
+    expect(rec?.score).toBeCloseTo(8, 5);
+    expect(rec?.reason).not.toContain('дешевле покупки');
+
+    // При пяти золотых остаётся ровно на покупку: заклинание и покупка
+    // в один ход — два тела, и сэкономленное золото идёт в очки.
+    const rich = shopSpellRules({ ...s, gold: 5 }, { cards: lassoCards })[0];
+    expect(rich?.score).toBeCloseTo(11, 5);
+    expect(rich?.reason).toContain('дешевле покупки');
+  });
 });
 
 describe('обновление от безделья', () => {
@@ -1104,7 +1214,7 @@ describe('заклинания руки', () => {
       { id: 'LIT', text: 'Give a minion +1/+1.' },
       { id: 'PH', text: 'Give a friendly minion +{0} Attack and <b>Divine Shield</b>.' },
       { id: 'GOLD', text: 'Gain 2 Gold.' },
-      { id: 'NONE', text: 'Discover a minion.' },
+      { id: 'NONE', text: 'Deal 2 damage to a random enemy.' },
     ]);
     const plain = {
       destroysFriendly: false,
@@ -1112,6 +1222,7 @@ describe('заклинания руки', () => {
       transforms: false,
       grantsTaunt: false,
       untargeted: false,
+      givesMinion: false,
     };
     expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
     expect(spellEffect('PH', [10, null], idx)).toEqual({
@@ -1122,6 +1233,33 @@ describe('заклинания руки', () => {
     });
     expect(spellEffect('GOLD', [], idx)).toEqual({ gold: 2, stats: 0, divineShield: false, ...plain });
     expect(spellEffect('NONE', [], idx)).toBeNull();
+  });
+
+  it('spellEffect: приклеенный золотой вариант текста не удваивает числа (part17)', () => {
+    // В снапшоте у части заклинаний в поле text лежат ДВА текста подряд,
+    // склеенные «цифры + [x]»: обычная версия и золотая. Fortify —
+    // «+{1} Health and Taunt.3[x]Give a minion +{0}/+{1} and Taunt.»:
+    // разбор складывал числа обеих и обещал +6 статов вместо +3.
+    const idx = createCardIndex([
+      {
+        id: 'FORTIFY',
+        name: 'Укрепление',
+        type: 'Battleground_spell',
+        text: 'Give a minion\n+{1} Health and <b>Taunt</b>.3[x]Give a minion\n+{0}/+{1} and <b>Taunt</b>.',
+      },
+      {
+        id: 'LEADING',
+        name: 'С разметкой',
+        type: 'Battleground_spell',
+        text: '[x]Give a minion\n+{0} Attack.',
+      },
+    ]);
+    expect(idx.info('FORTIFY')?.text).not.toContain('[x]');
+    expect(spellEffect('FORTIFY', [null, 3], idx)?.stats).toBe(3);
+
+    // Ведущий «[x]» — обычная разметка переносов, её резать нельзя.
+    expect(idx.info('LEADING')?.text).toContain('Attack');
+    expect(spellEffect('LEADING', [5, null], idx)?.stats).toBe(5);
   });
 
   it('spellEffect: «Destroy a friendly Undead» — жертва, и её племя из текста', () => {
@@ -1143,6 +1281,7 @@ describe('заклинания руки', () => {
       transforms: false,
       grantsTaunt: false,
       untargeted: false,
+      givesMinion: false,
     });
     expect(spellEffect('ANYKILL', [], idx)).toMatchObject({
       destroysFriendly: true,
@@ -1232,6 +1371,46 @@ describe('заклинания руки', () => {
       handSpells: [handSpell('SHIELD_T')],
     });
     expect(spellRules(allEngines, { cards: idx })[0]?.targetMinion?.cardId).toBe('AURA_M');
+  });
+
+  it('триггер О СЕБЕ — боец, а не движок, и провокацию берёт (part17, ход 11)', () => {
+    // «After this attacks and kills a minion…» (Wildfire Elemental) — это
+    // собственный размен, а не эффект, который надо беречь от ударов.
+    // Прежнее правило видело слово «After» и уводило провокацию на токен.
+    // Заодно проверяется вторая половина: усиление постоянно, поэтому
+    // не идёт на слабейшего своего — кандидата в продажу.
+    const idx = createCardIndex([
+      { id: 'FORTIFY', name: 'Укрепление', text: 'Give a minion +3 Health and <b>Taunt</b>.' },
+      {
+        id: 'SELFTRIG',
+        name: 'Элементаль огненной бури',
+        type: 'Minion',
+        techLevel: 3,
+        races: ['ELEMENTAL'],
+        isBaconPool: true,
+        mechanics: ['TRIGGER_VISUAL'],
+        text: 'After this attacks and kills a minion, deal excess damage to an adjacent enemy.',
+      },
+      {
+        id: 'TOKEN',
+        name: 'Капелька воды',
+        type: 'Minion',
+        techLevel: 1,
+        races: ['ELEMENTAL'],
+        isBaconPool: true,
+      },
+    ]);
+    const s = state({
+      board: [
+        minion(1, { cardId: 'SELFTRIG', attack: 8, health: 3 }),
+        minion(2, { cardId: 'TOKEN', attack: 3, health: 3 }),
+        minion(3, { cardId: 'TOKEN', attack: 3, health: 3 }),
+      ],
+      handSpells: [handSpell('FORTIFY')],
+    });
+    const rec = spellRules(s, { cards: idx })[0];
+    expect(rec?.targetMinion?.cardId).toBe('SELFTRIG');
+    expect(rec?.reason).toContain('не на кандидата в продажу');
   });
 
   it('монетка советуется, когда её золото открывает покупку (part10, ход 5)', () => {

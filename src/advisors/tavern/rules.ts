@@ -244,7 +244,7 @@ export interface TavernRules {
   readonly mechanicTextWords: Readonly<Record<string, string>>;
 
   /**
-   * Признаки «сила даёт миньона» в тексте силы героя.
+   * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
    * opponent's warband») — типовой случай: сила за золото приносит существо,
@@ -256,8 +256,15 @@ export interface TavernRules {
    * to your hand») объект глагола — местоимение, «minion» стоит в другом
    * предложении. Шаблоны «глагол…minion» такую силу не видели, и советник
    * молчал при золоте ровно на неё — на что игрок и указал.
+   *
+   * Таблица общая на силу героя и заклинание витрины, потому что факт
+   * записан в ТЕКСТЕ, а не в том, кто его произносит: «Enchanted Lasso»
+   * («Steal a random minion from the Tavern», 2 золота, part17, ход 1) —
+   * та же покупка миньона дешевле трёх, только заклинанием. Ни одного
+   * шаблона со «steal» здесь прежде не было, и заклинание было советнику
+   * невидимо: ни купить, ни заморозить его он не предлагал.
    */
-  readonly heroPowerMinionWords: readonly string[];
+  readonly givesMinionWords: readonly string[];
 
   /**
    * Признаки «сила обновляет витрину» в тексте силы героя — и цена такого
@@ -316,6 +323,25 @@ export interface TavernRules {
    * ударов. Механика AURA в снапшоте — тот же признак без слов.
    */
   readonly engineTextWords: readonly string[];
+
+  /**
+   * Признаки триггера О СЕБЕ: «After this attacks…», «Whenever this takes
+   * damage…». Такой миньон — боец, а не движок, и провокация ему не мешает.
+   *
+   * Случай part17, ход 11: «Fortify» (+3 здоровья и провокация) советовался
+   * на Water Droplet 3/3 — токен, который игрок и так собирался продать, —
+   * потому что оба Wildfire Elemental 8/3 и 6/3 («After this attacks and
+   * kills a minion, deal excess damage to an adjacent enemy») попадали
+   * в движки словом «After». Смысл исключения в другом: у Deathstrider
+   * эффект срабатывает от ЧУЖИХ действий и требует, чтобы носитель дожил,
+   * а «After this attacks» — описание собственного размена.
+   *
+   * Что это не натяжка, видно по пулу: из семи миньонов с «After/Whenever
+   * this» четыре срабатывают ОТ ПОЛУЧЕННОГО УРОНА («Whenever this takes
+   * damage…»), а один из них носит провокацию в собственном тексте (Very
+   * Hungry Winterfinner). Такие карты провокации не боятся, а хотят.
+   */
+  readonly selfTriggerWords: readonly string[];
 
   /**
    * Со скольких доказанных племён состав партии считается «известным».
@@ -484,11 +510,13 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],
 
-  heroPowerMinionWords: [
+  givesMinionWords: [
     'discover[^.]*minion',
     'add[^.]*minion',
     'get[^.]*minion',
     'copy of a minion',
+    // «Steal a random minion from the Tavern» — Enchanted Lasso, part17.
+    'steal[^.]*minion',
     // «Choose a minion … add it to your hand» — Зирелла, part9. Миньон и
     // глагол здесь в разных предложениях, поэтому [\s\S], а не [^.].
     'minion[\\s\\S]*add (?:it|them) to your hand',
@@ -516,6 +544,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   ],
 
   engineTextWords: ['\\bafter (?:a|an|you|your|this)\\b', '\\bwhenever\\b', '\\bat the (?:start|end) of\\b'],
+
+  selfTriggerWords: ['\\b(?:after|whenever) this\\b'],
 
   lobbyRacesKnownAfter: 3,
 

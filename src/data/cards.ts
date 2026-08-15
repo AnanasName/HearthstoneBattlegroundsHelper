@@ -99,6 +99,25 @@ function asRaces(card: RawCard): string[] {
   return typeof card.race === 'string' ? [card.race] : [];
 }
 
+/**
+ * Текст карты без приклеенного золотого варианта.
+ *
+ * В снапшоте у части заклинаний в поле `text` лежат ДВА текста подряд,
+ * склеенные номером и маркером переносов: «Give a minion +{1} Health and
+ * Taunt.**3[x]**Give a minion +{0}/+{1} and Taunt.» (Fortify, part17).
+ * Второй — золотая версия. Разбор читал их как один текст и складывал числа
+ * усиления обеих версий: у Fortify выходило «+6 статов» вместо +3, и совет
+ * тихо переоценивал заклинание. Таких карт в снапшоте шесть, и все шесть —
+ * заклинания-усиления, то есть ровно те, чьи числа мы читаем.
+ *
+ * Режется по первому «цифры + [x]» ПОСЛЕ начала текста: ведущий «[x]» —
+ * обычная разметка переносов и остаётся на месте.
+ */
+export function normalizeCardText(text: string): string {
+  const cut = /\d+\[x\]/.exec(text);
+  return cut === null || cut.index === 0 ? text : text.slice(0, cut.index);
+}
+
 export function createCardIndex(raw: readonly unknown[]): CardIndex {
   const byId = new Map<string, CardInfo>();
   const byDbfId = new Map<number, CardInfo>();
@@ -112,7 +131,7 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
       id: card.id,
       dbfId: asNumber(card.dbfId),
       name: typeof card.name === 'string' ? card.name : card.id,
-      text: typeof card.text === 'string' ? card.text : null,
+      text: typeof card.text === 'string' ? normalizeCardText(card.text) : null,
       techLevel: asNumber(card.techLevel),
       races: asRaces(card),
       isBaconPool: card.isBaconPool === true,

@@ -1217,14 +1217,53 @@ export function rerollRule(
 }
 
 /**
+ * Прошёл бы кандидат ту же планку, что при покупке на ПОЛНОМ борде.
+ *
+ * Планка одна с `buyRules`: тело в полный борд оправдано только явным
+ * превосходством над жертвой, и считать его надо против борда БЕЗ жертвы.
+ * Копия (тройка или вторая в руку) и магнит слота не требуют вовсе.
+ *
+ * Заморозке это нужно ровно затем же, зачем покупке: держать витрину ради
+ * карты, которую мы сами не купим, — потеря бесплатного обновления. Порог
+ * ценности от тира этого не ловит, потому что к концу партии статы витрины
+ * растут вместе с бордом: part17, ход 25 — Crackling Cyclone 38/43
+ * (56 очков против порога 14) при полном борде из миньонов по 100–800
+ * статов, слабейший из которых стоит 150 очков.
+ */
+function worthFullBoardSlot(
+  minion: Minion,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): boolean {
+  if (state.board.length < rules.boardSize) return true;
+
+  if (minionValue(minion, state, deps, rules).copiesOwned >= 1) return true;
+  if (
+    isMagnetic(minion, deps.cards) &&
+    magnetizeTarget(minion, state.board, deps.cards, poisonAmongSeen(state)) !== null
+  ) {
+    return true;
+  }
+
+  const victim = weakestOwn(state, deps, rules);
+  if (victim === null) return true;
+
+  const without = state.board.filter((x) => x.entityId !== victim.minion.entityId);
+  const replacing = minionValue(minion, { ...state, board: without }, deps, rules);
+  return replacing.total > victim.value + rules.sellMargin;
+}
+
+/**
  * Правило заморозки.
  *
  * Незамороженная витрина обновляется в начале хода БЕСПЛАТНО. Значит,
  * заморозка не «сохраняет хорошее», а отказывается от нового даром, и голые
  * статы её не окупают: свежая витрина в среднем не хуже нынешней. Окупает
- * только то, чего свежая витрина не даст, — копия под тройку или миньон
- * племени, которое уже собирается на борде. И только когда купить это
- * прямо сейчас не хватает золота: что по карману, надо просто покупать.
+ * только то, чего свежая витрина не даст, — копия под тройку, миньон
+ * племени, которое уже собирается на борде, или заклинание витрины, дающее
+ * миньона. И только когда купить это прямо сейчас не хватает золота:
+ * что по карману, надо просто покупать.
  */
 export function freezeRule(
   state: GameState,
@@ -1294,9 +1333,58 @@ export function freezeRule(
         v.value >= threshold &&
         (v.copies >= 2 ||
           (v.copies === 1 && v.tier >= state.techLevel) ||
-          v.mates >= rules.freeze.minTribeMates),
+          v.mates >= rules.freeze.minTribeMates) &&
+        // Карта, которую мы сами не купим, витрины не стоит: на полном борде
+        // она обязана перебивать жертву так же, как при покупке (part17,
+        // ход 25 — заморозка Crackling Cyclone 38/43 при борде из сотен).
+        worthFullBoardSlot(v.minion, state, deps, rules),
     );
   const best = keepers[0];
+
+  // Заклинание витрины, дающее миньона, — та же «покупка, до которой в этом
+  // ходу руки не дошли»: за два золота оно даёт тело, и свежая витрина
+  // такого не обещает. Случай part17, ход 1: при нулевом золоте в витрине
+  // лежал Enchanted Lasso («Steal a random minion from the Tavern»), и связка
+  // «заморозить сейчас — на пять золота купить одного и украсть второго»
+  // даёт два тела там, где две покупки стоят шесть. Игрок сыграл её сам;
+  // советник заклинания не видел вовсе.
+  //
+  // Полный борд эту ветку выключает: телу неоткуда взяться месту, а какой
+  // миньон придёт — заранее неизвестно, и сравнить его с жертвой нечем.
+  const spellKeeper =
+    state.board.length >= rules.boardSize || justLevelled
+      ? undefined
+      : state.shopSpells
+          .flatMap((spell) => {
+            if (spell.unplayable || spell.cost <= state.gold) return [];
+            const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
+            if (effect === null || !effect.givesMinion) return [];
+            // Заморозка судится не сегодняшним золотом, а тем ходом, ради
+            // которого держат витрину: там хватит и на покупку, и на неё.
+            const { score } = givesMinionValue(state, deps, rules, spell.cost, false);
+            return score >= threshold ? [{ spell, score }] : [];
+          })
+          .sort((a, b) => b.score - a.score)[0];
+
+  // Между миньоном и заклинанием выбирает та же шкала очков.
+  if (spellKeeper !== undefined && (best === undefined || spellKeeper.score > best.value)) {
+    const spellName =
+      deps.cards.info(spellKeeper.spell.cardId)?.name ?? spellKeeper.spell.cardId;
+    return {
+      action: 'freeze',
+      minion: null,
+      spellCardId: spellKeeper.spell.cardId,
+      score: spellKeeper.score - threshold,
+      cost: 0,
+      requiresSlot: false,
+      sellFirst: null,
+      reason:
+        `${spellName} за ${String(spellKeeper.spell.cost)} даёт миньона, а золота ` +
+        `${String(state.gold)} на него не хватает; со следующего хода это ` +
+        `покупка и заклинание в один ход — два тела вместо одного`,
+    };
+  }
+
   if (best === undefined) return null;
 
   const name = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
@@ -1332,6 +1420,43 @@ export function freezeRule(
  * сила не советуется: и то и другое читается из лога (блок PLAY на сущности
  * силы, тег LITERALLY_UNPLAYABLE).
  */
+/**
+ * Ценность действия «даёт миньона» — силы героя или заклинания витрины.
+ *
+ * Приходящий миньон — из той же витрины, поэтому его ценность оценивается
+ * СРЕДНИМ по витрине. У «Enchanted Lasso» («Steal a random minion from the
+ * Tavern») это не приближение, а точное ожидание: миньон берётся случайным
+ * из тех же карт, что мы уже оценили. Второе слагаемое — сэкономленное
+ * золото: действие дешевле покупки, а золото переводится в очки курсом
+ * `goldPointValue`.
+ *
+ * Скидка засчитывается не всегда, и это не мелочь: при трёх золотых
+ * и заклинании за два остаётся золотой, который просто сгорит, — «дешевле
+ * покупки» превращается в «слабее покупки», и совет обязан ставить обычную
+ * покупку выше. Поэтому у действия ПРЯМО СЕЙЧАС (`spendNow`) скидка
+ * считается, только если остатка хватает ещё на покупку. У заморозки
+ * наоборот: она и есть ставка на ход, где золота хватит на оба действия,
+ * — там скидка и есть весь смысл (part17, ход 1: заморозить при нулевом
+ * золоте, чтобы на пяти купить одного и украсть второго).
+ */
+function givesMinionValue(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  cost: number,
+  spendNow: boolean,
+): { readonly score: number; readonly average: number; readonly discounted: boolean } {
+  const shopValues = state.shop.map((m) => minionValue(m, state, deps, rules).total);
+  const average =
+    shopValues.length > 0
+      ? shopValues.reduce((a, b) => a + b, 0) / shopValues.length
+      : rules.value.perTechLevel * state.techLevel;
+
+  const discounted = !spendNow || state.gold - cost >= rules.minionCost;
+  const cheaper = discounted ? Math.max(0, rules.minionCost - cost) * rules.goldPointValue : 0;
+  return { score: average + cheaper, average, discounted };
+}
+
 export function heroPowerRule(
   state: GameState,
   deps: TavernAdvisorDeps,
@@ -1347,17 +1472,9 @@ export function heroPowerRule(
 
   const info = deps.cards.info(hero.heroPowerCardId);
   const text = info?.text ?? '';
-  if (!rules.heroPowerMinionWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+  if (!rules.givesMinionWords.some((w) => new RegExp(w, 'i').test(text))) return null;
 
-  const shopValues = state.shop.map((m) => minionValue(m, state, deps, rules).total);
-  const average =
-    shopValues.length > 0
-      ? shopValues.reduce((a, b) => a + b, 0) / shopValues.length
-      : rules.value.perTechLevel * state.techLevel;
-  // Сила дешевле покупки, и разница в золоте — это тоже очки: золото
-  // конвертируется по курсу goldPointValue, выведенному из цены покупки.
-  const cheaper = Math.max(0, rules.minionCost - cost) * rules.goldPointValue;
-  const score = average + cheaper;
+  const { score, average, discounted } = givesMinionValue(state, deps, rules, cost, true);
 
   return {
     action: 'heroPower',
@@ -1368,8 +1485,10 @@ export function heroPowerRule(
     sellFirst: null,
     reason:
       `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} даёт миньона — ` +
-      `как средний из витрины (${average.toFixed(1)}), но на ` +
-      `${String(rules.minionCost - cost)} золота дешевле покупки`,
+      `как средний из витрины (${average.toFixed(1)})` +
+      (discounted && cost < rules.minionCost
+        ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки`
+        : ''),
   };
 }
 
@@ -1593,6 +1712,13 @@ export interface SpellEffect {
    * которого у игрока нет (part15, ход 19: Misplaced Tea Set).
    */
   readonly untargeted: boolean;
+  /**
+   * Заклинание ДАЁТ МИНЬОНА — то же, что покупка, только дешевле трёх
+   * (`givesMinionWords`). «Enchanted Lasso» за 2: «Steal a random minion
+   * from the Tavern» (part17, ход 1). Ни статов, ни золота в тексте нет,
+   * и прежний разбор возвращал null — заклинание было невидимо целиком.
+   */
+  readonly givesMinion: boolean;
 }
 
 export function spellEffect(
@@ -1640,7 +1766,15 @@ export function spellEffect(
   const untargeted =
     destroy === null && rules.untargetedSpellWords.some((w) => new RegExp(w, 'i').test(text));
 
-  if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt) return null;
+  // «Даёт миньона» — та же таблица шаблонов, что у силы героя: факт записан
+  // в тексте, а не в том, кто его произносит. Замена («…destroy … to get
+  // a random Undead») сюда не относится — у неё своя ветка с жертвой.
+  const givesMinion =
+    !transforms && rules.givesMinionWords.some((w) => new RegExp(w, 'i').test(text));
+
+  if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt && !givesMinion) {
+    return null;
+  }
   return {
     gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
     stats,
@@ -1650,6 +1784,7 @@ export function spellEffect(
     transforms,
     grantsTaunt,
     untargeted,
+    givesMinion,
   };
 }
 
@@ -1657,12 +1792,20 @@ export function spellEffect(
  * Миньон-«движок»: его ценность — постоянный эффект из текста (аура,
  * «After/Whenever/At the start…»), а не размен телом. Признаки — механика
  * AURA в снапшоте и слова из `engineTextWords`.
+ *
+ * Триггер О СЕБЕ движком не считается: «After this attacks and kills
+ * a minion…» (Wildfire Elemental) — описание собственного размена, а не
+ * эффекта, который надо беречь от ударов. Прежнее правило зачисляло такого
+ * бойца в движки словом «After» и уводило провокацию на токен (part17,
+ * ход 11).
  */
 function isEffectEngine(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
   const info = cards.info(m.cardId);
   if (info?.mechanics.includes('AURA') ?? false) return true;
   const text = info?.text ?? '';
-  return text !== '' && rules.engineTextWords.some((w) => new RegExp(w, 'i').test(text));
+  if (text === '') return false;
+  if (rules.selfTriggerWords.some((w) => new RegExp(w, 'i').test(text))) return false;
+  return rules.engineTextWords.some((w) => new RegExp(w, 'i').test(text));
 }
 
 /**
@@ -1685,13 +1828,20 @@ function isEffectEngine(m: Minion, cards: CardIndex, rules: TavernRules): boolea
  *   советовался на Deathstrider — игрок прямо сказал, что не хочет его
  *   в приоритете ударов. Цель — крупнейший из остальных; если весь борд
  *   из движков, выбор честно возвращается к крупнейшему.
+ *
+ * И третье, по part17 (ход 11): усиление остаётся на миньоне НАВСЕГДА,
+ * поэтому оно не вешается на кандидата в продажу — слабейшего своего,
+ * которого правила сами назовут жертвой при первой покупке на полный борд.
+ * «Fortify» советовался на Water Droplet 3/3 — токен, который игрок,
+ * по его словам, и так собирался продать.
  */
 function spellTargetOn(
   effect: SpellEffect,
   state: GameState,
-  cards: CardIndex,
+  deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): { readonly target: Minion | null; readonly note: string } | null {
+  const cards = deps.cards;
   if (state.board.length === 0) return null;
 
   if (effect.destroysFriendly) {
@@ -1723,19 +1873,32 @@ function spellTargetOn(
     );
 
   let pool: readonly Minion[] = state.board;
+  const notes: string[] = [];
+
   if (effect.grantsTaunt) {
-    const bodies = state.board.filter((m) => !isEffectEngine(m, cards, rules));
-    if (bodies.length > 0) pool = bodies;
+    const bodies = pool.filter((m) => !isEffectEngine(m, cards, rules));
+    if (bodies.length > 0 && bodies.length < pool.length) {
+      pool = bodies;
+      notes.push('провокация зовёт удары, миньоны-эффекты не подставляются');
+    }
+  }
+
+  // Кандидат в продажу — тот же слабейший свой, которого назовёт покупка
+  // на полный борд. Усиление на нём уйдёт вместе с ним.
+  const victim = weakestOwn(state, deps, rules);
+  if (victim !== null) {
+    const keepers = pool.filter((m) => m.entityId !== victim.minion.entityId);
+    if (keepers.length > 0 && keepers.length < pool.length) {
+      pool = keepers;
+      notes.push('усиление навсегда — не на кандидата в продажу');
+    }
   }
 
   const target = largest(pool);
   const name = cards.info(target.cardId)?.name ?? target.cardId;
   return {
     target,
-    note:
-      effect.grantsTaunt && pool !== state.board
-        ? `цель — ${name}: провокация зовёт удары, миньоны-эффекты не подставляются`
-        : `цель — ${name}`,
+    note: `цель — ${name}` + (notes.length > 0 ? `: ${notes.join('; ')}` : ''),
   };
 }
 
@@ -1832,7 +1995,7 @@ export function spellRules(
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
-    const aimed = spellTargetOn(effect, state, deps.cards, rules);
+    const aimed = spellTargetOn(effect, state, deps, rules);
     if (aimed === null) return [];
 
     return [
@@ -1896,6 +2059,32 @@ export function shopSpellRules(
       ];
     }
 
+    // Заклинание, дающее миньона, — это покупка дешевле трёх золота, и оно
+    // сравнимо с покупками напрямую: та же шкала, что у силы героя (part17,
+    // ход 1: Enchanted Lasso за 2 при витрине из двух миньонов). Пустой
+    // борд ему не помеха — миньон и есть его наполнение.
+    if (effect.givesMinion) {
+      const { score, average, discounted } = givesMinionValue(state, deps, rules, spell.cost, true);
+      const cheaper = rules.minionCost - spell.cost;
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score,
+          cost: spell.cost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} за ${String(spell.cost)} даёт миньона — как средний из витрины ` +
+            `(${average.toFixed(1)})` +
+            (discounted && cheaper > 0
+              ? `, но на ${String(cheaper)} золота дешевле покупки`
+              : ', и это дешёвое тело, а не лучшее'),
+        },
+      ];
+    }
+
     if (state.board.length === 0) return [];
     const score = effect.transforms
       ? rules.value.transform
@@ -1903,7 +2092,7 @@ export function shopSpellRules(
         (effect.divineShield ? rules.value.divineShield : 0) +
         (effect.grantsTaunt ? rules.value.taunt : 0);
     if (score <= 0) return [];
-    const aimed = spellTargetOn(effect, state, deps.cards, rules);
+    const aimed = spellTargetOn(effect, state, deps, rules);
     if (aimed === null) return [];
     return [
       {
