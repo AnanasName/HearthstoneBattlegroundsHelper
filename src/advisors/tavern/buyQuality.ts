@@ -3,6 +3,7 @@ import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mappe
 import type { BattleSimulator } from '../battle/simulator.js';
 import type { CardIndex } from '../../data/cards.js';
 import type { Minion } from '../../state/types.js';
+import type { GameState } from '../../state/types.js';
 import { adviseTavern, type Recommendation } from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 import { readTavernTurns } from './turns.js';
@@ -82,29 +83,54 @@ export const DEFAULT_BUY_QUALITY_OPTIONS: BuyQualityOptions = {
 /** Ожидаемый исход боя одним числом: победа плюс половина ничьей. */
 const outcomeScore = (won: number, tied: number): number => won + tied / 2;
 
-export function measureBuyQuality(
+/** Одно решение о покупке: кандидаты и борд, с которым каждый выйдет в бой. */
+export interface BuyDecision {
+  readonly turn: number;
+  readonly state: GameState;
+  /** Вход боя без своего борда — его подставляет каждый кандидат. */
+  readonly base: ReturnType<typeof toBattleInfo>;
+  readonly opponentBoard: readonly Minion[];
+  /** Покупки в порядке эвристики: первая — её выбор. */
+  readonly candidates: readonly (Recommendation & { minion: Minion })[];
+  /** Борд каждого кандидата, в том же порядке. */
+  readonly boards: readonly (readonly Minion[])[];
+}
+
+export interface BuyEnumeration {
+  readonly decisions: readonly BuyDecision[];
+  readonly skippedNoBattle: number;
+  readonly skippedNoChoice: number;
+}
+
+/**
+ * Перечисление точек решения с кандидатами — БЕЗ единой симуляции.
+ *
+ * Вынесено из `measureBuyQuality`, потому что спрашивают из двух мест:
+ * сама сверка считает исходы тут же, а замер статистики карт (`measureCardStats`)
+ * сохраняет их в дамп. Собирать это дважды — верный способ разойтись, и проект
+ * этот урок уже оплатил (`positionQuestion` / `battleQuestion`).
+ */
+export function enumerateBuyDecisions(
   text: string,
   deps: { readonly cards: CardIndex; readonly simulator: BattleSimulator },
-  overrides: Partial<BuyQualityOptions> = {},
-): BuyQualityReport {
-  const options = { ...DEFAULT_BUY_QUALITY_OPTIONS, ...overrides };
-
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): BuyEnumeration {
   // Счётчик хода растёт на переходе в бой: таверна идёт нечётными номерами,
   // бой следом — чётным. Проверено на обеих фикстурах.
   const actualOpponents = new Map(readBattleEpisodes(text).map((e) => [e.turn, e.opponentBoard]));
 
-  const rows: BuyComparison[] = [];
+  const decisions: BuyDecision[] = [];
   let skippedNoBattle = 0;
   let skippedNoChoice = 0;
 
   for (const { state } of readTavernTurns(text)) {
-    const advice = adviseTavern(state, deps, options.rules);
+    const advice = adviseTavern(state, deps, rules);
     if (advice === null || state.hero === null) continue;
 
-    const buys = advice.recommendations.filter(
+    const candidates = advice.recommendations.filter(
       (r): r is Recommendation & { minion: Minion } => r.action === 'buy' && r.minion !== null,
     );
-    if (buys.length < 2) {
+    if (candidates.length < 2) {
       skippedNoChoice += 1;
       continue;
     }
@@ -130,14 +156,44 @@ export function measureBuyQuality(
           ? []
           : (state.trinketsByPlayer[state.nextOpponentPlayerId] ?? []),
     };
-    const base = toBattleInfo(setup, 1);
 
-    const measured = buys.map((buy) => {
+    decisions.push({
+      turn: state.turn,
+      state,
+      base: toBattleInfo(setup, 1),
+      opponentBoard,
+      candidates,
       // Продавать приходится, только если места нет.
-      const after = [
-        ...state.board.filter((m) => buy.sellFirst === null || m.entityId !== buy.sellFirst.entityId),
+      boards: candidates.map((buy) => [
+        ...state.board.filter(
+          (m) => buy.sellFirst === null || m.entityId !== buy.sellFirst.entityId,
+        ),
         buy.minion,
-      ];
+      ]),
+    });
+  }
+
+  return { decisions, skippedNoBattle, skippedNoChoice };
+}
+
+export function measureBuyQuality(
+  text: string,
+  deps: { readonly cards: CardIndex; readonly simulator: BattleSimulator },
+  overrides: Partial<BuyQualityOptions> = {},
+): BuyQualityReport {
+  const options = { ...DEFAULT_BUY_QUALITY_OPTIONS, ...overrides };
+  const { decisions, skippedNoBattle, skippedNoChoice } = enumerateBuyDecisions(
+    text,
+    deps,
+    options.rules,
+  );
+
+  const rows: BuyComparison[] = [];
+
+  for (const decision of decisions) {
+    const { base, opponentBoard } = decision;
+    const measured = decision.candidates.map((buy, i) => {
+      const after = decision.boards[i] ?? [];
       const result = simulate(deps.simulator, base, after, options.simulations);
       return { buy, outcome: outcomeScore(result.won, result.tied) };
     });
@@ -148,7 +204,7 @@ export function measureBuyQuality(
     const outcomes = measured.map((m) => m.outcome);
 
     rows.push({
-      turn: state.turn,
+      turn: decision.turn,
       candidates: measured.length,
       heuristicPick: heuristic.buy,
       simulatorPick: best.buy,
