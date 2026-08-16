@@ -2,6 +2,7 @@ import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { PositionTarget, ResolvedOpponent } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
+import type { SpendPlan } from '../advisors/tavern/spend.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState } from '../state/types.js';
 import {
@@ -11,6 +12,7 @@ import {
   noOpponentReason,
   opponentStale,
   planLine,
+  spendPlanLine,
   positionLine,
   recommendationLine,
   situationLine,
@@ -66,6 +68,14 @@ const MAX_ACTIONS = 3;
 export interface ViewInput {
   readonly state: GameState;
   readonly tavern: TavernAdvice | null;
+  /**
+   * План трат хода: чем занять ВСЁ золото, а не только первым действием.
+   *
+   * Отдельным полем, а не внутри `TavernAdvice`: план — это цепочка тех же
+   * советов на гипотетических состояниях, и модуль плана зависит от модуля
+   * советов. Обратная зависимость сделала бы круг.
+   */
+  readonly spendPlan?: SpendPlan | null;
   /** Идёт ли счёт расстановки прямо сейчас. */
   readonly thinking: boolean;
   readonly position:
@@ -151,6 +161,10 @@ function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
   // игрок читает верхнюю строку, и она должна описывать весь ход.
   const recommendations = input.tavern?.recommendations ?? [];
   const plan = input.tavern?.playPlan ?? [];
+  // План трат — первой строкой: ход состоит из нескольких действий, и верхняя
+  // строка должна описывать весь ход, а не первое из них. Отдельные советы
+  // остаются ниже: план их не отменяет, а собирает.
+  const spend = input.spendPlan ?? null;
   const lines: string[] = [];
   let planShown = false;
   for (const r of recommendations) {
@@ -164,9 +178,13 @@ function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
     lines.push(recommendationLine(r, cards));
   }
 
-  const shown: OverlayLine[] = lines
-    .slice(0, MAX_ACTIONS)
-    .map((text, i) => ({ text, tone: i === 0 ? 'good' : 'normal' }));
+  const shown: OverlayLine[] =
+    spend !== null && spend.steps.length >= 2
+      ? [
+          { text: spendPlanLine(spend, cards), tone: 'good' as const },
+          ...lines.slice(0, MAX_ACTIONS - 1).map((text) => ({ text, tone: 'normal' as const })),
+        ]
+      : lines.slice(0, MAX_ACTIONS).map((text, i) => ({ text, tone: i === 0 ? 'good' : 'normal' }));
 
   // Досчёт покупок боем — строкой поверх лимита, как и напоминание ниже:
   // это дополнение к эвристике, а не её замена. Несогласие боя с эвристикой

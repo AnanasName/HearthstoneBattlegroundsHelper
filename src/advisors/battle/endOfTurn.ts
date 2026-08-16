@@ -1,5 +1,6 @@
 import type { AllCardsService } from '@firestone-hs/reference-data';
 
+import { normalizeCardText } from '../../data/cards.js';
 import type { Minion } from '../../state/types.js';
 
 /**
@@ -24,6 +25,13 @@ import type { Minion } from '../../state/types.js';
  * симулятор, — оба пути (пакетный и воркер) читают один источник и не могут
  * разойтись. Разбор узкий сознательно: только «adjacent minions +N Attack»,
  * прочие эффекты конца хода (заклинания, золото) расстановки не касаются.
+ *
+ * Текст берётся через `normalizeCardText` — ту же чистку, что и в нашем
+ * справочнике: в снапшоте у части карт к тексту приклеен ЗОЛОТОЙ вариант
+ * («…Taunt.3[x]Give a minion…», part17), и числа обеих версий читаются как
+ * одно. Сегодня склеены только заклинания, а здесь читаются миньоны борда,
+ * — но снапшот обновляется с каждым патчем, и путь мимо чистки был бы
+ * миной: она сработала бы тихо, удвоив плейсхолдер баффа.
  */
 
 // Пробелы — \s+: тексты снапшота переносят строки посреди предложения.
@@ -46,7 +54,8 @@ export function endOfTurnAuraGains(
   const golden = board.filter((m) => m.golden).length;
 
   for (const m of board) {
-    const text: string = cards.getCard(m.cardId)?.text ?? '';
+    const raw: string = cards.getCard(m.cardId)?.text ?? '';
+    const text = normalizeCardText(raw);
     const match = ADJACENT_ATTACK.exec(text);
     if (match === null) continue;
 

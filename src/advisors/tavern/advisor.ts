@@ -601,6 +601,21 @@ export function buyCostOf(minion: Minion, rules: TavernRules = DEFAULT_TAVERN_RU
 }
 
 /**
+ * Цена обновления витрины — живая, из кнопки; таблица только запасной путь.
+ *
+ * Экономику меняют не только тринкеты: «Leaf Through the Pages» («Gain 2
+ * free Refreshes», part17 ходы 19 и 21; part13 ход 23) и напарник Magnus
+ * Manastorm («Two Refreshes each turn are free», part12 ходы 15–27) роняют
+ * `COST` кнопки в ноль на целый ход. Советник считал по таблице и в эти
+ * ходы честно не знал, что обновление бесплатно, — то же самое было бы
+ * с любым экономическим тринкетом. Правило прежнее: читать факт, а не
+ * моделировать эффект.
+ */
+export function rerollCostOf(state: GameState, rules: TavernRules = DEFAULT_TAVERN_RULES): number {
+  return state.rerollCost ?? rules.rerollCost;
+}
+
+/**
  * Племена, доказанные витриной, — состав партии, накопленный по факту.
  *
  * Прямого тега состава в логе нет. Витрина предлагает только пул партии,
@@ -724,7 +739,11 @@ export function levelUpRule(
         ? // Золота на одно: тройку упускать нельзя, подъём сразу за ней.
           triple - 0.5
         : bestBuy + behind * rules.levellingUrgencyPerTier;
-  } else if (behind === 0 && bestBuy !== null && shopIsTrash) {
+  } else if (behind === 0 && bestBuy !== null && shopIsTrash && rerollCostOf(state, rules) > 0) {
+    // Довод «витрина из мусора» держится на том, что обновление стоит золота.
+    // Когда оно бесплатно (заклинание «Gain 2 free Refreshes», напарник
+    // Magnus Manastorm, тринкеты), мусор — довод обновиться, а не подняться:
+    // подъём того же мусора не отменяет.
     score = bestBuy + rules.levellingUrgencyPerTier;
   }
 
@@ -736,7 +755,7 @@ export function levelUpRule(
   const leftover = state.gold - cost;
   const late = (state.tavernUpgradeTarget ?? state.techLevel + 1) >= rules.lateRerollTier;
   const leftoverTail =
-    leftover >= rules.rerollCost && leftover < rules.minionCost
+    leftover >= rerollCostOf(state, rules) && leftover < rules.minionCost
       ? late
         ? `; остаток ${String(leftover)} — на обновление витрины нового тира`
         : `; остаток ${String(leftover)} сгорит — это цена подъёма`
@@ -786,7 +805,7 @@ function ownValue(
 }
 
 /** Слабейший свой — кандидат на продажу, когда борд полон. */
-function weakestOwn(
+export function weakestOwn(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
@@ -1168,7 +1187,8 @@ export function rerollRule(
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): Recommendation | null {
-  if (state.gold < rules.rerollCost) return null;
+  const cost = rerollCostOf(state, rules);
+  if (state.gold < cost) return null;
 
   const best =
     state.shop.length === 0
@@ -1183,7 +1203,7 @@ export function rerollRule(
   // Копим на подъём: если после реролла на него уже не хватит, а сейчас
   // хватает — реролл дороже, чем кажется.
   const upgrade = state.tavernUpgradeCost;
-  if (upgrade !== null && state.gold >= upgrade && state.gold - rules.rerollCost < upgrade) {
+  if (upgrade !== null && state.gold >= upgrade && state.gold - cost < upgrade) {
     return null;
   }
 
@@ -1193,7 +1213,10 @@ export function rerollRule(
   // рероллы позже»). Пока подъём доступен и по карману, ход — подъём;
   // обновление советуется уже сдачей после него. Условия зеркалят входные
   // проверки levelUpRule: недоступный подъём реролл не блокирует.
+  // Бесплатное обновление с подъёмом не соревнуется вовсе: оно не отнимает
+  // золота. Запрет раннего реролла — про трату, а не про сам факт обновления.
   if (
+    cost > 0 &&
     state.techLevel < rules.lateRerollTier &&
     upgrade !== null &&
     state.gold >= upgrade &&
@@ -1207,12 +1230,13 @@ export function rerollRule(
     action: 'reroll',
     minion: null,
     score: threshold - best,
-    cost: rules.rerollCost,
+    cost,
     requiresSlot: false,
     sellFirst: null,
     reason:
       `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
-      `${String(state.techLevel)} — покупать нечего, обновление стоит ${String(rules.rerollCost)}`,
+      `${String(state.techLevel)} — покупать нечего, обновление ` +
+      (cost === 0 ? 'бесплатно' : `стоит ${String(cost)}`),
   };
 }
 
@@ -2552,21 +2576,24 @@ export function adviseTavern(
   // обновление витрины хватает, обновление и есть ход — поиск лучшего.
   // Случай part11: борд полон и силён, все покупки отсеяны, 5 золота,
   // совет «НИЧЕГО» — игрок справедливо заметил, что мог обновляться.
+  const idleRerollCost = rerollCostOf(state, rules);
   if (
     sorted[0]?.action === 'pass' &&
-    state.gold >= rules.rerollCost &&
+    state.gold >= idleRerollCost &&
     state.shop.some((m) => !m.frozen)
   ) {
     sorted.unshift({
       action: 'reroll',
       minion: null,
       score: 0.5,
-      cost: rules.rerollCost,
+      cost: idleRerollCost,
       requiresSlot: false,
       sellFirst: null,
       reason:
-        `покупать нечего и некуда, а золота ${String(state.gold)} — ` +
-        'обновление витрины в поиске лучшего',
+        idleRerollCost === 0
+          ? 'покупать нечего и некуда, а обновление бесплатно — искать лучшее'
+          : `покупать нечего и некуда, а золота ${String(state.gold)} — ` +
+            'обновление витрины в поиске лучшего',
     });
   }
 

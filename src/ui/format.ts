@@ -7,6 +7,7 @@ import type {
   TrinketAdvice,
 } from '../advisors/tavern/advisor.js';
 import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
+import type { SpendPlan } from '../advisors/tavern/spend.js';
 import type { CardIndex } from '../data/cards.js';
 import type { GameState, Minion } from '../state/types.js';
 
@@ -132,6 +133,38 @@ export function buyCheckLine(
 /** Вариант открытого выбора одной строкой. */
 export function choiceLine(c: ChoiceAdvice): string {
   return `${c.name} — ${c.reason}`;
+}
+
+/**
+ * План трат хода одной строкой: чем занять ВСЁ золото.
+ *
+ * Отдельные советы — это ранжирование действий, а ход состоит из нескольких:
+ * подняться и купить, купить и купить, разыграть из руки и обновиться.
+ * Судьба остатка называется здесь же: золото сгорает в конце хода, и молчать
+ * об этом нельзя. Хвост «дальше по новой витрине» ставится, когда план
+ * оборвался на обновлении: что там будет, никто не знает.
+ */
+export const MAX_PLAN_STEPS = 4;
+
+export function spendPlanLine(plan: SpendPlan, cards: CardIndex): string {
+  // Пометки «исход неизвестен» на шаге нет намеренно: план говорит, ЧТО
+  // делать, и знак вопроса у тёмного дара читался бы как сомнение в самом
+  // совете. Неизвестность видна там, где она важна, — в хвосте строки.
+  //
+  // Длина ограничена: план из шести шагов с целями заклинаний занимает
+  // в оверлее три строки из трёх, вытесняя расстановку. Первые четыре шага
+  // — это все крупные траты; хвост (дар, обновление) виден и в списке
+  // советов ниже.
+  const shown = plan.steps.slice(0, MAX_PLAN_STEPS);
+  const rest = plan.steps.length - shown.length;
+  const steps = shown.map((s) => recommendationLine(s.recommendation, cards));
+  if (rest > 0) steps.push(`…и ещё ${String(rest)}`);
+  const tail = plan.truncated
+    ? ' → дальше по новой витрине'
+    : plan.goldLeft > 0
+      ? `; остаётся ${String(plan.goldLeft)} — сгорит`
+      : '';
+  return `ПЛАН ХОДА: ${steps.join(' → ')}${tail}`;
 }
 
 /** План розыгрыша одной строкой: тела по порядку, магниты с целью. */

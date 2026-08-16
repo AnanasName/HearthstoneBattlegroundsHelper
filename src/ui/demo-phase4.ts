@@ -12,9 +12,11 @@
 import { readFileSync } from 'node:fs';
 
 import { adviseTavern, type Recommendation, type TavernAdvice } from '../advisors/tavern/advisor.js';
+import { spendPlan } from '../advisors/tavern/spend.js';
 import { readTavernTurns } from '../advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
 import type { GameState, Minion } from '../state/types.js';
+import { spendPlanLine } from './format.js';
 
 const DEFAULT_FIXTURE = 'data/fixtures/part3/game.log';
 
@@ -75,6 +77,11 @@ function printTurn(state: GameState, advice: TavernAdvice, cards: CardIndex): vo
         ` текст ${(value.textTribe + value.textMech + value.namedCard).toFixed(1)})`,
     );
   }
+
+  // План трат — тем же порядком, что в живом режиме: сперва весь ход,
+  // потом отдельные советы.
+  const spend = spendPlan(state, { cards });
+  if (spend.steps.length >= 2) console.log(`  ${spendPlanLine(spend, cards)}`);
 
   console.log('  совет:');
   for (const r of advice.recommendations.slice(0, 3)) {

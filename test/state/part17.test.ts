@@ -3,7 +3,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { createBattleSimulator } from '../../src/advisors/battle/simulator.js';
 import { advisePositionForState } from '../../src/advisors/position/advisor.js';
 import { winRate } from '../../src/advisors/position/score.js';
-import { adviseTavern, freezeRule, spellRules } from '../../src/advisors/tavern/advisor.js';
+import {
+  adviseTavern,
+  freezeRule,
+  rerollCostOf,
+  spellRules,
+} from '../../src/advisors/tavern/advisor.js';
+import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
@@ -32,6 +38,8 @@ describe('part17: лассо в заморозку, цель провокаци�
   let turn13Start: GameState | null = null;
   let turn13End: GameState | null = null;
   let cycloneTurn25: GameState | null = null;
+  let freeRefreshTurn19: GameState | null = null;
+  let turn1Start: GameState | null = null;
   let finalState: GameState;
 
   beforeAll(() => {
@@ -65,6 +73,11 @@ describe('part17: лассо в заморозку, цель провокаци�
       if (s.turn === 25 && s.gold === 0 && s.board.length === 7 && s.shop.some((m) => m.cardId === 'BGS_119')) {
         cycloneTurn25 = s;
       }
+      // Ход бесплатных обновлений: «Leaf Through the Pages» роняет COST
+      // кнопки обновления в ноль на весь ход.
+      if (s.turn === 19 && s.rerollCost === 0) freeRefreshTurn19 ??= s;
+      // Начало хода 1: золото целое, витрина наполнена — точка решения.
+      if (s.turn === 1 && s.gold === 3 && s.shop.length === 3) turn1Start = s;
     }
     finalState = reducer.snapshot();
   }, 240_000);
@@ -94,6 +107,24 @@ describe('part17: лассо в заморозку, цель провокаци�
 
     const top = adviseTavern(lassoTurn1, { cards })?.recommendations[0];
     expect(top?.action).toBe('freeze');
+  });
+
+  it('ход 1: план хода — покупка и заморозка лассо, как игрок и сыграл', () => {
+    // Отдельные советы описывают ОДНО действие, а ход состоял из двух:
+    // купить Циклона на все три золота и заморозить витрину ради лассо.
+    // План трат собирает их в одну строку — ровно тот ход, о котором
+    // игрок спрашивал «верна ли логика».
+    expect(turn1Start).not.toBeNull();
+    if (turn1Start === null) return;
+
+    const plan = spendPlan(turn1Start, { cards });
+    expect(plan.steps.map((s) => s.recommendation.action)).toEqual(['buy', 'freeze']);
+    expect(plan.steps[0]?.recommendation.minion?.cardId).toBe('BGS_119');
+    expect(plan.steps[1]?.recommendation.spellCardId).toBe('BG28_512');
+    // Золото потрачено целиком, и план не оборван: заморозка — законный конец
+    // хода, а не «дальше неизвестно».
+    expect(plan.goldLeft).toBe(0);
+    expect(plan.truncated).toBe(false);
   });
 
   it('ход 11: провокация Fortify идёт на тело, а не на кандидата в продажу (жалоба 2)', () => {
@@ -138,6 +169,26 @@ describe('part17: лассо в заморозку, цель провокаци�
     expect(winRate(advice.current.estimate)).toBeGreaterThanOrEqual(0.99);
     expect(advice.improves).toBe(false);
   }, 120_000);
+
+  it('ход 19: цена обновления витрины читается живой и бывает нулевой', () => {
+    // «Leaf Through the Pages» («Gain 2 free Refreshes») роняет COST кнопки
+    // обновления в ноль на весь ход — и это не сбой сущности, а эффект:
+    // в part17 так проходят ходы 19 и 21, в part13 — ход 23, в part12
+    // напарник Magnus Manastorm («Two Refreshes each turn are free») даёт
+    // то же с хода 15. Советник считал обновление по таблице (1 золото)
+    // и в такие ходы был честно неправ.
+    expect(freeRefreshTurn19).not.toBeNull();
+    if (freeRefreshTurn19 === null) return;
+
+    expect(freeRefreshTurn19.rerollCost).toBe(0);
+    expect(rerollCostOf(freeRefreshTurn19)).toBe(0);
+
+    // Ни один совет по обновлению не называет цену из таблицы.
+    const advice = adviseTavern(freeRefreshTurn19, { cards });
+    for (const rec of advice?.recommendations ?? []) {
+      if (rec.action === 'reroll') expect(rec.cost).toBe(0);
+    }
+  });
 
   it('ход 25: на полном борде заморозка проходит планку покупки (жалоба 4)', () => {
     // Борд из семи миньонов по 130–780 статов; в витрине Crackling Cyclone

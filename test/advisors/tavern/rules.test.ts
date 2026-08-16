@@ -18,6 +18,7 @@ import {
   playPlan,
   playRules,
   poisonAmongSeen,
+  rerollCostOf,
   rerollRule,
   sellRule,
   shopSpellRules,
@@ -527,6 +528,51 @@ describe('правило обновления витрины', () => {
     // В лейте (от lateRerollTier) запас возвращает прежнее поведение:
     // идёт поиск конкретных карт, обновление — полноценная трата (part11).
     expect(rerollRule({ ...s, techLevel: 4, gold: 7 }, deps)).not.toBeNull();
+  });
+
+  it('цена обновления берётся живой из кнопки, а не из таблицы', () => {
+    // «Gain 2 free Refreshes» (заклинание), напарник Magnus Manastorm,
+    // экономические тринкеты — все роняют COST кнопки обновления, и живой
+    // тег показывает результат уже применённым. Читать факт надёжнее,
+    // чем моделировать каждый источник (part17, ходы 19 и 21).
+    const shop = [shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 })];
+    expect(rerollCostOf(state({ shop }))).toBe(DEFAULT_TAVERN_RULES.rerollCost);
+    expect(rerollCostOf(state({ shop, rerollCost: 0 }))).toBe(0);
+
+    const free = rerollRule(state({ gold: 0, shop, rerollCost: 0 }), deps);
+    expect(free?.cost).toBe(0);
+    expect(free?.reason).toContain('бесплатно');
+  });
+
+  it('бесплатное обновление с подъёмом не соревнуется', () => {
+    // Запрет раннего реролла — про трату золота: обновление за 1 отняло бы
+    // его у подъёма. Бесплатное не отнимает ничего, и молчать ему незачем.
+    const s = {
+      gold: 5,
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 3,
+      shop: [shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 })],
+    };
+    expect(rerollRule(state(s), deps)).toBeNull();
+    expect(rerollRule(state({ ...s, rerollCost: 0 }), deps)).not.toBeNull();
+  });
+
+  it('при бесплатном обновлении мусор в витрине не гонит в подъём', () => {
+    // Довод «витрина из мусора — поднимайся» (JeefHS) держится на том, что
+    // обновление стоит золота. Бесплатное обновление того же мусора
+    // не отменяет, но и подъёма не требует.
+    const trash = {
+      turn: 5,
+      techLevel: 3,
+      gold: 6,
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 4,
+      shop: [shopMinion(9, 'MURLOC_1', { attack: 1, health: 1 })],
+    };
+    const paid = levelUpRule(state(trash), DEFAULT_TAVERN_RULES, buyRules(state(trash), deps));
+    const freeRefresh = state({ ...trash, rerollCost: 0 });
+    const free = levelUpRule(freeRefresh, DEFAULT_TAVERN_RULES, buyRules(freeRefresh, deps));
+    expect(paid?.score ?? 0).toBeGreaterThan(free?.score ?? 0);
   });
 
   it('ранний реролл молчит только при доступном подъёме', () => {

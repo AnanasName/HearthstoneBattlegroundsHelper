@@ -54,6 +54,9 @@ const TECH_UP_BUTTON_RE = /^TB_BaconShopTechUp\d+_Button$/;
 /** Кнопка тёмного дара — `CARDTYPE=GAME_MODE_BUTTON`, цена в теге `COST`. */
 const DARK_GIFT_BUTTON = 'BG36_Button_DarkGift';
 
+/** Кнопка обновления витрины — её `COST` и есть живая цена реролла. */
+const REROLL_BUTTON = 'TB_BaconShop_8p_Reroll_Button';
+
 /**
  * Заголовок открытия выбора: `id=3 Player=AngryMem#2886 TaskList= ChoiceType=GENERAL …`.
  *
@@ -758,6 +761,27 @@ export function createReducer(players: Players): Reducer {
     return none;
   };
 
+  /**
+   * Цена обновления витрины — `COST` кнопки обновления в `PLAY`.
+   *
+   * Ноль здесь ЗНАЧАЩИЙ, в отличие от кнопки подъёма: бесплатное обновление
+   * — реальный эффект тринкетов и героев, и отбрасывать его как «сброс»
+   * значит советовать по таблице вместо факта. Сброс кнопки в начале хода
+   * нулями отсекается зоной: на это время сущность лежит
+   * в `REMOVEDFROMGAME` (part17, ход 2 — COST=0 приходит именно там).
+   */
+  const rerollButton = (): number | null => {
+    const self = players.selfPlayerId;
+    if (self === null) return null;
+
+    for (const e of entities.values()) {
+      if (e.controller !== self || e.zone !== 'PLAY') continue;
+      if (e.cardId !== REROLL_BUTTON) continue;
+      return e.tags.get('COST') ?? null;
+    }
+    return null;
+  };
+
   /** Кнопка тёмного дара, если она сейчас есть И заряды не исчерпаны. */
   const darkGiftButton = (): number | null => {
     const self = players.selfPlayerId;
@@ -871,6 +895,7 @@ export function createReducer(players: Players): Reducer {
       techLevelUpTurn,
       tavernUpgradeCost: upgrade.cost,
       tavernUpgradeTarget: upgrade.target,
+      rerollCost: rerollButton(),
       maxTechLevel,
       // Остаток, а не выданное на ход: в игре слева от дроби показан именно он.
       gold: Math.max(0, goldTotal - goldSpent),

@@ -184,6 +184,44 @@ describe('вид оверлея', () => {
     expect(view.actions[0]?.tone).toBe('good');
   });
 
+  it('план трат — первой строкой, советы остаются ниже', () => {
+    // Ход состоит из нескольких действий, и верхняя строка обязана описывать
+    // весь ход: иначе игрок читает «купить X» и оставляет золото гореть.
+    const after = (gold: number): GameState => ({ ...state, gold });
+    const plan = {
+      steps: [
+        {
+          recommendation: tavern.recommendations[0]!,
+          goldBefore: 7,
+          goldAfter: 4,
+          opaque: false,
+          stateAfter: after(4),
+        },
+        {
+          recommendation: tavern.recommendations[1]!,
+          goldBefore: 4,
+          goldAfter: 0,
+          opaque: false,
+          stateAfter: after(0),
+        },
+      ],
+      goldLeft: 0,
+      truncated: false,
+    };
+    const view = buildView(input({ spendPlan: plan }), cards);
+
+    expect(view.actions[0]?.text).toContain('ПЛАН ХОДА');
+    expect(view.actions[0]?.tone).toBe('good');
+    // Лимит строк прежний: план занимает место одного совета, а не добавляется
+    // сверх него.
+    expect(view.actions).toHaveLength(3);
+    expect(view.actions[1]?.text).toContain('КУПИТЬ');
+
+    // План из одного шага интерфейсу не нужен — это и есть верхняя строка.
+    const single = buildView(input({ spendPlan: { ...plan, steps: [plan.steps[0]!] } }), cards);
+    expect(single.actions[0]?.text).not.toContain('ПЛАН ХОДА');
+  });
+
   it('покупка на полном борде называет, кого продать', () => {
     const view = buildView(input(), cards);
     expect(view.actions[0]?.text).toContain('продав');

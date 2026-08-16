@@ -264,6 +264,21 @@ export interface GameState {
   readonly tavernUpgradeCost: number | null;
   /** Какой тир дала бы кнопка апгрейда — её тег `TECH_LEVEL`. */
   readonly tavernUpgradeTarget: number | null;
+  /**
+   * Цена обновления витрины — тег `COST` кнопки `TB_BaconShop_8p_Reroll_Button`
+   * в зоне `PLAY` под своим контроллером.
+   *
+   * Правилом игры это число было единицей, и таблица `rules.rerollCost`
+   * его и хранит. Но экономику меняют тринкеты и герои («Refreshing the
+   * Tavern is free», скидки), а живой тег показывает результат уже
+   * применённым — читать факт надёжнее, чем моделировать эффект. Ноль
+   * здесь ЗНАЧАЩИЙ: бесплатное обновление меняет весь ход. Сброс кнопки
+   * в начале хода нулями отсеян зоной: сущность на это время уходит
+   * в `REMOVEDFROMGAME`.
+   *
+   * `null` — кнопки в PLAY нет (бой, конец партии), берётся таблица.
+   */
+  readonly rerollCost: number | null;
   /** Предел тира в этой партии — тег `BACON_MAX_PLAYER_TECH_LEVEL`, в фикстурах 6. */
   readonly maxTechLevel: number | null;
   /**
@@ -442,6 +457,7 @@ export const EMPTY_STATE: GameState = {
   techLevelUpTurn: null,
   tavernUpgradeCost: null,
   tavernUpgradeTarget: null,
+  rerollCost: null,
   maxTechLevel: null,
   gold: 0,
   goldTotal: 0,

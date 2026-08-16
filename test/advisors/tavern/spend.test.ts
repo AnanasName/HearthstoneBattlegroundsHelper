@@ -1,0 +1,280 @@
+import { describe, expect, it } from 'vitest';
+
+import type { Recommendation } from '../../../src/advisors/tavern/advisor.js';
+import { DEFAULT_TAVERN_RULES } from '../../../src/advisors/tavern/rules.js';
+import { applyRecommendation, spendPlan } from '../../../src/advisors/tavern/spend.js';
+import { createCardIndex } from '../../../src/data/cards.js';
+import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
+import { spendPlanLine } from '../../../src/ui/format.js';
+import { minion } from '../../minions.js';
+
+/**
+ * План трат хода: цепочка тех же правил на гипотетических состояниях.
+ *
+ * Проверяется две вещи: переходы состояния (что советы делают с бордом,
+ * рукой, витриной и золотом) и сама цепочка — что она не повторяет действий,
+ * не выходит за золото и честно обрывается там, где витрина становится
+ * неизвестной.
+ */
+
+const cards = createCardIndex([
+  { id: 'BODY_1', name: 'Тело', type: 'Minion', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
+  { id: 'BODY_2', name: 'Другое тело', type: 'Minion', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
+  { id: 'BODY_3', name: 'Третье тело', type: 'Minion', techLevel: 3, races: ['MURLOC'], isBaconPool: true },
+  { id: 'JUNK', name: 'Мусор', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
+]);
+const deps = { cards };
+
+const hero = (): Hero => ({
+  entityId: 1,
+  cardId: 'TB_BaconShop_HERO_60',
+  health: 40,
+  armor: 0,
+  damage: 0,
+  heroPowerCardId: null,
+  heroPowerEntityId: null,
+  heroPowerCost: null,
+  heroPowerUsedThisTurn: false,
+  heroPowerUnplayable: false,
+  heroPowerHasActivate: false,
+});
+
+function state(patch: Partial<GameState> = {}): GameState {
+  return {
+    ...EMPTY_STATE,
+    phase: 'tavern',
+    turn: 9,
+    techLevel: 3,
+    gold: 6,
+    goldTotal: 6,
+    hero: hero(),
+    ...patch,
+  };
+}
+
+const shopMinion = (id: number, cardId: string, patch: Partial<Minion> = {}): Minion =>
+  minion(id, { cardId, techLevel: cards.info(cardId)?.techLevel ?? 1, ...patch });
+
+const buy = (m: Minion, patch: Partial<Recommendation> = {}): Recommendation => ({
+  action: 'buy',
+  minion: m,
+  score: 10,
+  cost: DEFAULT_TAVERN_RULES.minionCost,
+  requiresSlot: false,
+  sellFirst: null,
+  reason: 'тест',
+  ...patch,
+});
+
+describe('переходы состояния для плана трат', () => {
+  it('покупка уводит миньона из витрины на борд и списывает золото', () => {
+    const m = shopMinion(10, 'BODY_1');
+    const s = state({ shop: [m], board: [] });
+    const applied = applyRecommendation(s, buy(m));
+
+    expect(applied?.state.gold).toBe(3);
+    expect(applied?.state.shop).toHaveLength(0);
+    expect(applied?.state.board.map((x) => x.entityId)).toEqual([10]);
+    expect(applied?.opaque).toBe(false);
+    expect(applied?.terminal).toBe(false);
+  });
+
+  it('на полном борде покупка ложится в руку, а продажа возвращает золото', () => {
+    const m = shopMinion(20, 'BODY_2');
+    const victim = shopMinion(1, 'JUNK');
+    const full = [victim, ...Array.from({ length: 6 }, (_, i) => shopMinion(i + 2, 'BODY_1'))];
+
+    const toHand = applyRecommendation(state({ shop: [m], board: full }), buy(m));
+    expect(toHand?.state.hand.map((x) => x.entityId)).toEqual([20]);
+    expect(toHand?.state.board).toHaveLength(7);
+
+    const withSale = applyRecommendation(
+      state({ shop: [m], board: full }),
+      buy(m, { sellFirst: victim }),
+    );
+    // Три золота ушло, одно вернулось продажей.
+    expect(withSale?.state.gold).toBe(6 - 3 + DEFAULT_TAVERN_RULES.sellGold);
+    expect(withSale?.state.board.some((x) => x.entityId === victim.entityId)).toBe(false);
+    expect(withSale?.state.board.map((x) => x.entityId)).toContain(20);
+  });
+
+  it('подъём таверны поднимает тир и убирает кнопку: дважды за ход не поднимаются', () => {
+    const s = state({ gold: 7, tavernUpgradeCost: 7, tavernUpgradeTarget: 4 });
+    const applied = applyRecommendation(s, {
+      action: 'levelUp',
+      minion: null,
+      score: 5,
+      cost: 7,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'тест',
+    });
+
+    expect(applied?.state.techLevel).toBe(4);
+    expect(applied?.state.gold).toBe(0);
+    expect(applied?.state.tavernUpgradeCost).toBeNull();
+    expect(applied?.state.techLevelUpTurn).toBe(9);
+  });
+
+  it('обновление витрины план заканчивает: дальше витрина неизвестна', () => {
+    const applied = applyRecommendation(state(), {
+      action: 'reroll',
+      minion: null,
+      score: 1,
+      cost: 1,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'тест',
+    });
+    expect(applied?.terminal).toBe(true);
+    expect(applied?.state.shop).toHaveLength(0);
+  });
+
+  it('заморозка ничего не тратит и заканчивает план', () => {
+    // Решение о заморозке принимается в конце хода, когда золото потрачено
+    // и стало видно, что осталось не по карману.
+    const applied = applyRecommendation(state(), {
+      action: 'freeze',
+      minion: null,
+      score: 4,
+      cost: 0,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'тест',
+    });
+    expect(applied?.terminal).toBe(true);
+    expect(applied?.state.gold).toBe(6);
+  });
+
+  it('«ничего» и продажа в план не входят', () => {
+    for (const action of ['pass', 'sell'] as const) {
+      const rec: Recommendation = {
+        action,
+        minion: null,
+        score: 1,
+        cost: 0,
+        requiresSlot: false,
+        sellFirst: null,
+        reason: 'тест',
+      };
+      expect(applyRecommendation(state(), rec)).toBeNull();
+    }
+  });
+});
+
+describe('план трат хода', () => {
+  it('на шесть золота собирает две покупки, а не одну', () => {
+    const s = state({
+      gold: 6,
+      board: [shopMinion(1, 'BODY_1')],
+      shop: [
+        shopMinion(10, 'BODY_3', { attack: 5, health: 5 }),
+        shopMinion(11, 'BODY_2', { attack: 4, health: 4 }),
+        shopMinion(12, 'JUNK', { attack: 1, health: 1 }),
+      ],
+    });
+    const plan = spendPlan(s, deps);
+
+    expect(plan.steps).toHaveLength(2);
+    expect(plan.steps.map((st) => st.recommendation.action)).toEqual(['buy', 'buy']);
+    // Дороже — раньше: цепочка идёт по тому же ранжированию, что список.
+    expect(plan.steps[0]?.recommendation.minion?.entityId).toBe(10);
+    expect(plan.steps[1]?.recommendation.minion?.entityId).toBe(11);
+    expect(plan.goldLeft).toBe(0);
+    expect(plan.truncated).toBe(false);
+  });
+
+  it('план из одного шага возвращается как есть: обрезать его — дело интерфейса', () => {
+    // Обрезка внутри модуля ломала замер: план из одного действия он читал бы
+    // как «ничего не делать» и сравнивал с пустым набором.
+    const s = state({
+      gold: 3,
+      board: [shopMinion(1, 'BODY_1')],
+      shop: [shopMinion(10, 'BODY_3', { attack: 5, health: 5 })],
+    });
+    const plan = spendPlan(s, deps);
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]?.recommendation.action).toBe('buy');
+  });
+
+  it('одно и то же действие в план дважды не попадает', () => {
+    // Активация носителя оставляет его на борде, а «нажато в этом ходу»
+    // читается из блоков лога, которых у гипотетического состояния нет.
+    const s = state({
+      gold: 10,
+      board: [shopMinion(1, 'BODY_1')],
+      shop: [
+        shopMinion(10, 'BODY_3', { attack: 5, health: 5 }),
+        shopMinion(11, 'BODY_2', { attack: 4, health: 4 }),
+      ],
+    });
+    const plan = spendPlan(s, deps);
+    const keys = plan.steps.map(
+      (st) => `${st.recommendation.action}:${String(st.recommendation.minion?.entityId)}`,
+    );
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('строка плана называет судьбу остатка золота и обрыв на обновлении', () => {
+    const m = shopMinion(10, 'BODY_3', { attack: 5, health: 5 });
+    const step = {
+      recommendation: buy(m),
+      goldBefore: 7,
+      goldAfter: 4,
+      opaque: false,
+      stateAfter: state({ gold: 4 }),
+    };
+
+    const burning = spendPlanLine(
+      { steps: [step, { ...step, goldBefore: 4, goldAfter: 1 }], goldLeft: 2, truncated: false },
+      cards,
+    );
+    expect(burning).toContain('ПЛАН ХОДА');
+    expect(burning).toContain('→');
+    expect(burning).toContain('остаётся 2 — сгорит');
+
+    // Оборвавшийся план про остаток молчит: что купить дальше, решит
+    // новая витрина, а не мы.
+    const truncated = spendPlanLine(
+      { steps: [step, { ...step, opaque: true }], goldLeft: 6, truncated: true },
+      cards,
+    );
+    expect(truncated).toContain('дальше по новой витрине');
+    expect(truncated).not.toContain('сгорит');
+  });
+
+  it('длинный план обрезается для показа, но сам план полный', () => {
+    // Шесть шагов с целями заклинаний занимают в оверлее три строки из трёх
+    // и вытесняют расстановку. Обрезка живёт в форматировании, а не в плане:
+    // замер и живой режим считают по полному плану.
+    const m = shopMinion(10, 'BODY_3', { attack: 5, health: 5 });
+    const step = {
+      recommendation: buy(m),
+      goldBefore: 9,
+      goldAfter: 6,
+      opaque: false,
+      stateAfter: state({ gold: 6 }),
+    };
+    const long = spendPlanLine(
+      { steps: [step, step, step, step, step, step], goldLeft: 0, truncated: false },
+      cards,
+    );
+    expect(long).toContain('…и ещё 2');
+    expect(long.split('→')).toHaveLength(5);
+  });
+
+  it('план обрывается на обновлении витрины и говорит об этом', () => {
+    const s = state({
+      gold: 7,
+      board: [shopMinion(1, 'BODY_1')],
+      shop: [
+        shopMinion(10, 'BODY_3', { attack: 5, health: 5 }),
+        shopMinion(11, 'BODY_2', { attack: 4, health: 4 }),
+      ],
+    });
+    const plan = spendPlan(s, deps);
+    expect(plan.truncated).toBe(true);
+    expect(plan.steps.at(-1)?.recommendation.action).toBe('reroll');
+    expect(spendPlanLine(plan, cards)).toContain('дальше по новой витрине');
+  });
+});

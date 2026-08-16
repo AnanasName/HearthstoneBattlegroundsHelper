@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { PositionTarget } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
+import { spendPlan } from '../advisors/tavern/spend.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
 import { DATASET_DIR, DatasetRecorder } from '../dataset/recorder.js';
 import { LiveAdvisor, type LiveAdvisorHandlers } from '../live/advisor.js';
@@ -33,6 +34,7 @@ import {
   noOpponentReason,
   opponentStale,
   planLine,
+  spendPlanLine,
   positionLine,
   recommendationLine,
   situationLine,
@@ -105,6 +107,14 @@ function printSituation(state: GameState, advice: TavernAdvice | null, cards: Ca
   if (state.shop.length > 0) {
     console.log(`   витрина: ${state.shop.map((m) => minionLabel(m, cards)).join('  |  ')}`);
   }
+
+  // План трат — первой строкой: ход состоит из нескольких действий,
+  // и описывать его одним верхним советом значит прятать половину хода.
+  // Правила здесь умолчальные — те же, на которых считает живой советник
+  // (`LiveAdvisor` не даёт их переопределить); если это когда-нибудь
+  // изменится, план поедет вместе с ними, и передавать их надо будет сюда.
+  const spend = spendPlan(state, { cards });
+  if (spend.steps.length >= 2) console.log(`   ▸ ${spendPlanLine(spend, cards)}`);
 
   // План на несколько розыгрышей заменяет отдельные строки «разыграть» —
   // то же правило, что в оверлее: верхняя строка описывает весь ход.

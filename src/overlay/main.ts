@@ -10,6 +10,7 @@ import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import { checkGameSetup, waitingForLogText } from '../ui/setup.js';
 import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
+import { spendPlan } from '../advisors/tavern/spend.js';
 import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.js';
 
 /**
@@ -140,13 +141,22 @@ function start(): void {
   let thinking = false;
   let last: ViewInput['position'] = null;
   let buyCheck: ViewInput['buyCheck'] = null;
+  // План трат считается там же, где строится вид: он всего лишь цепочка тех
+  // же правил на гипотетических состояниях, симулятор ему не нужен. Правила
+  // умолчальные — те же, на которых считает живой советник.
+  let plan: ViewInput['spendPlan'] = null;
   // Предупреждение продукта держится до конца партии: оно про данные,
   // а не про положение дел, и гаснуть с новым советом не должно.
   let warning: string | null = null;
 
   const show = (): void => {
     if (latest === null) return;
-    send(buildView({ state: latest, tavern, thinking, position: last, buyCheck, warning }, cards));
+    send(
+      buildView(
+        { state: latest, tavern, thinking, position: last, buyCheck, warning, spendPlan: plan },
+        cards,
+      ),
+    );
   };
 
   session = startLiveSession(
@@ -164,6 +174,7 @@ function start(): void {
       onTavern: (advice, state) => {
         latest = state;
         tavern = advice;
+        plan = advice === null ? null : spendPlan(state, { cards });
         // Новое положение — прошлый совет по расстановке к нему не относится.
         last = null;
         thinking = false;

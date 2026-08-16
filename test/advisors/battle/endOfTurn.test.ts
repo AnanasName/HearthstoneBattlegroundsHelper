@@ -66,6 +66,23 @@ describe('баффы соседям конца хода', () => {
     expect(b.attack).toBe(5);
   });
 
+  it('приклеенный золотой вариант текста не удваивает бафф (part17)', () => {
+    // Тот же снапшот, что у нашего справочника: у части карт к тексту
+    // приклеена золотая версия («…+{0} Attack.4[x]…+{0}/+{1}»). Сегодня
+    // склеены только заклинания, а здесь читаются миньоны, — но путь мимо
+    // чистки сработал бы тихо, прочитав плейсхолдер золотой версии.
+    const glued = fakeCards({
+      SYLVAR:
+        'At the end of your turn, give adjacent minions +{0} Attack.4[x]' +
+        'At the end of your turn, give adjacent minions +{1} Attack.',
+    });
+    const board = [
+      minion(1, { cardId: 'PLAIN' }),
+      minion(2, { cardId: 'SYLVAR', scriptData: [1, 9, null, null, null, null] }),
+    ];
+    expect(endOfTurnAuraGains(board, glued).get(2)).toBe(1);
+  });
+
   it('без носителей вход возвращается как есть, без копирования', () => {
     const board = [minion(1, { cardId: 'PLAIN' })];
     const gains = endOfTurnAuraGains(board, cards);
