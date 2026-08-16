@@ -82,7 +82,19 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // без цели перекладывал выбор на игрока (part12).
   const target =
     r.targetMinion == null ? '' : ` → на ${minionLabel(r.targetMinion, cards)}`;
-  return `${ACTION_LABEL[r.action]}${what}${price}${victim}${magnet}${target}`;
+  // Ветвь модального «Choose One» — там же и по той же причине: игра
+  // спрашивает «Булава или Щит», и совет обязан отвечать (part19).
+  // Две ветви в поле означают «равны» — тогда строка называет обе.
+  const list = r.spellBranches ?? [];
+  const branchLabel = (b: { name: string; label: string }): string =>
+    b.label === '' ? b.name : `${b.name} ${b.label}`;
+  const branch =
+    list.length === 0
+      ? ''
+      : list.length === 1
+        ? ` → ${branchLabel(list[0] as { name: string; label: string })}`
+        : ` → ${list.map(branchLabel).join(' либо ')} (равны)`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

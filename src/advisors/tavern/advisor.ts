@@ -77,6 +77,16 @@ export interface Recommendation {
    * перекладывал выбор на игрока (part12).
    */
   readonly targetMinion?: Minion | null;
+  /**
+   * Какую ветвь брать у модального заклинания «Choose One».
+   *
+   * Отдельным полем по той же причине, что и цель: оверлей показывает
+   * короткую строку действия, а «Alliance Flag» без ветви оставлял игрока
+   * с выбором «Булава или Щит» наедине (part19, ход 7). Список из двух
+   * элементов означает, что ветви равны по нашей шкале и выбор честно
+   * возвращается игроку.
+   */
+  readonly spellBranches?: readonly SpellBranch[];
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -863,14 +873,48 @@ function ownValue(
   return value.total - value.copies;
 }
 
-/** Слабейший свой — кандидат на продажу, когда борд полон. */
+/**
+ * Аура на ЧУЖИХ: ценность миньона — то, что он делает с остальным бордом,
+ * а не собственное тело. Признак — механика `AURA` в снапшоте, кроме аур
+ * О СЕБЕ («Has +{0}/+{1} for each…»), у которых эффект и есть статы.
+ *
+ * В пуле 17 карт с AURA, и разделяются они этим признаком начисто: восемь
+ * пумпят себя (Eternal Knight, Abyssal Bruiser, Maritime Extortionist…),
+ * девять усиливают чужое (Brann «Your Battlecries trigger twice», Titus
+ * «Your Deathrattles trigger an extra time», Drakkari Enchanter, Timewarped
+ * Swirler…).
+ */
+function isAuraOverOthers(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
+  const info = cards.info(m.cardId);
+  if (!(info?.mechanics.includes('AURA') ?? false)) return false;
+  const text = info?.text ?? '';
+  return !rules.selfAuraWords.some((w) => new RegExp(w, 'i').test(text));
+}
+
+/**
+ * Слабейший свой — кандидат на продажу, когда борд полон.
+ *
+ * Ауры на чужих в жертвы не идут, пока есть хоть одно обычное тело (part19,
+ * ход 27). Наша шкала меряет ТЕЛА: тир, статы, ключевые слова. У Бранна
+ * Бронзоборода тело 27/29 при борде в сотни статов — по шкале он слабейший
+ * и первым уходил в продажу, хотя ценность его в том, что он удваивает
+ * боевые кличи ВСЕХ будущих покупок (в витрине того хода стоял Mind Muck
+ * с кличем-поглощением). Продавать по числу, про которое сами знаем, что
+ * оно не про эту карту, — это не осторожность, а ошибка.
+ *
+ * Если весь борд из таких аур, выбор честно возвращается к слабейшему
+ * из них: место под покупку взять всё равно откуда-то надо. Тот же приём,
+ * что у цели провокации с миньонами-движками (part15).
+ */
 export function weakestOwn(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
 ): { minion: Minion; value: number } | null {
   if (state.board.length === 0) return null;
-  return state.board
+  const bodies = state.board.filter((m) => !isAuraOverOthers(m, deps.cards, rules));
+  const pool = bodies.length > 0 ? bodies : state.board;
+  return pool
     .map((m) => ({ minion: m, value: ownValue(m, state, deps, rules) }))
     .reduce((a, b) => (b.value < a.value ? b : a));
 }
@@ -1516,8 +1560,26 @@ export function freezeRule(
   //
   // Полный борд эту ветку выключает: телу неоткуда взяться месту, а какой
   // миньон придёт — заранее неизвестно, и сравнить его с жертвой нечем.
+  //
+  // А вот подъём таверны её НЕ выключает, и это правка part19 (ход 3). Запрет
+  // на заморозку в ход подъёма — про миньонов: свежая витрина будет нового
+  // тира, и держать старых соплеменников ради племени значит менять тир
+  // на племя. Заклинания в свежей витрине не будет ВООБЩЕ — ни нового тира,
+  // ни старого, — и терять его подъём не повод. Игрок морозил Enchanted Lasso
+  // по совету на ходу 1, поднял таверну на ходу 3, и совет исчез, хотя
+  // заморозку каждый ход надо продлевать заново, — на что он и указал.
+  //
+  // Порог у заклинания свой, и это второе следствие того же наблюдения:
+  // заклинание — ДОПОЛНИТЕЛЬНОЕ действие, а не замена покупке. Замороженную
+  // витрину следующего хода всё так же покупают; теряется не покупка,
+  // а РАЗНИЦА между свежей картой нового тира (её и обещает `threshold`)
+  // и лучшей из нынешних. Сравнивать двухзолотое тело с целой свежей картой
+  // значило требовать от него платы за то, чего заморозка не отнимает.
+  const bestShopValue = valued[0]?.value ?? 0;
+  const spellThreshold = Math.max(0, threshold - bestShopValue);
+
   const spellKeeper =
-    state.board.length >= rules.boardSize || justLevelled
+    state.board.length >= rules.boardSize
       ? undefined
       : state.shopSpells
           .flatMap((spell) => {
@@ -1527,19 +1589,24 @@ export function freezeRule(
             // Заморозка судится не сегодняшним золотом, а тем ходом, ради
             // которого держат витрину: там хватит и на покупку, и на неё.
             const { score } = givesMinionValue(state, deps, rules, spell.cost, false);
-            return score >= threshold ? [{ spell, score }] : [];
+            return score >= spellThreshold ? [{ spell, score: score - spellThreshold }] : [];
           })
           .sort((a, b) => b.score - a.score)[0];
 
-  // Между миньоном и заклинанием выбирает та же шкала очков.
-  if (spellKeeper !== undefined && (best === undefined || spellKeeper.score > best.value)) {
+  // Между миньоном и заклинанием выбирает превышение над своим порогом:
+  // пороги у них разные, и сравнивать сырые очки значило бы сравнивать
+  // ответы на разные вопросы.
+  if (
+    spellKeeper !== undefined &&
+    (best === undefined || spellKeeper.score > best.value - threshold)
+  ) {
     const spellName =
       deps.cards.info(spellKeeper.spell.cardId)?.name ?? spellKeeper.spell.cardId;
     return {
       action: 'freeze',
       minion: null,
       spellCardId: spellKeeper.spell.cardId,
-      score: spellKeeper.score - threshold,
+      score: spellKeeper.score,
       cost: 0,
       requiresSlot: false,
       sellFirst: null,
@@ -1884,6 +1951,152 @@ export interface SpellEffect {
    * и прежний разбор возвращал null — заклинание было невидимо целиком.
    */
   readonly givesMinion: boolean;
+  /**
+   * Ветви модального заклинания «Choose One», в порядке снапшота.
+   *
+   * Пусто у обычного заклинания. У модального остальные поля эффекта —
+   * это поля ВЫБРАННОЙ ветви (`chosen`), а не суммы обеих: суммировать
+   * их было тихо неверно («+{0}/+{1}; or +{2}/+{3}» у Alliance Flag
+   * складывалось в +8 статов вместо +4).
+   */
+  readonly branches: readonly SpellBranch[];
+  /**
+   * Индекс выбранной ветви, или `null` — ветви равны по нашей шкале
+   * и разделить их нечем. Тогда эффект взят от первой (они равны),
+   * а совет честно называет обе.
+   */
+  readonly chosen: number | null;
+}
+
+/** Ветвь «Choose One» — отдельная карта снапшота (`…t` и `…t2`). */
+export interface SpellBranch {
+  readonly cardId: string;
+  readonly name: string;
+  /** Короткая подпись действия: «+3/+1» у Allied Mace. Пусто, если не статы. */
+  readonly label: string;
+}
+
+/**
+ * Пара «+X/+Y» из текста: атака и здоровье по отдельности.
+ *
+ * Сумма статов для оценки и так считается, а раздельные числа нужны двум
+ * вещам: подписать ветвь «Choose One» словами игрока («+3/+1») и разделить
+ * ветви с одинаковой суммой (`buffSplitPreference`). Плейсхолдер — индекс
+ * в теги сущности, как везде.
+ */
+function statPair(
+  text: string,
+  scriptData: readonly (number | null)[],
+): { readonly attack: number; readonly health: number } | null {
+  const m = /\+(?:\{(\d)\}|(\d+))\s*\/\s*\+(?:\{(\d)\}|(\d+))/.exec(text);
+  if (m === null) return null;
+  const num = (placeholder: string | undefined, literal: string | undefined): number =>
+    placeholder === undefined ? Number(literal ?? 0) : (scriptData[Number(placeholder)] ?? 0);
+  return { attack: num(m[1], m[2]), health: num(m[3], m[4]) };
+}
+
+/**
+ * Очки ветви — только чтобы сравнить ветви между собой.
+ *
+ * Настоящая ценность заклинания считается в `spellRules`/`shopSpellRules`
+ * с ценой и состоянием; здесь нужен один скаляр на ветвь, и он собран
+ * из тех же весов. «Даёт миньона» оценивается ценой покупки: точную
+ * ценность (среднее по витрине) отсюда не видно — витрины у разбора нет.
+ */
+function branchScore(effect: SpellEffect, rules: TavernRules): number {
+  return (
+    (effect.transforms ? rules.value.transform : 0) +
+    effect.stats * rules.value.perStatPoint +
+    (effect.divineShield ? rules.value.divineShield : 0) +
+    (effect.grantsTaunt ? rules.value.taunt : 0) +
+    effect.gold * rules.goldPointValue +
+    (effect.givesMinion ? rules.minionCost * rules.goldPointValue : 0)
+  );
+}
+
+/**
+ * Модальное заклинание «Choose One»: какую ветвь советовать.
+ *
+ * Ветви лежат в снапшоте отдельными картами с теми же плейсхолдерами:
+ * `BG31_880` («Choose One — Give a minion +{0}/+{1}; or +{2}/+{3}») — это
+ * `BG31_880t` (Allied Mace, «+{0}/+{1}») и `BG31_880t2` (Allied Buckler,
+ * «+{2}/+{3}»). Соглашение проверено на всех пяти модальных заклинаниях
+ * пула; порядок ветвей в тексте родителя с порядком карт не совпадает
+ * (у Boundless Potential наоборот), поэтому читается текст каждой ветви,
+ * а не позиция.
+ *
+ * Случай part19 (ход 7): совет «РАЗЫГРАТЬ Alliance Flag → на Wrath Weaver»
+ * молчал о том, какой из двух эффектов брать, — игрок остался с выбором
+ * один на один, на что и указал. Заодно чинится тихий просчёт: сумма
+ * статов родителя складывала ОБЕ ветви (+3/+1 и +1/+3 = +8 статов вместо
+ * реальных +4).
+ *
+ * Выбор: сперва по нашей же шкале; при равенстве — по разделению статов
+ * (`buffSplitPreference`, замер `npm run spike:buff`); если и это не
+ * разделяет — `chosen: null`, и совет честно называет обе ветви.
+ */
+function chooseOneEffect(
+  cardId: string,
+  scriptData: readonly (number | null)[],
+  cards: CardIndex,
+  rules: TavernRules,
+): SpellEffect | null {
+  const parsed = ['t', 't2']
+    .map((suffix) => cards.info(cardId + suffix))
+    .flatMap((info) => {
+      if (info === null) return [];
+      const effect = spellEffect(info.id, scriptData, cards, rules);
+      if (effect === null) return [];
+      const pair = statPair(info.text ?? '', scriptData);
+      return [
+        {
+          effect,
+          pair,
+          branch: {
+            cardId: info.id,
+            name: info.name,
+            label: pair === null ? '' : `+${String(pair.attack)}/+${String(pair.health)}`,
+          },
+        },
+      ];
+    });
+
+  const first = parsed[0];
+  if (first === undefined) return null;
+  const branches = parsed.map((p) => p.branch);
+  if (parsed.length === 1) return { ...first.effect, branches, chosen: 0 };
+
+  const scores = parsed.map((p) => branchScore(p.effect, rules));
+  const bestScore = Math.max(...scores);
+  const leaders = scores.flatMap((s, i) => (s === bestScore ? [i] : []));
+
+  if (leaders.length === 1) {
+    const only = leaders[0] ?? 0;
+    return { ...(parsed[only]?.effect ?? first.effect), branches, chosen: only };
+  }
+
+  // Ветви равны по шкале: разделить их может только разделение статов —
+  // одна и та же сумма, розданная по-разному (+3/+1 против +1/+3).
+  const preference = rules.buffSplitPreference;
+  if (preference !== null) {
+    const split = leaders.flatMap((i) => {
+      const pair = parsed[i]?.pair;
+      return pair === undefined || pair === null ? [] : [{ i, pair }];
+    });
+    if (split.length === leaders.length && split.length > 1) {
+      const key = (p: { attack: number; health: number }): number =>
+        preference === 'attack' ? p.attack : p.health;
+      const best = split.reduce((a, b) => (key(b.pair) > key(a.pair) ? b : a));
+      const worst = split.reduce((a, b) => (key(b.pair) < key(a.pair) ? b : a));
+      if (key(best.pair) > key(worst.pair)) {
+        return { ...(parsed[best.i]?.effect ?? first.effect), branches, chosen: best.i };
+      }
+    }
+  }
+
+  // Разделить нечем. Эффект берётся от первой ветви — они равны, и это
+  // всё равно честнее суммы обеих, — а совет называет обе.
+  return { ...first.effect, branches, chosen: null };
 }
 
 export function spellEffect(
@@ -1892,8 +2105,16 @@ export function spellEffect(
   cards: CardIndex,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): SpellEffect | null {
-  const text = cards.info(cardId)?.text ?? '';
+  const info = cards.info(cardId);
+  const text = info?.text ?? '';
   if (text === '') return null;
+
+  // Модальное заклинание разбирается по ветвям, а не по склеенному тексту
+  // родителя. Рекурсии тут нет: у самих ветвей механики CHOOSE_ONE нет.
+  if (info?.mechanics.includes('CHOOSE_ONE') === true) {
+    const modal = chooseOneEffect(cardId, scriptData, cards, rules);
+    if (modal !== null) return modal;
+  }
 
   const gold = /gain (\d+) gold/i.exec(text);
 
@@ -1950,6 +2171,8 @@ export function spellEffect(
     grantsTaunt,
     untargeted,
     givesMinion,
+    branches: [],
+    chosen: null,
   };
 }
 
@@ -2068,6 +2291,55 @@ function spellTargetOn(
 }
 
 /**
+ * Кого усилит заклинание-бафф — та же цель, что называют советы.
+ *
+ * Нужно замеру `spike:buff`: он сравнивает «+3/+1 против +1/+3» ровно
+ * на том миньоне, которого выберет советник, а не на произвольном.
+ */
+export function buffTarget(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Minion | null {
+  const buff: SpellEffect = {
+    gold: 0,
+    stats: 4,
+    divineShield: false,
+    destroysFriendly: false,
+    destroyRace: null,
+    transforms: false,
+    grantsTaunt: false,
+    untargeted: false,
+    givesMinion: false,
+    branches: [],
+    chosen: null,
+  };
+  return spellTargetOn(buff, state, deps, rules)?.target ?? null;
+}
+
+/**
+ * Что сказать о ветвях модального заклинания: поле совета и слова причины.
+ *
+ * Одно место на руку и на витрину — совет об одном и том же заклинании
+ * не имеет права звучать по-разному оттого, где оно лежит.
+ */
+function branchAdvice(effect: SpellEffect): {
+  readonly branches: readonly SpellBranch[];
+  readonly note: string;
+} {
+  const label = (b: SpellBranch): string => (b.label === '' ? b.name : `${b.name} ${b.label}`);
+  if (effect.branches.length === 0) return { branches: [], note: '' };
+
+  const chosen = effect.chosen === null ? undefined : effect.branches[effect.chosen];
+  if (chosen !== undefined) return { branches: [chosen], note: `ветвь ${label(chosen)}` };
+
+  return {
+    branches: effect.branches,
+    note: `ветви равны по нашей шкале: ${effect.branches.map(label).join(' или ')}`,
+  };
+}
+
+/**
  * Правила розыгрыша заклинаний из руки.
  *
  * Бой заклинания не играет, но забытая в руке монетка — потерянное золото,
@@ -2162,6 +2434,7 @@ export function spellRules(
 
     const aimed = spellTargetOn(effect, state, deps, rules);
     if (aimed === null) return [];
+    const branch = branchAdvice(effect);
 
     return [
       {
@@ -2169,6 +2442,7 @@ export function spellRules(
         minion: null,
         spellCardId: spell.cardId,
         targetMinion: aimed.target,
+        spellBranches: branch.branches,
         score,
         cost: spell.cost,
         requiresSlot: false,
@@ -2177,6 +2451,7 @@ export function spellRules(
           `${name} — ${effect.transforms ? 'замена' : 'усиление перед боем'}` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
+          (branch.note === '' ? '' : `, ${branch.note}`) +
           `, ${aimed.note}`,
       },
     ];
@@ -2259,12 +2534,14 @@ export function shopSpellRules(
     if (score <= 0) return [];
     const aimed = spellTargetOn(effect, state, deps, rules);
     if (aimed === null) return [];
+    const branch = branchAdvice(effect);
     return [
       {
         action: 'buy' as const,
         minion: null,
         spellCardId: spell.cardId,
         targetMinion: aimed.target,
+        spellBranches: branch.branches,
         score,
         cost: spell.cost,
         requiresSlot: false,
@@ -2273,6 +2550,7 @@ export function shopSpellRules(
           `${name} за ${String(spell.cost)} — ${effect.transforms ? 'замена' : 'усиление'}` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
+          (branch.note === '' ? '' : `, ${branch.note}`) +
           `, ${aimed.note}`,
       },
     ];

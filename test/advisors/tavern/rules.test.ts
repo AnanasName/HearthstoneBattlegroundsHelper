@@ -1269,6 +1269,10 @@ describe('заклинания руки', () => {
       grantsTaunt: false,
       untargeted: false,
       givesMinion: false,
+      // Ветви — только у модального «Choose One» (part19); у обычного
+      // заклинания их нет, и выбирать нечего.
+      branches: [],
+      chosen: null,
     };
     expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
     expect(spellEffect('PH', [10, null], idx)).toEqual({
@@ -1328,6 +1332,8 @@ describe('заклинания руки', () => {
       grantsTaunt: false,
       untargeted: false,
       givesMinion: false,
+      branches: [],
+      chosen: null,
     });
     expect(spellEffect('ANYKILL', [], idx)).toMatchObject({
       destroysFriendly: true,

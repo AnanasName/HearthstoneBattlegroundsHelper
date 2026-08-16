@@ -361,6 +361,38 @@ export interface TavernRules {
   readonly selfTriggerWords: readonly string[];
 
   /**
+   * Признаки ауры О СЕБЕ: «Has +{0}/+{1} for each…».
+   *
+   * Механика `AURA` в снапшоте стоит у двух разных пород карт. Одни усиливают
+   * ЧУЖОЕ («Your Battlecries trigger twice» — Брann, «Your Deathrattles
+   * trigger an extra time» — Titus): их ценность — эффект, а тело случайно.
+   * Другие пумпят СЕБЯ по счётчику («Has +{0}/+{1} for each friendly Eternal
+   * Knight that died») — у них эффект и есть статы, и мерить их статами
+   * правильно.
+   *
+   * Разделение проверено по всему пулу: 17 карт с AURA, 8 из них пишут
+   * «Has +», и ни одна из девяти «чужих» этих слов не содержит.
+   */
+  readonly selfAuraWords: readonly string[];
+
+  /**
+   * Что брать, когда усиление даёт ОДНУ И ТУ ЖЕ сумму статов, розданную
+   * по-разному: «+3/+1» или «+1/+3».
+   *
+   * Нужно модальным заклинаниям «Choose One» (part19, ход 7: Alliance Flag —
+   * Allied Mace +3/+1 против Allied Buckler +1/+3): по нашей шкале обе ветви
+   * стоят ровно одинаково, а выбрать игроку надо одну, и советник об этом
+   * молчал.
+   *
+   * Значение НЕ выдумано и не взято из чужого мнения: оно замерено
+   * симулятором на точках решения всех партий текущего билда
+   * (`npm run spike:buff`, порог и метод объявлены в самом замере
+   * до прогона). `null` означало бы «замер разницы не нашёл» — тогда
+   * совет честно называет обе ветви и выбор оставляет игроку.
+   */
+  readonly buffSplitPreference: 'attack' | 'health' | null;
+
+  /**
    * Со скольких доказанных племён состав партии считается «известным».
    *
    * Состав накапливается по однoплеменным миньонам витрины (`lobbyRaces`)
@@ -566,6 +598,11 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   selfTriggerWords: ['\\b(?:after|whenever) this\\b'],
 
+  selfAuraWords: ['\\bhas \\+'],
+
+  // Замер `npm run spike:buff` — значение ставится по его итогу.
+  buffSplitPreference: null,
+
   lobbyRacesKnownAfter: 3,
 
   goldPointValue: 3,
@@ -588,16 +625,26 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   },
 
   // Только механики с фактурой: хрипы (Titus) и ралли (Deathstrider) —
-  // part15, прямая сторона; заклинания таверны — part18, обратная.
+  // part15, прямая сторона; заклинания таверны — part18, обратная;
+  // боевые кличи — part19.
   //
   // У Spellcraft в снапшоте имя механики `BACON_SPELLCRAFT_ID`, и называют
   // её тексты по-разному: «Spellcraft:» у носителей, «Tavern spell» и «cast
   // a spell» у тех, кто заклинаниями живёт (Abyssal Bruiser, Fleeing
   // Fugitive). В пуле такие тексты у 97 карт — связь массовая, а не частная.
+  //
+  // Клич назван словами у Бранна Бронзоборода («Your Battlecries trigger
+  // twice») и Kalecgos («After you trigger a Battlecry, give your Dragons
+  // +X/+Y»); носителей самой механики BATTLECRY в пуле 46. Обе стороны
+  // работают той же двусторонней связью, что у заклинаний (part18): Бранн
+  // на борде делает кличевого кандидата в витрине ценнее, а кличи на борде —
+  // ценнее Бранна. Собственный «Battlecry:» в тексте синергией не считается
+  // (карта описывает себя) — это общее правило `textMechanicsOf`.
   mechanicTextWords: {
     DEATHRATTLE: 'deathrattles?',
     BACON_RALLY: 'rally',
     BACON_SPELLCRAFT_ID: 'spellcraft|tavern spells?|cast a spell',
+    BATTLECRY: 'battlecr(?:y|ies)',
   },
 
   rerollMarginOverTier: 2,
