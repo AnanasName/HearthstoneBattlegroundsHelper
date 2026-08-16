@@ -96,7 +96,7 @@ function main(): void {
   const cards = loadCardIndex();
   const simulator = createBattleSimulator();
 
-  const diffs: number[] = [];
+  const diffs: { readonly turn: number; readonly diff: number }[] = [];
   let skipped = 0;
 
   for (const path of FIXTURES) {
@@ -127,40 +127,62 @@ function main(): void {
         return sum / bases.length;
       };
 
-      diffs.push(run(SPLIT.attack, SPLIT.health) - run(SPLIT.health, SPLIT.attack));
+      diffs.push({
+        turn: state.turn,
+        diff: run(SPLIT.attack, SPLIT.health) - run(SPLIT.health, SPLIT.attack),
+      });
       used += 1;
     }
 
     console.log(`${(path.split('/')[2] ?? path).padEnd(8)} точек ${String(used).padStart(3)}`);
   }
 
-  const n = diffs.length;
-  if (n === 0) {
+  if (diffs.length === 0) {
     console.log('точек не нашлось');
     return;
   }
-  const mean = diffs.reduce((a, b) => a + b, 0) / n;
-  const variance = diffs.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1);
-  const se = Math.sqrt(variance / n);
-  const moved = diffs.filter((d) => Math.abs(d) > 0.05).length;
+
+  const summary = (
+    rows: readonly { readonly diff: number }[],
+  ): { n: number; mean: number; se: number; moved: number } => {
+    const n = rows.length;
+    const mean = rows.reduce((a, b) => a + b.diff, 0) / n;
+    const variance = rows.reduce((a, b) => a + (b.diff - mean) ** 2, 0) / Math.max(1, n - 1);
+    return { n, mean, se: Math.sqrt(variance / n), moved: rows.filter((r) => Math.abs(r.diff) > 0.05).length };
+  };
+
+  const all = summary(diffs);
 
   console.log('\n═══ итог ═══');
-  console.log(`  точек решения:            ${String(n)} (пропущено ${String(skipped)})`);
-  console.log(`  из них разность ненулевая: ${String(moved)}`);
+  console.log(`  точек решения:            ${String(all.n)} (пропущено ${String(skipped)})`);
+  console.log(`  из них разность ненулевая: ${String(all.moved)}`);
   console.log(
     `  среднее (+${String(SPLIT.attack)}/+${String(SPLIT.health)} минус ` +
-      `+${String(SPLIT.health)}/+${String(SPLIT.attack)}): ${mean.toFixed(3)} п.п.`,
+      `+${String(SPLIT.health)}/+${String(SPLIT.attack)}): ${all.mean.toFixed(3)} п.п.`,
   );
-  console.log(`  стандартная ошибка:       ${se.toFixed(3)} п.п.`);
-  console.log(`  минимальный различимый:   ${(2 * se).toFixed(3)} п.п. (порог приёмки)`);
+  console.log(`  стандартная ошибка:       ${all.se.toFixed(3)} п.п.`);
+  console.log(`  минимальный различимый:   ${(2 * all.se).toFixed(3)} п.п. (порог приёмки)`);
   console.log(
     `\n  ВЕРДИКТ: ${
-      Math.abs(mean) > 2 * se
-        ? mean > 0
+      Math.abs(all.mean) > 2 * all.se
+        ? all.mean > 0
           ? 'при равной сумме брать АТАКУ (buffSplitPreference: attack)'
           : 'при равной сумме брать ЗДОРОВЬЕ (buffSplitPreference: health)'
         : 'разницы не видно — buffSplitPreference остаётся null'
     }`,
+  );
+
+  // Диагностика, НЕ предрегистрированная и на вердикт не влияющая: ход 1
+  // в наших сверках — другой режим (бой 1×1, исходы насыщены), и он умеет
+  // тянуть на себя почти всю сумму квадратов. Печатается, чтобы «не нашли»
+  // нельзя было спутать с «нашли, но спрятали в шуме первого хода».
+  const firstTurn = diffs.filter((d) => d.turn === 1).length;
+  const late = summary(diffs.filter((d) => d.turn > 1));
+  console.log(
+    `\n  диагностика (не предрегистрирована), без хода 1: ${String(late.n)} точек ` +
+      `(ход 1 дал ${String(firstTurn)}: до первого боя цели нет, и такие точки` +
+      ' до замера не доходят вовсе), ' +
+      `среднее ${late.mean.toFixed(3)} п.п. при пороге ${(2 * late.se).toFixed(3)}`,
   );
   console.log(
     '\n  Оговорки — в шапке файла: считается только ближайший бой, точка\n' +

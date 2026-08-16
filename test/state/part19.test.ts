@@ -12,6 +12,7 @@ import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
+import { recommendationLine } from '../../src/ui/format.js';
 import type { GameState, Minion } from '../../src/state/types.js';
 import { part19Game } from '../fixtures.js';
 
@@ -130,6 +131,13 @@ describe('part19: заморозка после подъёма, ветви Choos
     // обе — если по нашей шкале они равны и разделить нечем.
     expect((play?.spellBranches ?? []).length).toBeGreaterThan(0);
     expect(play?.reason).toContain('ветв');
+
+    // И то же самое видно в короткой строке действия — её показывает
+    // оверлей, и молчала именно она.
+    if (play === undefined) return;
+    const line = recommendationLine(play, cards);
+    expect(line).toContain('Allied Mace +3/+1');
+    expect(line).toContain('на Wrath Weaver');
   });
 
   it('ход 9: ралли вторым номером — совет подтверждается перебором (пункт 3)', () => {
@@ -140,26 +148,27 @@ describe('part19: заморозка после подъёма, ветви Choos
     // против лучшей из тех, где камп стоит первым.
     expect(turn9).not.toBeNull();
     if (turn9 === null) return;
+    const state = turn9;
 
-    expect(turn9.board.map((m) => m.cardId)).toEqual([
+    expect(state.board.map((m) => m.cardId)).toEqual([
       'BG33_886',
       'BGS_004',
       'BG26_174_G',
       'BG35_150',
     ]);
 
-    const question = battleQuestion(turn9);
+    const question = battleQuestion(state);
     expect(question).not.toBeNull();
     if (question === null) return;
 
     const simulator = sharedBattleSimulator();
-    const gains = endOfTurnAuraGains(turn9.board, simulator.cards);
+    const gains = endOfTurnAuraGains(state.board, simulator.cards);
     const bases = question.setups.map((s) => toBattleInfo(s, 1));
     const per = Math.floor(6000 / bases.length);
 
     const outcome = (order: readonly number[]): number => {
       const board = withEndOfTurnAuras(
-        order.map((i) => turn9.board[i] as Minion),
+        order.map((i) => state.board[i] as Minion),
         gains,
       );
       let sum = 0;
