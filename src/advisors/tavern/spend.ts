@@ -33,9 +33,11 @@ import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
  *    не меняет, а решается в конце хода: после трат видно, что осталось
  *    не по карману. Пока есть что делать с золотом, она ждёт — иначе план
  *    обрывался бы на ней, не потратив ни монеты;
- *  - **продажа** отдельным шагом не планируется. Она уже входит в покупку
- *    на полный борд (`sellFirst`), а самостоятельный размен «продать, чтобы
- *    купить» правила и так советуют одним советом.
+ *  - **продажа** входит в план отдельным шагом только там, где её советуют
+ *    правила: размен на полном борде (`sellRule`) и карта, чья ценность
+ *    реализуется продажей (`sellForGoldRule`, part18). Продажа ради места
+ *    под конкретную покупку по-прежнему живёт внутри самой покупки
+ *    (`sellFirst`) и отдельным шагом не дублируется.
  */
 
 /** Шаг плана трат. */
@@ -68,7 +70,7 @@ export interface SpendPlan {
 }
 
 /** Действия, которые в план трат не входят вовсе. */
-const SKIPPED_ACTIONS: ReadonlySet<Recommendation['action']> = new Set(['pass', 'sell']);
+const SKIPPED_ACTIONS: ReadonlySet<Recommendation['action']> = new Set(['pass']);
 
 const withoutEntity = (list: readonly Minion[], entityId: number): Minion[] =>
   list.filter((m) => m.entityId !== entityId);
@@ -245,6 +247,22 @@ export function applyRecommendation(
     case 'reroll':
       // Витрина стала другой: всё, что мы про неё знали, больше не про неё.
       return { state: paid({ shop: [] }), opaque: true, terminal: true };
+
+    case 'sell': {
+      // Продажа — шаг хода, а не только освобождение места: карта, чья
+      // ценность в продаже, отдаёт золото и обещанное (part18, ход 5).
+      // Кого продать, решило правило; здесь только последствия.
+      if (rec.minion === null) return null;
+      return {
+        state: paid({
+          gold: state.gold + rules.sellGold,
+          board: withoutEntity(state.board, rec.minion.entityId),
+        }),
+        // Что придёт взамен по тексту карты, решает игра.
+        opaque: true,
+        terminal: false,
+      };
+    }
 
     case 'freeze':
       // Заморозка ничего не тратит и ничего не меняет — она про следующий

@@ -264,16 +264,46 @@ function textMechanicsOf(cardId: string, cards: CardIndex, rules: TavernRules): 
     .map(([mech]) => mech);
 }
 
-/** Сколько своих миньонов несёт хотя бы одну из механик (по снапшоту их карт). */
+/**
+ * Свои миньоны, связанные с кандидатом МЕХАНИКОЙ, — в обе стороны.
+ *
+ * Прямая сторона: текст кандидата называет механику, а свои её несут
+ * (Titus Rivendare «Your Deathrattles trigger an extra time» на борде
+ * хрипов, part15).
+ *
+ * Обратная сторона: кандидат НЕСЁТ механику, а тексты своих её называют.
+ * Случай part18 (ход 17): борд наг на заклинаниях — Abyssal Bruiser
+ * («+{0}/+{1} for each Tavern spell you've cast»), Fleeing Fugitive
+ * («Whenever you cast a spell on this…»), — а в витрине Deep-Sea Angler,
+ * нага со Spellcraft, то есть источник этих самых заклинаний. Связь была
+ * невидима, и советник предпочёл ему демона на два тира выше, «который
+ * совсем не подходит композиции», — на что игрок и указал. Двусторонность
+ * здесь та же, что у связи по имени карты (`namedCardMates`).
+ *
+ * Миньон, который сам несёт механику и сам же её называет («Spellcraft: …»),
+ * в обратную сторону не считается: он производитель, а не потребитель, —
+ * то же исключение, что у собственной механики в прямую сторону.
+ */
 function boardMatesOfMechanics(
   mechanics: readonly string[],
+  candidate: Minion,
   board: readonly Minion[],
   cards: CardIndex,
+  rules: TavernRules,
 ): number {
-  if (mechanics.length === 0) return 0;
+  const own = cards.info(candidate.cardId)?.mechanics ?? [];
+  const named = Object.entries(rules.mechanicTextWords).filter(([mech]) => own.includes(mech));
+
   return board.filter((m) => {
-    const theirs = cards.info(m.cardId)?.mechanics ?? [];
-    return mechanics.some((mech) => theirs.includes(mech));
+    const info = cards.info(m.cardId);
+    const theirs = info?.mechanics ?? [];
+    if (mechanics.some((mech) => theirs.includes(mech))) return true;
+
+    const text = info?.text ?? '';
+    if (text === '') return false;
+    return named.some(
+      ([mech, word]) => !theirs.includes(mech) && new RegExp(`\\b(?:${word})\\b`, 'i').test(text),
+    );
   }).length;
 }
 
@@ -436,12 +466,16 @@ export function minionValue(
   );
   const textTribe = textMates * w.perTextTribeMate;
 
-  // Механика, названная словами в тексте, — та же связь, что у племён:
-  // Titus Rivendare без неё был слабейшим на борде хрипов (part15, ход 17).
+  // Механика — та же связь, что у племён, и в обе стороны: кандидат её
+  // называет, а свои несут (Titus Rivendare на борде хрипов, part15), либо
+  // кандидат её несёт, а свои называют (нага со Spellcraft на борде,
+  // живущем заклинаниями, part18).
   const textMechMates = boardMatesOfMechanics(
     textMechanicsOf(candidate.cardId, cards, rules),
+    candidate,
     state.board.filter((m) => m.entityId !== candidate.entityId),
     cards,
+    rules,
   );
   const textMech = textMechMates * w.perTextMechMate;
 
@@ -613,6 +647,31 @@ export function buyCostOf(minion: Minion, rules: TavernRules = DEFAULT_TAVERN_RU
  */
 export function rerollCostOf(state: GameState, rules: TavernRules = DEFAULT_TAVERN_RULES): number {
   return state.rerollCost ?? rules.rerollCost;
+}
+
+/**
+ * Есть ли смысл в ПЛАТНОМ обновлении витрины прямо сейчас.
+ *
+ * Смысл появляется, когда найденное будет на что купить: обновление ради
+ * взгляда — это потеря золота, а заморозить найденное значит отдать даром
+ * бесплатное обновление следующего хода. Случай part18 (ход 7, скриншот
+ * игрока): план советовал «подняться за 5 и обновить на оставшийся 1»,
+ * хотя на витрину нового тира этого золота уже не хватало ни на что.
+ * Игрок указал прямо: в ранней игре обновлять нежелательно.
+ *
+ * С `lateRerollTier` правило снимается: в лейте обновление — это поиск
+ * конкретной карты под заморозку, и «не хватит купить сейчас» ему не довод
+ * (part11, тот же игрок: «ценны рероллы позже»). Бесплатное обновление
+ * не тратит ничего и не спрашивается вовсе.
+ */
+export function paidRerollIsUseful(
+  state: GameState,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): boolean {
+  const cost = rerollCostOf(state, rules);
+  if (cost === 0) return true;
+  if (state.techLevel >= rules.lateRerollTier) return true;
+  return state.gold - cost >= rules.minionCost;
 }
 
 /**
@@ -1176,6 +1235,85 @@ export function sellRule(
 }
 
 /**
+ * Правило продажи карты, чья ценность РЕАЛИЗУЕТСЯ ПРОДАЖЕЙ.
+ *
+ * «When you sell this, get a random Tier 1 minion» (River Skipper),
+ * «…get a Water Droplet» (Sellemental): обещанное записано в тексте, но
+ * получить его можно только продав. Прежний `sellRule` продаёт лишь ради
+ * МЕСТА на полном борде, и такие карты держались телом до конца партии.
+ *
+ * Условие продажи — золото должно открыть ЕЩЁ ОДНУ покупку: пять золотых
+ * покупают одного миньона, шесть — двоих. Без этого продажа даёт монету,
+ * которой некуда деться, и теряет тело. Случай part18 (ход 5): скипер 1/1
+ * при пяти золотых — игрок продал его и купил два тела вместо одного тела
+ * и заклинания.
+ *
+ * Удерживаемая ценность считается БЕЗ слагаемого экономики: оно и есть
+ * то, что придёт при продаже, и держать карту ради него — не получить его
+ * никогда.
+ */
+export function sellForGoldRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  if (state.board.length === 0 || state.shop.length === 0) return null;
+
+  // Продажа открывает покупку только если меняет ЧИСЛО доступных покупок.
+  const affordable = (gold: number): number => Math.floor(gold / rules.minionCost);
+  if (affordable(state.gold + rules.sellGold) <= affordable(state.gold)) return null;
+
+  const sellable = state.board.filter((m) => {
+    const text = deps.cards.info(m.cardId)?.text ?? '';
+    if (text === '' || !rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))) {
+      return false;
+    }
+    // Копия, из которой собирается тройка, не продаётся: тройка стоит
+    // больше любого обещания текста, и вторая копия — ставка на неё.
+    return copiesOwned(m, state) === 0;
+  });
+  if (sellable.length === 0) return null;
+
+  // Что купится на открывшееся золото: лучшее в витрине, чего мы ещё не
+  // держим на борде. Цена читается с миньона — скидки видны тегом.
+  const buys = state.shop
+    .filter((m) => buyCostOf(m, rules) <= state.gold + rules.sellGold)
+    .map((m) => ({ minion: m, value: minionValue(m, state, deps, rules).total }))
+    .sort((a, b) => b.value - a.value);
+  const unlocked = buys[affordable(state.gold)] ?? buys.at(-1);
+  if (unlocked === undefined) return null;
+
+  const scored = sellable
+    .map((minion) => {
+      const value = minionValue(minion, { ...state, board: [minion] }, deps, rules);
+      // Экономика этой карты — обещание продажи, а не причина держать.
+      return { minion, retained: value.total - value.economy };
+    })
+    .sort((a, b) => a.retained - b.retained);
+  const victim = scored[0];
+  if (victim === undefined) return null;
+
+  const gain = unlocked.value - victim.retained;
+  if (gain <= 0) return null;
+
+  const name = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
+  const buyName = deps.cards.info(unlocked.minion.cardId)?.name ?? unlocked.minion.cardId;
+  return {
+    action: 'sell',
+    minion: victim.minion,
+    score: gain,
+    cost: 0,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `${name} отдаёт обещанное текстом только при продаже, а золото ` +
+      `${String(state.gold)} → ${String(state.gold + rules.sellGold)} открывает ещё одну ` +
+      `трату (лучшая сейчас — ${buyName}, ${unlocked.value.toFixed(1)}); держать его ` +
+      `дальше — ${victim.retained.toFixed(1)} очков телом`,
+  };
+}
+
+/**
  * Правило обновления витрины.
  *
  * Советуется, когда покупать нечего: лучший кандидат ниже порога. Отдельно
@@ -1189,6 +1327,9 @@ export function rerollRule(
 ): Recommendation | null {
   const cost = rerollCostOf(state, rules);
   if (state.gold < cost) return null;
+  // Обновление ради взгляда — потеря золота: найденное должно быть на что
+  // купить (part18, ход 7).
+  if (!paidRerollIsUseful(state, rules)) return null;
 
   const best =
     state.shop.length === 0
@@ -2557,6 +2698,7 @@ export function adviseTavern(
     darkGiftRule(state, rules),
     spinRule(state, deps, rules, buys),
     sellRule(state, deps, rules),
+    sellForGoldRule(state, deps, rules),
     rerollRule(state, deps, rules),
     freezeRule(state, deps, rules),
     {
@@ -2580,6 +2722,9 @@ export function adviseTavern(
   if (
     sorted[0]?.action === 'pass' &&
     state.gold >= idleRerollCost &&
+    // «Делать нечего» с золотом на покупку — повод искать; с золотом
+    // на один реролл в ранней партии — нет (part18, ход 7).
+    paidRerollIsUseful(state, rules) &&
     state.shop.some((m) => !m.frozen)
   ) {
     sorted.unshift({

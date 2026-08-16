@@ -263,8 +263,11 @@ describe('план трат хода', () => {
     expect(long.split('→')).toHaveLength(5);
   });
 
-  it('план обрывается на обновлении витрины и говорит об этом', () => {
+  it('в лейте план обрывается на обновлении витрины и говорит об этом', () => {
+    // Тир от lateRerollTier: обновление — это поиск конкретной карты под
+    // заморозку, и остаток в одно золото ему не помеха.
     const s = state({
+      techLevel: DEFAULT_TAVERN_RULES.lateRerollTier,
       gold: 7,
       board: [shopMinion(1, 'BODY_1')],
       shop: [
@@ -276,5 +279,24 @@ describe('план трат хода', () => {
     expect(plan.truncated).toBe(true);
     expect(plan.steps.at(-1)?.recommendation.action).toBe('reroll');
     expect(spendPlanLine(plan, cards)).toContain('дальше по новой витрине');
+  });
+
+  it('в ранней партии план не тратит остаток на обновление (part18, ход 7)', () => {
+    // Игрок указал прямо: в ранней игре обновлять нежелательно. Обновление
+    // на последнее золото — это взгляд на витрину, покупать с которой уже
+    // нечем, а заморозить найденное значит отдать бесплатное обновление.
+    const s = state({
+      techLevel: DEFAULT_TAVERN_RULES.lateRerollTier - 1,
+      gold: 7,
+      board: [shopMinion(1, 'BODY_1')],
+      shop: [
+        shopMinion(10, 'BODY_3', { attack: 5, health: 5 }),
+        shopMinion(11, 'BODY_2', { attack: 4, health: 4 }),
+      ],
+    });
+    const plan = spendPlan(s, deps);
+    expect(plan.steps.some((st) => st.recommendation.action === 'reroll')).toBe(false);
+    expect(plan.goldLeft).toBe(1);
+    expect(spendPlanLine(plan, cards)).toContain('остаётся 1 — сгорит');
   });
 });

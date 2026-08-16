@@ -173,6 +173,23 @@ export interface TavernRules {
   readonly economyTextWords: readonly string[];
 
   /**
+   * Признаки карты, чья ценность РЕАЛИЗУЕТСЯ ПРОДАЖЕЙ: «When you sell this,
+   * get a random Tier 1 minion» (River Skipper), «…get a Water Droplet»
+   * (Sellemental).
+   *
+   * Случай part18 (ход 5, скриншот игрока): на борде River Skipper 1/1,
+   * золота 5. План считал его телом и раскладывал пять золотых на покупку
+   * и заклинание; игрок продал скипера — получил золото и обещанного
+   * миньона — и купил ДВА тела. Советник продажу не предлагал вовсе:
+   * `sellRule` срабатывает только на полном борде, ради места.
+   *
+   * Обещанное продажей входит в ценность карты слагаемым `economy`, но
+   * получить его можно, только продав: держать такую карту ради этого
+   * слагаемого — значит не получить его никогда.
+   */
+  readonly sellValueWords: readonly string[];
+
+  /**
    * Признаки боевого эффекта в тексте карты.
    *
    * «Rally:» — эффект старта боя (Bat, Tusked Camper, Glim Guardian);
@@ -501,6 +518,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],
 
+  sellValueWords: ['when you sell this'],
+
   battleTextWords: ['rally:', '(?<!you |your )summons? '],
 
   // «Battlecry: Get two Slimy Shields…» (Oozeling, part16). Строго после
@@ -568,10 +587,17 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     UNDEAD: 'undead',
   },
 
-  // Только механики с фактурой: хрипы (Titus) и ралли (Deathstrider), part15.
+  // Только механики с фактурой: хрипы (Titus) и ралли (Deathstrider) —
+  // part15, прямая сторона; заклинания таверны — part18, обратная.
+  //
+  // У Spellcraft в снапшоте имя механики `BACON_SPELLCRAFT_ID`, и называют
+  // её тексты по-разному: «Spellcraft:» у носителей, «Tavern spell» и «cast
+  // a spell» у тех, кто заклинаниями живёт (Abyssal Bruiser, Fleeing
+  // Fugitive). В пуле такие тексты у 97 карт — связь массовая, а не частная.
   mechanicTextWords: {
     DEATHRATTLE: 'deathrattles?',
     BACON_RALLY: 'rally',
+    BACON_SPELLCRAFT_ID: 'spellcraft|tavern spells?|cast a spell',
   },
 
   rerollMarginOverTier: 2,
