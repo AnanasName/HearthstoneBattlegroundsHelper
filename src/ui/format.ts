@@ -93,7 +93,7 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
       ? ''
       : list.length === 1
         ? ` → ${branchLabel(list[0] as { name: string; label: string })}`
-        : ` → ${list.map(branchLabel).join(' либо ')} (равны)`;
+        : ` → ${list.map(branchLabel).join(' либо ')} (выбор за вами)`;
   return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}`;
 }
 

@@ -2045,16 +2045,14 @@ function chooseOneEffect(
   cards: CardIndex,
   rules: TavernRules,
 ): SpellEffect | null {
-  const parsed = ['t', 't2']
+  const all = ['t', 't2']
     .map((suffix) => cards.info(cardId + suffix))
     .flatMap((info) => {
       if (info === null) return [];
-      const effect = spellEffect(info.id, scriptData, cards, rules);
-      if (effect === null) return [];
       const pair = statPair(info.text ?? '', scriptData);
       return [
         {
-          effect,
+          effect: spellEffect(info.id, scriptData, cards, rules),
           pair,
           branch: {
             cardId: info.id,
@@ -2065,9 +2063,19 @@ function chooseOneEffect(
       ];
     });
 
+  const branches = all.map((p) => p.branch);
+  const parsed = all.flatMap((p) => (p.effect === null ? [] : [{ ...p, effect: p.effect }]));
   const first = parsed[0];
   if (first === undefined) return null;
-  const branches = parsed.map((p) => p.branch);
+
+  // Одну из ветвей разобрать не вышло — сравнивать не с чем. «Не берёмся
+  // судить» здесь честнее, чем «берите ту, которую поняли»: у Boundless
+  // Potential это «Discover a minion of your Tier» против «a Tavern spell
+  // of your Tier», и неоценённая ветвь не значит худшую. Очки при этом
+  // берутся от разобранной — иначе заклинание пропало бы из советов вовсе.
+  if (parsed.length < all.length) {
+    return { ...first.effect, branches, chosen: branches.length === 1 ? 0 : null };
+  }
   if (parsed.length === 1) return { ...first.effect, branches, chosen: 0 };
 
   const scores = parsed.map((p) => branchScore(p.effect, rules));
@@ -2337,9 +2345,14 @@ function branchAdvice(effect: SpellEffect): {
   const chosen = effect.chosen === null ? undefined : effect.branches[effect.chosen];
   if (chosen !== undefined) return { branches: [chosen], note: `ветвь ${label(chosen)}` };
 
+  // «Наша шкала не разделяет» — единственная формулировка, верная в обоих
+  // случаях: и когда ветви стоят поровну (Alliance Flag: +3/+1 против
+  // +1/+3), и когда одну из них оценить нечем (Boundless Potential:
+  // миньон против заклинания таверны). Писать «равны» во втором случае
+  // было бы неправдой.
   return {
     branches: effect.branches,
-    note: `ветви равны по нашей шкале: ${effect.branches.map(label).join(' или ')}`,
+    note: `ветви ${effect.branches.map(label).join(' и ')} наша шкала не разделяет`,
   };
 }
 
@@ -2510,11 +2523,16 @@ export function shopSpellRules(
     if (effect.givesMinion) {
       const { score, average, discounted } = givesMinionValue(state, deps, rules, spell.cost, true);
       const cheaper = rules.minionCost - spell.cost;
+      // Модальное «даёт миньона» (The Road Less Traveled, Boundless
+      // Potential) спросит игрока сразу после покупки — ветви называются
+      // и здесь, а не только у усилений.
+      const branch = branchAdvice(effect);
       return [
         {
           action: 'buy' as const,
           minion: null,
           spellCardId: spell.cardId,
+          spellBranches: branch.branches,
           score,
           cost: spell.cost,
           requiresSlot: false,
@@ -2524,7 +2542,8 @@ export function shopSpellRules(
             `(${average.toFixed(1)})` +
             (discounted && cheaper > 0
               ? `, но на ${String(cheaper)} золота дешевле покупки`
-              : ', и это дешёвое тело, а не лучшее'),
+              : ', и это дешёвое тело, а не лучшее') +
+            (branch.note === '' ? '' : `; ${branch.note}`),
         },
       ];
     }
