@@ -20,6 +20,7 @@
     "spike:field": "tsx src/advisors/position/spikeField.ts",
     "spike:buff": "tsx src/advisors/tavern/spikeBuff.ts",
     "spike:level": "tsx src/advisors/tavern/spikeLevel.ts",
+    "spike:taunt": "tsx src/advisors/tavern/spikeTaunt.ts",
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "validate:tavern": "tsx src/advisors/tavern/validate.ts",
     "validate:spend": "tsx src/advisors/tavern/validateSpend.ts",
