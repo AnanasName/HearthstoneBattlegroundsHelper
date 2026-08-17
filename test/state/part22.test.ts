@@ -203,6 +203,29 @@ describe('part22: рука как позиция, сила героя, удво�
     ).toBe(false);
   });
 
+  /**
+   * Пункт 2, вторая половина: «рекомендует почему-то заморозить жука
+   * из 1 таверны».
+   *
+   * Buzzing Vermin 1/1 первого тира при таверне 2 держался как «свой
+   * по племени» — на борде два зверя. Тот же довод, что у пары в part15:
+   * витрина второго тира предложит зверя не хуже, и отдавать за карту
+   * НИЖЕ тира бесплатное обновление незачем.
+   */
+  it('пункт 2: витрина не морозится ради соплеменника ниже тира таверны', () => {
+    expect(turn5Screenshot).not.toBeNull();
+    if (turn5Screenshot === null) return;
+
+    // Условия жалобы: таверна 2, в витрине зверь первого тира, на борде
+    // два своих зверя — прежде этого хватало на заморозку.
+    expect(turn5Screenshot.techLevel).toBe(2);
+    const vermin = turn5Screenshot.shop.find((m) => m.cardId === 'BG31_803');
+    expect(vermin).toBeDefined();
+    expect(cards.info('BG31_803')?.techLevel).toBe(1);
+
+    expect(freezeRule(turn5Screenshot, { cards })?.minion?.cardId).not.toBe('BG31_803');
+  });
+
   it('пункт 2: но купить такую карту советуется по-прежнему', () => {
     expect(turn5Decision).not.toBeNull();
     if (turn5Decision === null) return;

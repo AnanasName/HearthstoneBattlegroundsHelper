@@ -54,6 +54,7 @@ const cards = createCardIndex([
   { id: 'MURLOC_1', name: 'Мурлок', techLevel: 1, races: ['MURLOC'], isBaconPool: true },
   { id: 'MURLOC_2', name: 'Другой мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
   { id: 'MURLOC_3', name: 'Третий мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
+  { id: 'MURLOC_5', name: 'Пятый мурлок', techLevel: 5, races: ['MURLOC'], isBaconPool: true },
   { id: 'DRAGON_1', name: 'Дракон', techLevel: 3, races: ['DRAGON'], isBaconPool: true },
   { id: 'AMALGAM', name: 'Амальгама', techLevel: 4, races: ['ALL'], isBaconPool: true },
   { id: 'NEUTRAL', name: 'Нейтральный', techLevel: 2, races: [], isBaconPool: true },
@@ -935,7 +936,10 @@ describe('правило заморозки', () => {
         big(6, 'NEUTRAL_2'),
         big(7, 'AMALGAM'),
       ],
-      shop: [shopMinion(10, 'SKIPPER', { attack: 5, health: 5 })],
+      // Кандидат берётся тира таверны: ветка племени с part22 требует
+      // карту не ниже тира, и карта первого тира отсеялась бы раньше —
+      // тогда тест проверял бы не то, ради чего написан.
+      shop: [shopMinion(10, 'MURLOC_5', { attack: 5, health: 5 })],
     });
     expect(freezeRule(full, deps)).toBeNull();
 
