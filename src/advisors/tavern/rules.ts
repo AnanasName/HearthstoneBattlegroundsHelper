@@ -417,6 +417,40 @@ export interface TavernRules {
   readonly spellMagnetGainWords: readonly string[];
 
   /**
+   * Признак миньона, который РАБОТАЕТ ИЗ РУКИ: его собственный текст
+   * привязывает эффект к тому, что карта лежит в руке.
+   *
+   * В пуле таких трое, и они делятся надвое:
+   *  - «If this minion is in your hand, summon a copy of it» (Flighty Scout
+   *    `BG32_330`) — карта ВОЮЕТ из руки, тело в бою есть и без розыгрыша;
+   *  - «While this is in your hand, after you play a Murloc, gain +{0}/+{1}»
+   *    (Bream Counter `BG26_137`, Timewarped Astrogill `BG34_Giant_801`) —
+   *    карта РАСТЁТ в руке, и розыгрыш рост останавливает.
+   *
+   * Случай part22 (ходы 5 и 17): план каждый ход предлагал «РАЗЫГРАТЬ Flighty
+   * Scout» и «РАЗЫГРАТЬ Bream Counter 208/206, продав Rodeo Performer», хотя
+   * ценность обеих карт написана в их тексте и живёт в руке. Игрок оставил
+   * обе в руке и пришёл первым: Bream Counter дорос до 670/668.
+   */
+  readonly handWorkerWords: readonly string[];
+
+  /**
+   * Признак миньона, который рукой ПИТАЕТСЯ: его текст читает ЧУЖИЕ карты
+   * руки («Gain the Attack of the highest-Attack minion in your hand» —
+   * Costume Enthusiast `BG34_142`, «Give a random minion in your hand
+   * +{0}/+{1}» — Scourfin).
+   *
+   * Таких в пуле одиннадцать, и вместе с тремя «работающими из руки» они
+   * дают ровно 14 карт с «in your hand» — ВСЕ мурлоки. Рука для этого
+   * племени не склад, а позиция: разыгранная карта перестаёт кормить борд.
+   *
+   * Шаблоны нарочно требуют слова «minion(s)/Murlocs … in your hand»: текст
+   * самого «работающего из руки» («this minion IS in your hand») под них
+   * не подходит, и карта не считается собственным кормильцем.
+   */
+  readonly handFeederWords: readonly string[];
+
+  /**
    * Признаки ауры О СЕБЕ: «Has +{0}/+{1} for each…».
    *
    * Механика `AURA` в снапшоте стоит у двух разных пород карт. Одни усиливают
@@ -680,6 +714,17 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   spellMagnetPermanentWords: ['\\b(?:is|are) permanent\\b'],
 
   spellMagnetGainWords: ['\\bgain\\s+\\+'],
+
+  handWorkerWords: ['\\b(?:if|while) this(?: minion)? is in your hand\\b'],
+
+  handFeederWords: [
+    '\\bminions? in your hand\\b',
+    '\\bin your hand and board\\b',
+    // «Gain the stats of all the minions in your hand» — множественное
+    // число уже покрыто первым шаблоном; отдельный нужен племенной формы
+    // («give Murlocs in your hand…»), где слова «minion» нет вовсе.
+    '\\b(?:murlocs?|beasts?|demons?|dragons?|elementals?|mechs?|nagas?|pirates?|quilboars?|undead) in your hand\\b',
+  ],
 
   selfAuraWords: ['\\bhas \\+'],
 
