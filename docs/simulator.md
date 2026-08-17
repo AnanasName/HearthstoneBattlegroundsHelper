@@ -133,10 +133,25 @@ simulateBattle(
 |---|---|
 | `cardId`, `hpLeft`, `tavernTier` | ✅ есть |
 | `heroPowers: BgsHeroPower[]` | ⚠️ `cardId` и `entityId` силы героя есть; счётчики использования нет |
-| `hand: BoardEntity[]` | ✅ рука собирается теми же полями, что борд |
+| `hand: BoardEntity[]` | ✅ передаётся с 17.08 (part21); поля те же, что у борда, но `maxHealth` обязателен |
 | `globalInfo` | ⚠️ семь полей из ~60, см. ниже |
 | `questEntities`, `questRewards` | ❌ нет |
-| `trinkets: BoardTrinket[]` | ❌ нет, механика требует разбора |
+| `trinkets: BoardTrinket[]` | ✅ передаются с 14.08: dbfId с героев → cardId справочником |
+
+**Про руку.** Она нужна не для полноты, а потому, что часть карт пула играет
+рукой ПРЯМО В БОЮ: «Rally: Summon the highest-Attack minion from your hand for
+this combat only» (Expert Aviator), «Whenever this takes damage, give a minion
+in your hand +2/+1» (Very Hungry Winterfinner). Симулятор это умеет
+(`cards/impl/minion/expert-aviator.js` читает `attackingHero.hand`), и пока
+руку не передавали, ралли-призыв считался нулём — строка «по бою» оценивала
+носителя ралли как голое тело (part21, ход 5: 77.4% вместо 97.0%).
+
+Тонкость входа: кандидатов на призыв симулятор отбирает условием
+`!!e.maxHealth` (`services/hand-minion-priority.js`), а у нас это поле
+приходит тегом и в руке бывает пустым — поэтому миньонам руки оно
+проставляется от текущего здоровья. Поле `playerHand` в `BattleSetup`
+необязательное: у старых эпизодов руки нет, и отсутствие честнее пустого
+списка — оно означает «не знаем», а не «рука пуста».
 
 **Про `globalInfo`.** Замаплены только те счётчики, для которых в фикстурах нашёлся
 именованный тег: потраченное золото, сыгранные заклинания, карты за ход, бафы

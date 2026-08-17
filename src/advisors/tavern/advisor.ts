@@ -1,4 +1,4 @@
-import { normalizeCardText, RACE_ALL, type CardIndex } from '../../data/cards.js';
+import { RACE_ALL, type CardIndex } from '../../data/cards.js';
 import { sharedBgStats, type BgStats } from '../../data/bgStats.js';
 import type { ChoiceOption, GameState, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf, type TavernRules } from './rules.js';
@@ -2222,8 +2222,9 @@ export function spellMagnetGain(
   /** Выгода взята у ХРАНИТЕЛЯ, и его дневной заряд на этом тратится. */
   readonly spendsCharge?: boolean;
 } | null {
-  const info = cards.info(target.cardId);
-  const text = info === null ? '' : normalizeCardText(info.text ?? '');
+  // Текст справочник уже нормализовал: приклеенный золотой вариант отрезан
+  // при загрузке снапшота (`normalizeCardText`, part17).
+  const text = cards.info(target.cardId)?.text ?? '';
   if (text === '') return null;
   if (!rules.spellMagnetWords.some((w) => new RegExp(w, 'i').test(text))) return null;
 
