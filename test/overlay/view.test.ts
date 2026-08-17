@@ -331,6 +331,8 @@ describe('вид оверлея', () => {
       golden: 0,
       economy: 0,
       battle: 0,
+      doubler: 0,
+      heroPower: 0,
       textTribe: 0,
       textMech: 0,
       namedCard: 0,
