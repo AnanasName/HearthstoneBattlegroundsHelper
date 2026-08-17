@@ -1,0 +1,137 @@
+{
+  "$comment": [
+    "Партия 17.08.2026 (17:23–17:53) — четырнадцатая партия с оверлеем",
+    "(TB_BaconShop_HERO_55, Грибомант Флургл, мурлоки, 1-е место). Пять",
+    "пунктов обратной связи по пяти скриншотам. Закрыты тестами",
+    "в test/state/part22.test.ts.",
+    "",
+    "Пункт 1 (скриншот хода 1): «рекомендовало купить дракона вместо",
+    "экономического мурлока, который поможет активировать способность",
+    "героя; и морозить заклинание уже не нужно — купленный мурлок и так",
+    "даст купить два существа на 3 ходу».",
+    "",
+    "Пункт 2 (скриншот хода 5): «предлагает выставить карту, которая и так",
+    "выпадет из руки, но с меньшей ценностью — мурлоки играют через",
+    "усиление карт В РУКЕ; и зачем-то морозит жука первого тира».",
+    "",
+    "Пункт 3 (ходы 7 и дальше): «почему-то советует морозить Лассо,",
+    "практического эффекта от карты не вижу».",
+    "",
+    "Пункт 4 (скриншот конца хода 17): «снова предлагает выставить карту,",
+    "которая улучшается именно от того, что она в руке».",
+    "",
+    "Пункт 5 (скриншот хода 23): «на столе Бранн и есть золото — выгоднее",
+    "брать карты, которые позволяют прокрутить статы, а не карту, которая",
+    "даёт эффект лишь в конце хода».",
+    "",
+    "Ценность фикстуры — РУКА КАК ПОЗИЦИЯ, а не как склад. В пуле",
+    "14 миньонов с «in your hand», и ВСЕ ЧЕТЫРНАДЦАТЬ — мурлоки: это",
+    "не частный случай, а целый архетип. Делятся на два рода:",
+    "  • работают ИЗ руки — Flighty Scout `BG32_330` («Start of Combat:",
+    "    If this minion is in your hand, summon a copy of it»), Bream",
+    "    Counter `BG26_137` («While this is in your hand, after you play",
+    "    a Murloc, gain +{0}/+{1}»), Timewarped Astrogill `BG34_Giant_801`;",
+    "  • ПИТАЮТСЯ рукой — Costume Enthusiast `BG34_142` («Start of Combat:",
+    "    Gain the Attack of the highest-Attack minion in your hand»),",
+    "    Choral Mrrrglr, Futurefin, Shamanic Tidecaller `BG36_704`,",
+    "    Twilight Tidehunter `BG36_703` и другие.",
+    "Симулятор обе стороны умеет (`flighty-scout.js`, `costume-enthusiast.js`",
+    "читают `playerEntity.hand`), и с ходом 19 это стало замером, а не",
+    "мнением: `npm run spike:hand`.",
+    "",
+    "Сила героя тоже оказалась невидимой советнику: «Рыбалка»",
+    "`TB_BaconShop_HP_056` — «After you sell 5 minions, get a random",
+    "Murloc» — называет и ПРОДАЖУ, и ПЛЕМЯ, а ценность покупки читала",
+    "только борд. River Skipper `BG33_140` («When you sell this, get",
+    "a random Tier 1 minion») — ровно та карта, которую эта сила хочет."
+  ],
+  "game": "Battlegrounds, билд 248348, 17.08.2026 17:23–17:53",
+  "log": "game.log",
+  "checkpoints": [
+    {
+      "id": "final-placement",
+      "verifiedBy": "лог, сверено 17.08.2026",
+      "expect": {
+        "phase": "gameOver",
+        "finalPlace": 1,
+        "heroCardId": "TB_BaconShop_HERO_55",
+        "heroPowerCardId": "TB_BaconShop_HP_056",
+        "buildNumber": 248348
+      }
+    },
+    {
+      "id": "turn1-economy-murloc-vs-dragon",
+      "turn": 1,
+      "verifiedBy": "скриншот из чата (17:23), сверено 17.08.2026",
+      "expect": {
+        "techLevel": 1,
+        "gold": 3,
+        "board": [],
+        "shop": ["BG31_330", "BG33_140", "BG29_888"],
+        "shopSpells": ["BG28_504"],
+        "topBuyWas": "BG29_888",
+        "playedByPlayer": "купил River Skipper BG33_140",
+        "note": "сила героя названа продажей и племенем — оба слагаемых были нулём"
+      }
+    },
+    {
+      "id": "turn5-play-from-hand",
+      "turn": 5,
+      "verifiedBy": "скриншот из чата (17:25), сверено 17.08.2026",
+      "expect": {
+        "techLevel": 2,
+        "gold": 5,
+        "board": ["BG33_140"],
+        "shop": ["BG26_805", "BG25_001", "BG32_330", "BG31_803"],
+        "screenshotState": {
+          "board": ["BG36_200", "BG26_805"],
+          "hand": ["BG32_330"],
+          "shop": ["BG25_001", "BG31_803"],
+          "gold": 0,
+          "adviceWas": "РАЗЫГРАТЬ Flighty Scout 3/3 → ЗАМОРОЗИТЬ Buzzing Vermin 1/1"
+        },
+        "playedByPlayer": "оставил Flighty Scout в руке, витрину не морозил"
+      }
+    },
+    {
+      "id": "turn7-lasso-freeze",
+      "turn": 7,
+      "verifiedBy": "скриншот из чата (17:36), сверено 17.08.2026",
+      "expect": {
+        "techLevel": 2,
+        "gold": 6,
+        "board": ["BG36_200", "BG26_805", "BG33_140", "BG29_300"],
+        "hand": ["BG32_330"],
+        "adviceWas": "ПОДНЯТЬ ТАВЕРНУ за 5 → РАЗЫГРАТЬ Flighty Scout → ЗАМОРОЗИТЬ Enchanted Lasso",
+        "note": "Enchanted Lasso BG28_512 крадёт из ТОЙ ЖЕ витрины — из того, что останется после покупок"
+      }
+    },
+    {
+      "id": "turn17-bream-counter-in-hand",
+      "turn": 17,
+      "verifiedBy": "скриншот из чата (17:37), конец хода, сверено 17.08.2026",
+      "expect": {
+        "techLevel": 4,
+        "hp": 7,
+        "board": ["BG35_143", "BG27_556", "BG28_550", "BG36_704", "BG_LOE_077", "BG36_764", "BG36_703_G"],
+        "hand": ["BG26_137", "BG36_764"],
+        "breamCounterStats": "208/206",
+        "adviceWas": "РАЗЫГРАТЬ Bream Counter 208/206, продав Rodeo Performer 3/4",
+        "playedByPlayer": "оставил Bream Counter в руке — к ходу 23 он вырос до 670/668"
+      }
+    },
+    {
+      "id": "turn23-brann-and-battlecry",
+      "turn": 23,
+      "verifiedBy": "скриншот из чата (17:45), сверено 17.08.2026",
+      "expect": {
+        "techLevel": 5,
+        "gold": 8,
+        "boardHasBrann": "BG_LOE_077",
+        "choiceOptions": ["BG35_142", "BG35_143", "BG36_507"],
+        "scoresWere": { "BG35_142": 24.0, "BG35_143": 21.0, "BG36_507": 18.5 },
+        "note": "Deepwater Chieftain BG35_143 — «Battlecry and Deathrattle: Get a Deepwater Clan»; при Бранне клич срабатывает дважды, а Deepwater Clan BG35_149 — заклинание, которым живёт борд (Twilight Tidehunter, Shamanic Tidecaller)"
+      }
+    }
+  ]
+}

@@ -239,6 +239,28 @@ export function part21Game(): string {
 }
 
 /**
+ * Партия 22 — 17.08.2026 (17:23–17:53), четырнадцатая партия с оверлеем
+ * (Грибомант Флургл `TB_BaconShop_HERO_55`, мурлоки, **1-е место**). Пять
+ * пунктов обратной связи, три из них об одном: РУКА — ЭТО ПОЗИЦИЯ.
+ *
+ * Фактура: миньоны, работающие ИЗ руки (Flighty Scout `BG32_330` — «Start
+ * of Combat: If this minion is in your hand, summon a copy of it»; Bream
+ * Counter `BG26_137` — «While this is in your hand, after you play
+ * a Murloc, gain +{0}/+{1}», к ходу 23 вырос до 670/668), и миньоны,
+ * которые рукой ПИТАЮТСЯ (Costume Enthusiast `BG34_142` — «Gain the Attack
+ * of the highest-Attack minion in your hand»). Все 14 карт пула
+ * с «in your hand» — мурлоки.
+ *
+ * Здесь же сила героя, называющая продажу и племя («Рыбалка»
+ * `TB_BaconShop_HP_056`: «After you sell 5 minions, get a random Murloc»),
+ * и Бранн `BG_LOE_077` при выборе из кличевых карт (`BG35_143` —
+ * «Battlecry and Deathrattle: Get a Deepwater Clan»).
+ */
+export function part22Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part22', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция

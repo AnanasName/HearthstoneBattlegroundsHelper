@@ -39,7 +39,7 @@ import { tavernTurnOf } from './rules.js';
 import { readTavernTurns } from './turns.js';
 
 /** Партии текущего билда 248348 — те же, на которых считается качество советов. */
-const PARTS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+const PARTS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 
 interface PartResult {
   readonly part: number;
