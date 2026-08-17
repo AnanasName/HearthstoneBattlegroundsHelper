@@ -41,6 +41,7 @@ const FIXTURES = [
   'data/fixtures/part17/game.log',
   'data/fixtures/part18/game.log',
   'data/fixtures/part19/game.log',
+  'data/fixtures/part20/game.log',
 ] as const;
 
 function main(): void {
