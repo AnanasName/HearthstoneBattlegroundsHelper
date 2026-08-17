@@ -74,7 +74,8 @@ function printTurn(state: GameState, advice: TavernAdvice, cards: CardIndex): vo
         ` племя ${value.tribe.toFixed(1)} слова ${value.keywords.toFixed(1)}` +
         ` копии ${value.copies.toFixed(1)} экономика ${value.economy.toFixed(1)}` +
         ` бой ${value.battle.toFixed(1)}` +
-        ` текст ${(value.textTribe + value.textMech + value.namedCard).toFixed(1)})`,
+        ` текст ${(value.textTribe + value.textMech + value.namedCard).toFixed(1)}` +
+        ` магнит ${value.spellMagnet.toFixed(1)})`,
     );
   }
 
