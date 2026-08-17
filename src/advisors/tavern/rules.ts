@@ -19,8 +19,16 @@
  */
 
 export interface LevelTiming {
-  /** С какого хода эта строка действует. */
-  readonly fromTurn: number;
+  /**
+   * С какого хода ТАВЕРНЫ эта строка действует.
+   *
+   * Шкала здесь — не `GameState.turn`: тег `TURN` считает и таверну, и бой,
+   * поэтому ходы таверны идут нечётными номерами (1, 3, 5…), и ход таверны N
+   * — это `turn = 2N − 1`. Перевод делает `tavernTurnOf`, и он обязателен:
+   * кривая сообщества написана в ходах таверны («тир 3 к четвёртому ходу»),
+   * а сравнение с сырым `turn` разгоняет её вдвое.
+   */
+  readonly fromTavernTurn: number;
   /** Какой тир к этому ходу хочется иметь. */
   readonly tier: number;
 }
@@ -54,7 +62,8 @@ export interface TavernRules {
   readonly shopSizeByTier: readonly number[];
 
   /**
-   * К какому тиру стремиться на каком ходу.
+   * К какому тиру стремиться на каком ходу ТАВЕРНЫ (не `GameState.turn`,
+   * см. `LevelTiming.fromTavernTurn`).
    *
    * Кривая сообщества, сверенная с фикстурами: в part3 человек шёл
    * т2 на 3-м ходу, т3 на 5-м, т4 на 7-м — почти ровно по этой таблице;
@@ -518,17 +527,24 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   shopSizeByTier: [0, 3, 4, 4, 5, 5, 6],
 
-  // Стандартная кривая: подъём на 4 золота вторым ходом, тир 3 на шестое
-  // золото четвёртым. Прежняя таблица опаздывала на ход — «тир 2 к ходу 3»
-  // означало покупку вторым ходом, и советник на 4 золота брал миньона
-  // вместо подъёма. Указано игроком, сверено с кривой сообщества.
+  // Стандартная кривая в ходах ТАВЕРНЫ: подъём на 4 золота вторым ходом,
+  // тир 3 на шестое золото четвёртым, дальше по тиру за два хода. Указано
+  // игроком, сверено с кривой сообщества.
+  //
+  // Числа не менялись с прошлой правки — менялась шкала, с которой их
+  // сравнивают (`tavernTurnOf`). Прежде строки читались как номера
+  // `GameState.turn`, а тот считает и бой: «тир 6 с хода 11» означало
+  // «с ШЕСТОГО хода таверны», где 8 золота и тир 6 недостижим в принципе.
+  // Отсюда жалоба игрока «очень часто советует улучшить таверну»: замер
+  // по 202 точкам решения семнадцати партий — отставание в 87% ходов,
+  // подъём верхним советом в 50%.
   levelling: [
-    { fromTurn: 1, tier: 1 },
-    { fromTurn: 2, tier: 2 },
-    { fromTurn: 4, tier: 3 },
-    { fromTurn: 7, tier: 4 },
-    { fromTurn: 9, tier: 5 },
-    { fromTurn: 11, tier: 6 },
+    { fromTavernTurn: 1, tier: 1 },
+    { fromTavernTurn: 2, tier: 2 },
+    { fromTavernTurn: 4, tier: 3 },
+    { fromTavernTurn: 7, tier: 4 },
+    { fromTavernTurn: 9, tier: 5 },
+    { fromTavernTurn: 11, tier: 6 },
   ],
   levellingHpFloor: 15,
   levellingUrgencyPerTier: 3,
@@ -666,11 +682,29 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   sellMargin: 3,
 };
 
+/**
+ * Номер хода ТАВЕРНЫ по счётчику `GameState.turn`.
+ *
+ * Тег `TURN` на `GameEntity` растёт и на переходе в бой: таверна идёт
+ * нечётными номерами, бой следом — чётным (проверено на всех фикстурах,
+ * та же фактура, что у `trinketOfferTurns`). Значит ход таверны N — это
+ * `turn = 2N − 1`, и золота на нём `min(2 + N, 10)`: наш `turn = 15` — это
+ * восьмой ход таверны с десятью золотыми, а не пятнадцатый.
+ *
+ * Правила, чьи числа взяты из чужих таблиц и разговоров об игре (кривая
+ * подъёма), обязаны переводить шкалу здесь. Правила, чьи числа ЗАМЕРЕНЫ
+ * у нас (`trinketOfferTurns`), живут в нашей нумерации и перевода не хотят.
+ */
+export function tavernTurnOf(turn: number): number {
+  return Math.max(0, Math.ceil(turn / 2));
+}
+
 /** Какой тир полагается иметь к этому ходу по таблице. */
 export function targetTier(turn: number, rules: TavernRules): number {
+  const tavernTurn = tavernTurnOf(turn);
   let tier = rules.levelling[0]?.tier ?? 1;
   for (const row of rules.levelling) {
-    if (turn >= row.fromTurn) tier = row.tier;
+    if (tavernTurn >= row.fromTavernTurn) tier = row.tier;
   }
   return tier;
 }

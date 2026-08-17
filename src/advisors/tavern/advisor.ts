@@ -1,7 +1,7 @@
 import { RACE_ALL, type CardIndex } from '../../data/cards.js';
 import { sharedBgStats, type BgStats } from '../../data/bgStats.js';
 import type { ChoiceOption, GameState, Minion, TrinketOffer } from '../../state/types.js';
-import { DEFAULT_TAVERN_RULES, targetTier, type TavernRules } from './rules.js';
+import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf, type TavernRules } from './rules.js';
 
 /**
  * TavernAdvisor: что делать в фазе таверны.
@@ -839,7 +839,7 @@ export function levelUpRule(
     sellFirst: null,
     reason:
       (behind > 0
-        ? `таверна ${String(state.techLevel)} при ожидаемых ${String(wanted)} к ходу ${String(state.turn)}` +
+        ? `таверна ${String(state.techLevel)} при ожидаемых ${String(wanted)} к ${String(tavernTurnOf(state.turn))}-му ходу таверны` +
           `, подъём до ${String(target)} стоит ${String(cost)} из ${String(state.gold)}${widerShop}`
         : shopIsTrash
           ? `таверна ${String(state.techLevel)} по графику, но витрина без покупок ` +

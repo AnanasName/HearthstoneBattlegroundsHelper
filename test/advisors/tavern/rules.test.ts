@@ -29,7 +29,7 @@ import {
   trinketAdvice,
   trinketForecast,
 } from '../../../src/advisors/tavern/advisor.js';
-import { DEFAULT_TAVERN_RULES, targetTier } from '../../../src/advisors/tavern/rules.js';
+import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf } from '../../../src/advisors/tavern/rules.js';
 import { createBgStats } from '../../../src/data/bgStats.js';
 import { createCardIndex, loadCardIndex } from '../../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
@@ -92,14 +92,29 @@ const shopMinion = (id: number, cardId: string, patch: Partial<Minion> = {}): Mi
   minion(id, { cardId, techLevel: cards.info(cardId)?.techLevel ?? 1, ...patch });
 
 describe('таблица таймингов подъёма', () => {
-  it('отдаёт тир, полагающийся к ходу', () => {
+  it('считает ход таверны, а не сырой счётчик хода', () => {
+    // Счётчик TURN растёт и на переходе в бой: таверна идёт нечётными.
+    expect(tavernTurnOf(1)).toBe(1);
+    expect(tavernTurnOf(3)).toBe(2);
+    expect(tavernTurnOf(15)).toBe(8);
+    // Фаза боя того же хода таверны своего номера не получает.
+    expect(tavernTurnOf(2)).toBe(1);
+  });
+
+  it('отдаёт тир, полагающийся к ходу таверны', () => {
     expect(targetTier(1, DEFAULT_TAVERN_RULES)).toBe(1);
-    // Стандартная кривая: подъём на 4 золота вторым ходом. Прежняя таблица
-    // опаздывала на ход, и советник на втором ходу брал миньона вместо тира.
-    expect(targetTier(2, DEFAULT_TAVERN_RULES)).toBe(2);
+    // Стандартная кривая: подъём на 4 золота вторым ходом таверны — это
+    // наш turn 3.
     expect(targetTier(3, DEFAULT_TAVERN_RULES)).toBe(2);
-    expect(targetTier(6, DEFAULT_TAVERN_RULES)).toBe(3);
-    expect(targetTier(11, DEFAULT_TAVERN_RULES)).toBe(6);
+    // Тир 3 к четвёртому ходу таверны (шесть золота) — наш turn 7.
+    expect(targetTier(7, DEFAULT_TAVERN_RULES)).toBe(3);
+    // Точка жалобы игрока (part20, turn 15 — восьмой ход таверны, десять
+    // золота): по кривой полагается тир 4, а не 6. Прежняя шкала сравнивала
+    // «tier 6 с хода 11» с сырым turn и объявляла отставание в 2 тира
+    // на ходу, где игрок шёл ВПЕРЕДИ графика.
+    expect(targetTier(15, DEFAULT_TAVERN_RULES)).toBe(4);
+    // Тир 6 — к одиннадцатому ходу таверны, то есть к нашему turn 21.
+    expect(targetTier(21, DEFAULT_TAVERN_RULES)).toBe(6);
     // За концом таблицы значение держится, а не обнуляется.
     expect(targetTier(30, DEFAULT_TAVERN_RULES)).toBe(6);
   });
@@ -108,11 +123,11 @@ describe('таблица таймингов подъёма', () => {
     const custom = {
       ...DEFAULT_TAVERN_RULES,
       levelling: [
-        { fromTurn: 1, tier: 1 },
-        { fromTurn: 2, tier: 5 },
+        { fromTavernTurn: 1, tier: 1 },
+        { fromTavernTurn: 2, tier: 5 },
       ],
     };
-    expect(targetTier(2, custom)).toBe(5);
+    expect(targetTier(3, custom)).toBe(5);
   });
 });
 
@@ -211,13 +226,17 @@ describe('правило подъёма таверны', () => {
   });
 
   it('советует тем настойчивее, чем сильнее отставание от таблицы', () => {
-    // Ход 9 требует тира 5; при тире 2 отставание в три тира.
-    const behind = levelUpRule(upgradable({ turn: 9, techLevel: 2, gold: 10 }));
-    const onTrack = levelUpRule(upgradable({ turn: 5, techLevel: 3, gold: 10 }));
+    // Turn 21 — одиннадцатый ход таверны, он требует тира 6; при тире 3
+    // отставание в три тира.
+    const behind = levelUpRule(upgradable({ turn: 21, techLevel: 3, gold: 10 }));
+    // Turn 15 — восьмой ход таверны, полагается тир 4: тир 4 идёт по графику.
+    const onTrack = levelUpRule(upgradable({ turn: 15, techLevel: 4, gold: 10 }));
 
     expect(behind?.score).toBe(3 * DEFAULT_TAVERN_RULES.levellingUrgencyPerTier);
     expect(onTrack?.score).toBe(0);
-    expect(behind?.reason).toContain('ожидаемых 5');
+    expect(behind?.reason).toContain('ожидаемых 6');
+    // Ход в совете назван в той же шкале, в которой сравнивается.
+    expect(behind?.reason).toContain('11-му ходу таверны');
   });
 
   it('подъём на чётный тир обещает расширение витрины', () => {
