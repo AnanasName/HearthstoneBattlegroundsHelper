@@ -224,6 +224,9 @@ export function battleQuestion(state: GameState): PositionQuestion | null {
   ): BattleSetup => ({
     turn: state.turn,
     playerBoard: state.board,
+    // Рука идёт в бой вместе с бордом: ралли-призыв достаёт из неё тело
+    // («Rally: Summon the highest-Attack minion from your hand»).
+    playerHand: state.hand,
     opponentBoard,
     playerHero: hero,
     techLevel: state.techLevel,

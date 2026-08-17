@@ -18,6 +18,13 @@ export interface BattleEpisode {
   readonly turn: number;
   /** Свой борд на начало боя, до первого размена. */
   readonly playerBoard: readonly Minion[];
+  /**
+   * Своя рука на начало боя — миньоны.
+   *
+   * Часть карт пула играет рукой прямо в бою (ралли-призыв Expert Aviator),
+   * и симулятору она нужна так же, как борд.
+   */
+  readonly playerHand: readonly Minion[];
   /** Борд противника на начало боя. */
   readonly opponentBoard: readonly Minion[];
   readonly playerHero: Hero;
@@ -43,6 +50,7 @@ function effectiveHp(hero: Hero | null): number {
 interface Pending {
   turn: number;
   playerBoard: readonly Minion[];
+  playerHand: readonly Minion[];
   opponentBoard: readonly Minion[];
   playerHero: Hero;
   techLevel: number;
@@ -98,6 +106,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
         pending = {
           turn: state.turn,
           playerBoard: state.board,
+          playerHand: state.hand,
           opponentBoard: state.opponentBoard,
           playerHero: state.hero,
           techLevel: state.techLevel,
@@ -125,6 +134,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
       episodes.push({
         turn: pending.turn,
         playerBoard: pending.playerBoard,
+        playerHand: pending.playerHand,
         opponentBoard: pending.opponentBoard,
         playerHero: pending.playerHero,
         techLevel: pending.techLevel,

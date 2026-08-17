@@ -126,6 +126,18 @@ export function toPlayerEntity(
 }
 
 /**
+ * Миньон РУКИ во входе симулятора.
+ *
+ * Отличается от бордового одним: `maxHealth` обязателен. Симулятор отбирает
+ * кандидатов на призыв из руки условием `!!e.maxHealth` (expert-aviator.js),
+ * и миньон руки без этого поля молча не призывается вовсе — а у нас поле
+ * необязательное, оно приходит тегом и в руке бывает пустым.
+ */
+function toHandEntity(m: Minion): BoardEntity {
+  return { ...toBoardEntity(m), maxHealth: m.maxHealth ?? m.health ?? 1 };
+}
+
+/**
  * Всё, что нужно знать о положении дел перед боем.
  *
  * Выделено из `BattleEpisode` затем, что эпизод — это бой из лога с уже
@@ -135,6 +147,21 @@ export function toPlayerEntity(
 export interface BattleSetup {
   readonly turn: number;
   readonly playerBoard: readonly Minion[];
+  /**
+   * Своя РУКА на момент боя — миньоны, не заклинания.
+   *
+   * Нужна затем, что часть карт пула играет рукой прямо в бою: «Rally:
+   * Summon the highest-Attack minion from your hand for this combat only»
+   * (Expert Aviator, part21), «Whenever this takes damage, give a minion
+   * in your hand +2/+1» (Very Hungry Winterfinner). Симулятор это умеет
+   * (`expert-aviator.js` читает `attackingHero.hand`), а мы руку
+   * не передавали — и ралли в счёте не срабатывало ни разу: строка «по бою»
+   * оценивала носителя ралли как голое тело.
+   *
+   * Поле необязательное: у старых эпизодов руки нет, и отсутствие честнее
+   * пустого списка — оно означает «не знаем», а не «рука пуста».
+   */
+  readonly playerHand?: readonly Minion[];
   readonly opponentBoard: readonly Minion[];
   readonly playerHero: Hero;
   readonly techLevel: number;
@@ -199,6 +226,11 @@ export function toBattleInfo(
       player: {
         ...toPlayerEntity(episode.playerHero, episode.techLevel, episode.globalInfo),
         trinkets: toTrinkets(episode.playerTrinketDbfIds),
+        // Рука — только когда она известна: у старых эпизодов её нет,
+        // и пустой список означал бы «рука пуста», а не «не знаем».
+        ...(episode.playerHand === undefined
+          ? {}
+          : { hand: episode.playerHand.map(toHandEntity) }),
       },
       board: episode.playerBoard.map(toBoardEntity),
     },
