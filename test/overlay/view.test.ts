@@ -334,6 +334,7 @@ describe('вид оверлея', () => {
       textTribe: 0,
       textMech: 0,
       namedCard: 0,
+      spellMagnet: 0,
       total,
       tribeMates: 0,
       textTribeMates: 0,

@@ -1,4 +1,4 @@
-import { RACE_ALL, type CardIndex } from '../../data/cards.js';
+import { normalizeCardText, RACE_ALL, type CardIndex } from '../../data/cards.js';
 import { sharedBgStats, type BgStats } from '../../data/bgStats.js';
 import type { ChoiceOption, GameState, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf, type TavernRules } from './rules.js';
@@ -78,6 +78,15 @@ export interface Recommendation {
    */
   readonly targetMinion?: Minion | null;
   /**
+   * Цель — магнит-ХРАНИТЕЛЬ, и совет тратит его дневной заряд («The first
+   * Spellcraft spell … each turn is permanent»).
+   *
+   * Нужно ПЛАНУ хода: заряд один на ход, и второе чародейское заклинание
+   * той же цепочки постоянным уже не станет. Без пометки план обещал бы
+   * постоянство дважды — тихо и неверно (part21).
+   */
+  readonly spendsMagnetCharge?: boolean;
+  /**
    * Какую ветвь брать у модального заклинания «Choose One».
    *
    * Отдельным полем по той же причине, что и цель: оверлей показывает
@@ -109,6 +118,8 @@ export interface ValueBreakdown {
   readonly textMech: number;
   /** Связь по имени карты: текст называет карту своих — или их тексты его. */
   readonly namedCard: number;
+  /** Магнит заклинаний: выгода от заклинаний руки, применённых к нему. */
+  readonly spellMagnet: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
@@ -494,6 +505,25 @@ export function minionValue(
   const namedMates = namedCardMates(candidate, state.board, cards);
   const namedCard = namedMates * w.perNamedCardMate;
 
+  // Магнит заклинаний ценен ровно теми заклинаниями, что у нас ЕСТЬ: Fleeing
+  // Fugitive получает свои +1 здоровья с каждого применённого к нему,
+  // Lava Lurker оставляет навсегда временное усиление. Заклинания руки —
+  // читаемый факт состояния, и выгода считается тем же `spellMagnetGain`,
+  // что и у выбора цели: одна формула на покупку и на применение
+  // (part21, ход 5 — три заклинания в руке при беглеце в витрине).
+  //
+  // Отдельного веса у слагаемого нет: выгода измерена в СТАТАХ, а у статов
+  // цена уже есть. Будущие заклинания (свой чародей на борде выдаёт по одному
+  // за ход) не считаются — это ставка, а не факт; связь с чародеем и так
+  // даёт `perTextMechMate`.
+  const magnetStats = state.handSpells.reduce((sum, spell) => {
+    const effect = spellEffect(spell.cardId, spell.scriptData, cards, rules);
+    if (effect === null || effect.untargeted || effect.destroysFriendly) return sum;
+    if (effect.stats <= 0 && !effect.divineShield && !effect.grantsTaunt) return sum;
+    return sum + (spellMagnetGain(candidate, effect, spell.cardId, cards, rules)?.gain ?? 0);
+  }, 0);
+  const spellMagnet = magnetStats * w.perStatPoint;
+
   return {
     techLevel: tech,
     stats,
@@ -506,6 +536,7 @@ export function minionValue(
     textTribe,
     textMech,
     namedCard,
+    spellMagnet,
     total:
       tech +
       stats +
@@ -517,7 +548,8 @@ export function minionValue(
       battle +
       textTribe +
       textMech +
-      namedCard,
+      namedCard +
+      spellMagnet,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -1916,6 +1948,18 @@ export interface SpellEffect {
   readonly gold: number;
   /** Сумма статов усиления: «+{0} Attack», «+X/+Y». */
   readonly stats: number;
+  /**
+   * Та часть `stats`, которая ВЫВЕТРИТСЯ: «+2 Attack until next turn»
+   * (Mini-Trident и остальные четыре временных чародейских токена пула).
+   *
+   * Считается по предложению, где стоят сами статы, а не по всему тексту:
+   * у Undersea Mount («Give a minion +{0}/+{1}. If it's a Naga, also give
+   * it Windfury until next turn») временна только вихревая часть.
+   *
+   * Нужно выбору цели: временное усиление имеет смысл класть на носителя,
+   * который делает его постоянным (Lava Lurker, part21).
+   */
+  readonly temporaryStats: number;
   /** Даёт ли божественный щит. */
   readonly divineShield: boolean;
   /**
@@ -2111,6 +2155,108 @@ function chooseOneEffect(
   return { ...first.effect, branches, chosen: null };
 }
 
+/**
+ * Временно ли усиление, стоящее в тексте на позиции `index`.
+ *
+ * Смотрится ПРЕДЛОЖЕНИЕ, в котором стоят статы, а не весь текст: у Undersea
+ * Mount «Give a minion +{0}/+{1}. If it's a Naga, also give it Windfury
+ * until next turn» статы постоянны, а временна вихревая половина. Поиск
+ * по всему тексту пометил бы временными и статы — тихо и неверно.
+ */
+function isTemporaryClause(text: string, index: number, rules: TavernRules): boolean {
+  const rest = text.slice(index);
+  const stop = rest.search(/[.;]/);
+  const clause = stop === -1 ? rest : rest.slice(0, stop);
+  return rules.temporaryBuffWords.some((w) => new RegExp(w, 'i').test(clause));
+}
+
+/**
+ * Чародейское ли это заклинание.
+ *
+ * Слова «Spellcraft» в тексте самого токена нет — оно стоит у миньона,
+ * который его выдаёт. Зато держится соглашение идентификаторов, то же,
+ * что у ветвей «Choose One» (part19): токен чародейства — это `<id миньона>t`
+ * (Mini-Myrmidon `BG23_000` → Mini-Trident `BG23_000t`, золотой
+ * `BG23_000_Gt`). Проверено на ВСЕХ 22 чародеях пула — у каждого есть
+ * свой токен, и других карт с таким id нет.
+ */
+function isSpellcraftSpell(cardId: string | null, cards: CardIndex): boolean {
+  if (cardId === null || !cardId.endsWith('t')) return false;
+  const source = cards.info(cardId.slice(0, -1));
+  return source?.mechanics.includes('BACON_SPELLCRAFT_ID') ?? false;
+}
+
+/**
+ * «Магнит заклинаний» — миньон, чей текст говорит о заклинании, применённом
+ * К НЕМУ САМОМУ, и сколько СТАТОВ даст сверх усиления попадание именно в него.
+ *
+ * Случай part21 (ход 9): план советовал купить Lava Lurker («The first
+ * Spellcraft spell played from hand on this each turn is permanent»)
+ * и тут же играл Mini-Trident мимо него — в крупнейшее тело борда. Цель
+ * выбиралась по размеру, и обе стороны дела советник не видел вовсе:
+ * ни того, что трезубец ВЫВЕТРИТСЯ («+2 Attack until next turn»),
+ * ни того, что на скрытне он останется навсегда.
+ *
+ * Считается только то, что читается числами:
+ *
+ * - ХРАНИТЕЛЬ («…is permanent») превращает временную часть усиления
+ *   в постоянную — выгода равна `temporaryStats`. Требуется, чтобы
+ *   заклинание было чародейским (так написано в тексте) и чтобы дневной
+ *   счётчик («({0} left!)» — живой тег сущности) не был исчерпан;
+ * - РАСТУЩИЙ («…gain +{0} Health») получает свои статы с любого заклинания.
+ *
+ * Остальные пять магнитов пула (копия заклинания, кровавый камень соседям,
+ * усиление витрины, миньона в руке, чужое заклинание) числом не мерятся —
+ * у них выгода `0`, и цель выбирается как прежде, по телу. Это честнее
+ * выдуманного веса: «не берёмся судить» здесь то же, что у сложных активаций.
+ */
+export function spellMagnetGain(
+  target: Minion,
+  effect: SpellEffect,
+  spellCardId: string | null,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): {
+  readonly gain: number;
+  readonly note: string;
+  /** Выгода взята у ХРАНИТЕЛЯ, и его дневной заряд на этом тратится. */
+  readonly spendsCharge?: boolean;
+} | null {
+  const info = cards.info(target.cardId);
+  const text = info === null ? '' : normalizeCardText(info.text ?? '');
+  if (text === '') return null;
+  if (!rules.spellMagnetWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  if (rules.spellMagnetPermanentWords.some((w) => new RegExp(w, 'i').test(text))) {
+    // Счётчик оставшихся на этот ход — тот же плейсхолдер «({0} left!)».
+    // Тега нет — считаем, что заряд есть: отсутствие тега не значит ноль.
+    const left = target.scriptData[0] ?? 1;
+    if (!isSpellcraftSpell(spellCardId, cards) || effect.temporaryStats <= 0 || left <= 0) {
+      return { gain: 0, note: '' };
+    }
+    return {
+      gain: effect.temporaryStats,
+      note: `усиление на нём останется навсегда (+${String(effect.temporaryStats)} статов)`,
+      spendsCharge: true,
+    };
+  }
+
+  if (rules.spellMagnetGainWords.some((w) => new RegExp(w, 'i').test(text))) {
+    const m = /\bgain\s+\+(?:\{(\d)\}|(\d+))(?:\s*\/\s*\+(?:\{(\d)\}|(\d+)))?/i.exec(text);
+    if (m === null) return { gain: 0, note: '' };
+    const num = (placeholder: string | undefined, literal: string | undefined): number =>
+      placeholder === undefined
+        ? Number(literal ?? 0)
+        : (target.scriptData[Number(placeholder)] ?? 0);
+    const gain = num(m[1], m[2]) + num(m[3], m[4]);
+    return gain <= 0
+      ? { gain: 0, note: '' }
+      : { gain, note: `растёт от заклинаний (+${String(gain)} статов)` };
+  }
+
+  return { gain: 0, note: '' };
+}
+
 export function spellEffect(
   cardId: string,
   scriptData: readonly (number | null)[],
@@ -2131,12 +2277,21 @@ export function spellEffect(
   const gold = /gain (\d+) gold/i.exec(text);
 
   // Числа усиления: литерал или плейсхолдер-индекс в теги сущности.
+  // Заодно считается, сколько из них выветрится: пометка временности
+  // относится к СВОЕМУ предложению, а не ко всему тексту карты.
   let stats = 0;
+  let temporaryStats = 0;
   for (const m of text.matchAll(/\+(?:\{(\d)\}|(\d+))/g)) {
     const placeholder = m[1];
     const literal = m[2];
-    if (placeholder !== undefined) stats += scriptData[Number(placeholder)] ?? 0;
-    else if (literal !== undefined) stats += Number(literal);
+    const value =
+      placeholder !== undefined
+        ? (scriptData[Number(placeholder)] ?? 0)
+        : literal !== undefined
+          ? Number(literal)
+          : 0;
+    stats += value;
+    if (isTemporaryClause(text, m.index, rules)) temporaryStats += value;
   }
   const shield = /divine shield/i.test(text);
 
@@ -2176,6 +2331,7 @@ export function spellEffect(
   return {
     gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
     stats,
+    temporaryStats,
     divineShield: shield,
     destroysFriendly: destroy !== null,
     destroyRace,
@@ -2240,7 +2396,12 @@ function spellTargetOn(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
-): { readonly target: Minion | null; readonly note: string } | null {
+  spellCardId: string | null = null,
+): {
+  readonly target: Minion | null;
+  readonly note: string;
+  readonly spendsCharge?: boolean;
+} | null {
   const cards = deps.cards;
   if (state.board.length === 0) return null;
 
@@ -2294,11 +2455,31 @@ function spellTargetOn(
     }
   }
 
+  // Магнит заклинаний бьёт размер тела: попадание в него даёт СВЕРХ усиления
+  // ещё статы, и они считаются числом, а не мнением (part21, ход 9 — Lava
+  // Lurker делает трезубец постоянным, Fleeing Fugitive растёт на +1).
+  // Правило «крупнейший» им не соперник: наши же docs говорят, что кому
+  // полезнее усиление, правила не судят, — а тут выгода читается.
+  const magnets = pool.map((m) => ({
+    minion: m,
+    gain: spellMagnetGain(m, effect, spellCardId, cards, rules),
+  }));
+  const bestGain = Math.max(0, ...magnets.map((x) => x.gain?.gain ?? 0));
+  let spendsCharge = false;
+  if (bestGain > 0) {
+    const best = magnets.filter((x) => (x.gain?.gain ?? 0) === bestGain);
+    pool = best.map((x) => x.minion);
+    const note = best[0]?.gain?.note;
+    if (note !== undefined && note !== '') notes.push(note);
+    spendsCharge = best[0]?.gain?.spendsCharge ?? false;
+  }
+
   const target = largest(pool);
   const name = cards.info(target.cardId)?.name ?? target.cardId;
   return {
     target,
     note: `цель — ${name}` + (notes.length > 0 ? `: ${notes.join('; ')}` : ''),
+    spendsCharge,
   };
 }
 
@@ -2316,6 +2497,7 @@ export function buffTarget(
   const buff: SpellEffect = {
     gold: 0,
     stats: 4,
+    temporaryStats: 0,
     divineShield: false,
     destroysFriendly: false,
     destroyRace: null,
@@ -2449,7 +2631,7 @@ export function spellRules(
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
-    const aimed = spellTargetOn(effect, state, deps, rules);
+    const aimed = spellTargetOn(effect, state, deps, rules, spell.cardId);
     if (aimed === null) return [];
     const branch = branchAdvice(effect);
 
@@ -2458,6 +2640,7 @@ export function spellRules(
         action: 'play' as const,
         minion: null,
         spellCardId: spell.cardId,
+        spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
         spellBranches: branch.branches,
         score,
@@ -2555,7 +2738,7 @@ export function shopSpellRules(
         (effect.divineShield ? rules.value.divineShield : 0) +
         (effect.grantsTaunt ? rules.value.taunt : 0);
     if (score <= 0) return [];
-    const aimed = spellTargetOn(effect, state, deps, rules);
+    const aimed = spellTargetOn(effect, state, deps, rules, spell.cardId);
     if (aimed === null) return [];
     const branch = branchAdvice(effect);
     return [
@@ -2563,6 +2746,7 @@ export function shopSpellRules(
         action: 'buy' as const,
         minion: null,
         spellCardId: spell.cardId,
+        spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
         spellBranches: branch.branches,
         score,

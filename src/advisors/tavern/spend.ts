@@ -105,6 +105,23 @@ export interface AppliedStep {
  * и ровно то, чем правила пользуются дальше. Где эффект неизвестен, честно
  * считается ОДНО золото, а шаг помечается непрозрачным.
  */
+/**
+ * Тот же борд, но у цели совета израсходован дневной заряд хранителя
+ * заклинаний. Ничего не трогает, если совет заряда не тратит.
+ */
+function withoutMagnetCharge(
+  board: readonly Minion[],
+  rec: Recommendation,
+): readonly Minion[] {
+  const target = rec.targetMinion;
+  if (rec.spendsMagnetCharge !== true || target == null) return board;
+  return board.map((m) =>
+    m.entityId === target.entityId
+      ? { ...m, scriptData: m.scriptData.map((v, i) => (i === 0 ? Math.max(0, (v ?? 1) - 1) : v)) }
+      : m,
+  );
+}
+
 export function applyRecommendation(
   state: GameState,
   rec: Recommendation,
@@ -186,7 +203,13 @@ export function applyRecommendation(
       // Заклинание руки: бесплатно или за цену тега, эффект неизвестен.
       if (rec.minion === null) {
         return {
-          state: paid({ handSpells: withoutSpell(state.handSpells, rec.spellCardId) }),
+          state: paid({
+            handSpells: withoutSpell(state.handSpells, rec.spellCardId),
+            // Дневной заряд магнита-хранителя потрачен: следующее чародейское
+            // заклинание той же цепочки постоянным на нём уже не станет
+            // (part21). Счётчик живёт в `scriptData[0]` — «({0} left!)».
+            board: withoutMagnetCharge(state.board, rec),
+          }),
           opaque: true,
           terminal: false,
         };

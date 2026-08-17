@@ -370,6 +370,53 @@ export interface TavernRules {
   readonly selfTriggerWords: readonly string[];
 
   /**
+   * Слова, которыми текст помечает усиление ВРЕМЕННЫМ: «until next turn»,
+   * «for this combat».
+   *
+   * Ищутся НЕ по всему тексту, а в предложении, где стоят сами статы:
+   * у Undersea Mount («Give a minion +{0}/+{1}. If it's a Naga, also give
+   * it Windfury until next turn.») временна только вихревая часть, а статы
+   * остаются навсегда. Поиск по всему тексту объявил бы временными и их —
+   * тот же класс тихой ошибки, что склеенный золотой текст (part17).
+   *
+   * Нужно выбору цели: заклинание, которое иначе выветрится, имеет смысл
+   * класть на носителя, делающего его постоянным (part21, ход 9).
+   */
+  readonly temporaryBuffWords: readonly string[];
+
+  /**
+   * Признак «магнита заклинаний»: текст миньона говорит о заклинании,
+   * применённом К НЕМУ САМОМУ.
+   *
+   * В пуле таких семь: Lava Lurker («The first Spellcraft spell played from
+   * hand on this each turn is permanent»), Fleeing Fugitive («Whenever you
+   * cast a spell on this, gain +{0} Health»), Zesty Shaker, Vigilant
+   * Bristlemane, Devilish Distractor, Twilight Tidehunter, Gatekeeper
+   * Amalgam. Целить заклинание в такого — получить сверх усиления ещё что-то,
+   * и советник этого не видел вовсе: цель выбиралась по размеру тела
+   * (part21, ход 9 — трезубец шёл мимо только что купленного Lava Lurker).
+   */
+  readonly spellMagnetWords: readonly string[];
+
+  /**
+   * Признак магнита-ХРАНИТЕЛЯ: заклинание, применённое к нему, становится
+   * постоянным («…is permanent»). Только у Lava Lurker в текущем пуле.
+   */
+  readonly spellMagnetPermanentWords: readonly string[];
+
+  /**
+   * Признак магнита-РАСТУЩЕГО: он сам получает статы за каждое заклинание
+   * («…gain +{0} Health» у Fleeing Fugitive).
+   *
+   * Слово «gain» (в отличие от «give») означает, что статы достаются
+   * носителю; сама по себе эта пара слов в пуле частая, но ищется она
+   * ТОЛЬКО у карт, уже опознанных магнитами, — иначе поймала бы и
+   * «give minions in the Tavern +{0}/+{1}» (Devilish Distractor), где
+   * статы уходят не нам.
+   */
+  readonly spellMagnetGainWords: readonly string[];
+
+  /**
    * Признаки ауры О СЕБЕ: «Has +{0}/+{1} for each…».
    *
    * Механика `AURA` в снапшоте стоит у двух разных пород карт. Одни усиливают
@@ -620,6 +667,19 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   engineTextWords: ['\\bafter (?:a|an|you|your|this)\\b', '\\bwhenever\\b', '\\bat the (?:start|end) of\\b'],
 
   selfTriggerWords: ['\\b(?:after|whenever) this\\b'],
+
+  temporaryBuffWords: [
+    'until next turn',
+    'until end of combat',
+    'for this combat',
+    'this combat only',
+  ],
+
+  spellMagnetWords: ['\\bspells?\\b[^.]{0,60}\\bon this\\b'],
+
+  spellMagnetPermanentWords: ['\\b(?:is|are) permanent\\b'],
+
+  spellMagnetGainWords: ['\\bgain\\s+\\+'],
 
   selfAuraWords: ['\\bhas \\+'],
 

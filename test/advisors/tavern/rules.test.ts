@@ -1282,6 +1282,9 @@ describe('заклинания руки', () => {
       { id: 'NONE', text: 'Deal 2 damage to a random enemy.' },
     ]);
     const plain = {
+      // Временной части у этих усилений нет: «until next turn» в текстах
+      // не стоит (part21).
+      temporaryStats: 0,
       destroysFriendly: false,
       destroyRace: null,
       transforms: false,
@@ -1344,6 +1347,7 @@ describe('заклинания руки', () => {
     expect(spellEffect('BUTCHER', [6, 2], idx)).toEqual({
       gold: 0,
       stats: 8,
+      temporaryStats: 0,
       divineShield: false,
       destroysFriendly: true,
       destroyRace: 'UNDEAD',
