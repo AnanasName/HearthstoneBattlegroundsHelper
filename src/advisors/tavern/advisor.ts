@@ -120,6 +120,10 @@ export interface ValueBreakdown {
   readonly namedCard: number;
   /** Магнит заклинаний: выгода от заклинаний руки, применённых к нему. */
   readonly spellMagnet: number;
+  /** Удвоитель механики на борде: лишняя принесённая карта по курсу. */
+  readonly doubler: number;
+  /** Синергия с СИЛОЙ ГЕРОЯ: её текст называет племя кандидата или продажу. */
+  readonly heroPower: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
@@ -358,6 +362,34 @@ function namedCardMates(candidate: Minion, board: readonly Minion[], cards: Card
   }).length;
 }
 
+/**
+ * Механики, которые УДВАИВАЕТ хотя бы один свой миньон на борде.
+ *
+ * Удвоитель — читаемый факт: его текст говорит «trigger twice» / «trigger
+ * an extra time» и называет механику словом. В пуле таких ровно трое, и они
+ * делят три механики между собой (Бранн — кличи, Titus — хрипы, Drakkari —
+ * конец хода). Собственный текст кандидата тут ни при чём: удваивает ЧУЖОЙ
+ * миньон, стоящий на борде.
+ */
+function doubledMechanicsOnBoard(
+  board: readonly Minion[],
+  candidate: Minion,
+  cards: CardIndex,
+  rules: TavernRules,
+): string[] {
+  const doubled = new Set<string>();
+  for (const m of board) {
+    if (m.entityId === candidate.entityId) continue;
+    const text = cards.info(m.cardId)?.text ?? '';
+    if (text === '') continue;
+    if (!rules.mechanicDoublerWords.some((w) => new RegExp(w, 'i').test(text))) continue;
+    for (const [mech, word] of Object.entries(rules.doubledMechanicWords)) {
+      if (new RegExp(`\\b(?:${word})\\b`, 'i').test(text)) doubled.add(mech);
+    }
+  }
+  return [...doubled];
+}
+
 /** Сколько своих миньонов принадлежит хотя бы одному из племён. */
 function boardMatesOfTribes(
   tribes: readonly string[],
@@ -524,6 +556,58 @@ export function minionValue(
   }, 0);
   const spellMagnet = magnetStats * w.perStatPoint;
 
+  // Удвоитель механики на борде множит эффект кандидата, а не добавляет
+  // «ещё одного своего»: при Бранне «Battlecry: Get a Deepwater Clan»
+  // приносит ДВЕ карты, а `perTextMechMate` начислял за него полторы очка,
+  // как за рядовую связь (part22, ход 23 — кличевой мурлок стоял вторым
+  // после карты с эффектом конца хода, удваивать который некому).
+  //
+  // Очки начисляются только там, где известно ЧТО удваивается: у триггера,
+  // ПРИНОСЯЩЕГО карту, есть курс — тот же `heroPowerSpellValue`, которым
+  // считается прокрутка генератора и заклинание от силы героя. Удвоение
+  // эффекта без добычи (аура, статы) остаётся обычной связью: множитель
+  // там реален, а цены у него нет, и выдумывать её мы не будем.
+  const carried = new Set(info?.mechanics ?? []);
+  const doubles = doubledMechanicsOnBoard(state.board, candidate, cards, rules).filter((mech) =>
+    carried.has(mech),
+  );
+  const brings =
+    text !== '' && rules.triggerGetWords.some((word) => new RegExp(word, 'i').test(text));
+  const doubler = doubles.length > 0 && brings ? rules.heroPowerSpellValue : 0;
+
+  // Сила героя — такой же читаемый текст, как текст миньона борда, и связи
+  // из неё читаются теми же таблицами. Прежде ценность покупки смотрела
+  // только на борд и на саму карту, и герой не влиял ни на что (part22,
+  // ход 1: Грибомант Флургл, «After you sell 5 minions, get a random
+  // Murloc», — а советник предложил дракона вместо мурлока, чья ценность
+  // реализуется ровно продажей).
+  //
+  // Два слагаемых, оба однократные — это факт о КАНДИДАТЕ, а не о числе
+  // своих на борде:
+  //  - племя, названное силой: вес как у племени из текста карты
+  //    (`perTextTribeMate`) — упоминание слабее принадлежности;
+  //  - продажа: сила платит за то же действие, которым карта отдаёт своё
+  //    обещание, поэтому вес тот же, что у собственной экономики карты.
+  const heroPowerText = state.hero?.heroPowerCardId == null
+    ? ''
+    : (cards.info(state.hero.heroPowerCardId)?.text ?? '');
+  let heroPower = 0;
+  if (heroPowerText !== '') {
+    const myRaces = racesOf(candidate, cards);
+    const heroTribes = Object.entries(rules.tribeTextWords)
+      .filter(([, word]) => new RegExp(`\\b(?:${word})\\b`, 'i').test(heroPowerText))
+      .map(([race]) => race);
+    if (heroTribes.some((r) => myRaces.includes(r) || myRaces.includes(RACE_ALL))) {
+      heroPower += w.perTextTribeMate;
+    }
+    const heroSells = rules.heroPowerSellWords.some((word) =>
+      new RegExp(word, 'i').test(heroPowerText),
+    );
+    const cardSells =
+      text !== '' && rules.sellValueWords.some((word) => new RegExp(word, 'i').test(text));
+    if (heroSells && cardSells) heroPower += w.economy;
+  }
+
   return {
     techLevel: tech,
     stats,
@@ -537,6 +621,8 @@ export function minionValue(
     textMech,
     namedCard,
     spellMagnet,
+    doubler,
+    heroPower,
     total:
       tech +
       stats +
@@ -549,7 +635,9 @@ export function minionValue(
       textTribe +
       textMech +
       namedCard +
-      spellMagnet,
+      spellMagnet +
+      doubler +
+      heroPower,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -653,6 +741,24 @@ export function magnetizeTarget(
   }
 
   return largest(pool);
+}
+
+/**
+ * Работает ли миньон ИЗ РУКИ — по собственному тексту.
+ *
+ * Признак читаемый и в пуле массовый ровно настолько, насколько нужен:
+ * карт с «in your hand» четырнадцать, и ВСЕ мурлоки. Трое из них работают
+ * из руки сами (Flighty Scout, Bream Counter, Timewarped Astrogill),
+ * остальные одиннадцать рукой питаются — тех этот признак не ловит,
+ * и правильно: они как раз хотят на борд.
+ */
+export function isHandWorker(
+  minion: Minion,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): boolean {
+  const text = cards.info(minion.cardId)?.text ?? '';
+  return text !== '' && rules.handWorkerWords.some((w) => new RegExp(w, 'i').test(text));
 }
 
 /** Магнитный ли миньон — механика MODULAR в справочнике. */
@@ -1031,6 +1137,7 @@ export function buyRules(
       if (value.namedCardMates > 0) {
         notes.push(`связана по имени: своих ${String(value.namedCardMates)}`);
       }
+      if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
       if (value.economy > 0) notes.push('вернёт часть цены при продаже');
       if (minion.golden) notes.push('золотой');
       if (host !== null) {
@@ -1118,6 +1225,31 @@ export function playRules(
       ) ??
         false);
     if (doomed && !doomedWorthIt) return [];
+
+    // Карта, РАБОТАЮЩАЯ ИЗ РУКИ, розыгрышем себя же и отменяет. Признак —
+    // её собственный текст (`handWorkerWords`), и пород две:
+    //
+    //  - «Start of Combat: If this minion is in your hand, summon a copy
+    //    of it» (Flighty Scout). Тел в бою поровну: копия приходит и без
+    //    розыгрыша. Разница только в слоте — разыгранная карта занимает
+    //    место на борде НАВСЕГДА, а лежащая в руке воюет бесплатно. Это
+    //    арифметика из текста карты, а не мнение.
+    //  - «While this is in your hand, after you play a Murloc, gain
+    //    +{0}/+{1}» (Bream Counter). Розыгрыш ОСТАНАВЛИВАЕТ рост, и цена
+    //    остановки ближайшему бою невидима — ровно как у экономики.
+    //    На part22 план каждый ход предлагал выставить счетовода; игрок
+    //    держал его в руке, и тот дорос с 208/206 до 670/668.
+    //
+    // Замер (`npm run spike:hand`) правило НЕ доказывает и на это не
+    // претендует: он объявлен негодным по собственному предрегистрированному
+    // критерию — контроль своего порога не взял (0.648 при 1.170), потому
+    // что на 59 точках из 68 лишнее тело ближайший бой не меняет вовсе.
+    // Что он показал — согласие: у «играет из руки» разность розыгрыша
+    // −0.05 п.п., то есть ровно ноль, при +0.65 у обычной карты. Числа
+    // и оговорки — в docs/tavern.md.
+    //
+    // Купить такую карту по-прежнему советуется: из руки она и работает.
+    if (isHandWorker(minion, deps.cards, rules)) return [];
 
     let value = minionValue(minion, state, deps, rules);
 
@@ -1614,6 +1746,14 @@ export function freezeRule(
   const bestKept = valued.slice(affordable)[0]?.value ?? 0;
   const spellThreshold = Math.max(0, threshold - bestKept);
 
+  // Сколько покупок игрок сделает в тот ход, ради которого держит витрину.
+  // Золото хода таверны N — правило игры, записанное у `tavernTurnOf`:
+  // `min(2 + N, 10)`. Нужно затем, что заклинание, крадущее ИЗ ВИТРИНЫ,
+  // получит не среднюю её карту, а среднюю из ОСТАВШИХСЯ: лучшие к тому
+  // моменту будут куплены.
+  const nextGold = Math.min(2 + tavernTurnOf(state.turn) + 1, 10);
+  const nextAffordable = Math.floor(nextGold / rules.minionCost);
+
   const spellKeeper =
     state.board.length >= rules.boardSize
       ? undefined
@@ -1622,9 +1762,21 @@ export function freezeRule(
             if (spell.unplayable || spell.cost <= state.gold) return [];
             const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
             if (effect === null || !effect.givesMinion) return [];
+
             // Заморозка судится не сегодняшним золотом, а тем ходом, ради
             // которого держат витрину: там хватит и на покупку, и на неё.
-            const { score } = givesMinionValue(state, deps, rules, spell.cost, false);
+            //
+            // Заклинание, крадущее ИЗ ВИТРИНЫ, получает то, что в ней
+            // ОСТАНЕТСЯ после покупок того хода: лучшие карты мы к тому
+            // моменту купим сами.
+            const stealsFromShop = rules.givesMinionFromShopWords.some((w) =>
+              new RegExp(w, 'i').test(deps.cards.info(spell.cardId)?.text ?? ''),
+            );
+
+            const pool = stealsFromShop
+              ? valued.slice(nextAffordable).map((v) => v.minion)
+              : state.shop;
+            const { score } = givesMinionValue(state, deps, rules, spell.cost, false, pool);
             return score >= spellThreshold ? [{ spell, score: score - spellThreshold }] : [];
           })
           .sort((a, b) => b.score - a.score)[0];
@@ -1706,6 +1858,15 @@ export function freezeRule(
  * наоборот: она и есть ставка на ход, где золота хватит на оба действия,
  * — там скидка и есть весь смысл (part17, ход 1: заморозить при нулевом
  * золоте, чтобы на пяти купить одного и украсть второго).
+ *
+ * `pool` — из чего именно придёт миньон. По умолчанию это вся витрина, и для
+ * «Get a random minion» так и есть. Но «Steal a random minion FROM THE
+ * TAVERN» (Enchanted Lasso) берёт из ТОЙ ЖЕ витрины, которую мы сейчас
+ * оцениваем, — а к моменту применения лучшие карты из неё уже куплены.
+ * Считать ожидание по всей витрине значило считать лучшую карту дважды:
+ * и «мы её купим», и «лассо может её дать». Случай part22 (ход 7 и дальше):
+ * игрок про повторяющийся совет заморозить лассо сказал «не вижу
+ * практического эффекта от этой карты» — и был прав ровно этим.
  */
 function givesMinionValue(
   state: GameState,
@@ -1713,8 +1874,9 @@ function givesMinionValue(
   rules: TavernRules,
   cost: number,
   spendNow: boolean,
+  pool: readonly Minion[] = state.shop,
 ): { readonly score: number; readonly average: number; readonly discounted: boolean } {
-  const shopValues = state.shop.map((m) => minionValue(m, state, deps, rules).total);
+  const shopValues = pool.map((m) => minionValue(m, state, deps, rules).total);
   const average =
     shopValues.length > 0
       ? shopValues.reduce((a, b) => a + b, 0) / shopValues.length
@@ -3038,6 +3200,7 @@ export function choiceAdvice(
     if (value.textTribeMates > 0) {
       notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
     }
+    if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
     if (info.magnetic) notes.push('магнитный');
 
     return {

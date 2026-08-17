@@ -293,6 +293,18 @@ export interface TavernRules {
   readonly givesMinionWords: readonly string[];
 
   /**
+   * Признак «миньон придёт ИЗ ВИТРИНЫ, а не из пула»: «Steal a random minion
+   * from the Tavern» (Enchanted Lasso).
+   *
+   * Разница не косметическая. Если миньон берётся из витрины, которую мы
+   * прямо сейчас и оцениваем, то к моменту применения лучших карт в ней
+   * уже не будет — мы их купим. Ожидание по всей витрине считает лучшую
+   * карту дважды и потому завышено (part22, ход 7: повторяющийся совет
+   * заморозить лассо, «практического эффекта не вижу»).
+   */
+  readonly givesMinionFromShopWords: readonly string[];
+
+  /**
    * Признаки «сила обновляет витрину» в тексте силы героя — и цена такого
    * напоминания в очках.
    *
@@ -415,6 +427,65 @@ export interface TavernRules {
    * статы уходят не нам.
    */
   readonly spellMagnetGainWords: readonly string[];
+
+  /**
+   * Признак силы героя, срабатывающей НА ПРОДАЖЕ миньона.
+   *
+   * Случай part22 (ход 1): герой — Грибомант Флургл, сила «Рыбалка»
+   * (`TB_BaconShop_HP_056`, «After you sell 5 minions, get a random
+   * Murloc»). В витрине лежал River Skipper («When you sell this, get
+   * a random Tier 1 minion») — карта, чья ценность реализуется ровно тем
+   * действием, которое сила героя и вознаграждает: продажа платит дважды.
+   * Советник же предложил дракона, потому что ценность покупки читала
+   * только борд и текст самой карты, а силу героя — никогда.
+   *
+   * Таких сил в пуле четыре («Smart Savings», «Рыбалка», «Devour»,
+   * «Tentacular»), и все четыре пишут продажу словами.
+   */
+  readonly heroPowerSellWords: readonly string[];
+
+  /**
+   * Признак УДВОИТЕЛЯ механики: миньон, чей текст говорит, что механика
+   * срабатывает дважды или лишний раз.
+   *
+   * В пуле таких ровно трое, и они делят между собой три механики: Бранн
+   * Бронзобород `BG_LOE_077` («Your Battlecries trigger twice»), Titus
+   * Rivendare `BG25_354` («Your Deathrattles trigger an extra time»),
+   * Drakkari Enchanter `BG26_ICC_901` («Your end of turn effects trigger
+   * twice»). Все трое — AURA, все трое усиливают ЧУЖОЕ.
+   *
+   * Удвоитель — не рядовая связь. `perTextMechMate` считает его одним
+   * «своим по механике» (1.5 очка), а он множит эффект кандидата: при
+   * Бранне «Battlecry: Get a Deepwater Clan» приносит ДВЕ карты. Случай
+   * part22 (ход 23): Бранн на борде, выбор из трёх мурлоков, и Deepwater
+   * Chieftain с кличем стоял ВТОРЫМ (21.0) после Cousin Errgl (24.0),
+   * у которого эффект в конце хода и удваивать его некому.
+   */
+  readonly mechanicDoublerWords: readonly string[];
+
+  /**
+   * Какую механику удвоитель называет. Ключ — имя механики в `mechanics`
+   * снапшота, значение — слово в тексте удвоителя.
+   *
+   * Таблица отдельна от `mechanicTextWords` СОЗНАТЕЛЬНО: та задаёт обычную
+   * двустороннюю синергию и применяется широко, а здесь нужен ровно один
+   * вопрос — «удваивается ли механика кандидата», — и расширять первую
+   * таблицу ради него значило бы менять ценность там, где никто не жаловался.
+   * Поэтому здесь есть END_OF_TURN, которого нет там.
+   */
+  readonly doubledMechanicWords: Readonly<Record<string, string>>;
+
+  /**
+   * Признак «триггер ПРИНОСИТ карту»: за словом триггера в том же
+   * предложении стоит get/discover/add.
+   *
+   * Отличается от `battlecryGetWords` тем, что не привязан к кличу: удваивать
+   * можно и хрип, и конец хода. Нужен, чтобы удвоитель добавлял очки только
+   * там, где известно ЧТО именно удваивается: принесённая карта имеет курс
+   * (`heroPowerSpellValue`), а «срабатывает дважды» у эффекта без добычи
+   * оценить нечем — там остаётся обычная связь `perTextMechMate`.
+   */
+  readonly triggerGetWords: readonly string[];
 
   /**
    * Признак миньона, который РАБОТАЕТ ИЗ РУКИ: его собственный текст
@@ -680,6 +751,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     'discover[^.]*\\bbuddy\\b',
   ],
 
+  givesMinionFromShopWords: ['from\\s+the\\s+tavern'],
+
   heroPowerRefreshWords: ['refresh[^.]*tavern'],
   freeHeroPowerValue: 2,
 
@@ -715,15 +788,34 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   spellMagnetGainWords: ['\\bgain\\s+\\+'],
 
-  handWorkerWords: ['\\b(?:if|while) this(?: minion)? is in your hand\\b'],
+  heroPowerSellWords: ['\\b(?:after|when|whenever)\\s+you\\s+sell\\b'],
+
+  mechanicDoublerWords: ['\\btriggers?\\s+(?:twice|an\\s+extra\\s+time)\\b'],
+
+  doubledMechanicWords: {
+    BATTLECRY: 'battlecr(?:y|ies)',
+    DEATHRATTLE: 'deathrattles?',
+    END_OF_TURN: 'end\\s+of\\s+turn',
+  },
+
+  triggerGetWords: [
+    '\\b(?:battlecr(?:y|ies)|deathrattles?|at\\s+the\\s+end\\s+of\\s+your\\s+turn)\\b[^.]*' +
+      '\\b(?:gets?|discovers?|adds?)\\b',
+  ],
+
+  // Пробелы здесь ОБЯЗАНЫ быть `\s+`: тексты снапшота переносят строки
+  // посреди предложения, и у Flighty Scout стоит «If this\nminion is in
+  // your hand». Шаблон с обычным пробелом не совпадал МОЛЧА — первый прогон
+  // замера дал по этой группе ноль точек при карте, лежавшей в руке
+  // пол-партии. Тот же класс ошибки, что смертники и бафф соседям (part16).
+  handWorkerWords: ['\\b(?:if|while)\\s+this(?:\\s+minion)?\\s+is\\s+in\\s+your\\s+hand\\b'],
 
   handFeederWords: [
-    '\\bminions? in your hand\\b',
-    '\\bin your hand and board\\b',
-    // «Gain the stats of all the minions in your hand» — множественное
-    // число уже покрыто первым шаблоном; отдельный нужен племенной формы
-    // («give Murlocs in your hand…»), где слова «minion» нет вовсе.
-    '\\b(?:murlocs?|beasts?|demons?|dragons?|elementals?|mechs?|nagas?|pirates?|quilboars?|undead) in your hand\\b',
+    '\\bminions?\\s+in\\s+your\\s+hand\\b',
+    '\\bin\\s+your\\s+hand\\s+and\\s+board\\b',
+    // Племенная форма («give Murlocs in your hand…»), где слова «minion»
+    // нет вовсе — Shamanic Tidecaller, Timewarped Mrrrglr.
+    '\\b(?:murlocs?|beasts?|demons?|dragons?|elementals?|mechs?|nagas?|pirates?|quilboars?|undead)\\s+in\\s+your\\s+hand\\b',
   ],
 
   selfAuraWords: ['\\bhas \\+'],

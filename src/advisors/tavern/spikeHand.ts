@@ -82,6 +82,24 @@
  *  - на полном борде жертвой берётся слабейший по статам, а не по правилам
  *    продажи: замер про руку, а не про выбор жертвы;
  *  - золото не тратится ни в одной ветви — сравниваются ровно рука и борд.
+ *
+ * ## Отменённый прогон — записан, а не стёрт
+ *
+ * Первый прогон (17.08) объявлен НЕГОДНЫМ по собственному правилу приёмки:
+ * контроль не превысил своего порога (3.343 при 3.976), а группа 1a осталась
+ * ПУСТОЙ — при том что Flighty Scout лежал в руке пол-партии part22.
+ * Причина — в шаблоне: в снапшоте у карты стоит «If this\nminion is in your
+ * hand», и шаблон с обычным пробелом не совпал молча. Это ровно та ловушка,
+ * что записана в CLAUDE.md после part16. Шаблоны переписаны на `\s+`,
+ * пороги и группы остались прежними — переигран прогон, а не критерий.
+ *
+ * Второй прогон контроль тоже не взял (3.390 при 4.030), и диагностика
+ * показала второй дефект ИНСТРУМЕНТА: в контроль попадал Polarizing
+ * Beatboxer из part8 — карта под замком тринкета (`LITERALLY_UNPLAYABLE`),
+ * которую разыграть НЕЛЬЗЯ. Одна такая точка давала −15 п.п. и разгоняла
+ * разброс контроля. Ветвь «разыграть» обязана быть выполнимой в игре,
+ * поэтому неиграбельные и смертники исключены тем же условием, каким
+ * их отсекает `playRules`. Критерии приёмки снова не менялись.
  */
 import { readFileSync } from 'node:fs';
 
@@ -127,7 +145,7 @@ function isHandWorker(m: Minion, cards: CardIndex, rules: TavernRules): boolean 
 /** Он же, но с призывом: эффект случается в самом бою (Flighty Scout). */
 function playsFromHand(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
   const text = textOf(m, cards);
-  return matches(text, rules.handWorkerWords) && /\bsummon\b/i.test(text);
+  return matches(text, rules.handWorkerWords) && /\bsummons?\b/i.test(text);
 }
 
 /** Миньон борда, читающий ЧУЖИЕ карты руки. */
@@ -175,12 +193,19 @@ function main(): void {
           : fitting.reduce((a, b) => (stats(b) > stats(a) ? b : a));
       };
 
-      const plain = (m: Minion): boolean => !isHandWorker(m, cards, rules);
+      // Ветвь «разыграть» обязана быть выполнимой: карту под замком тринкета
+      // (`LITERALLY_UNPLAYABLE`) в игре не выставить, и её «розыгрыш» —
+      // не решение игрока, а выдумка замера. `playRules` отсекает такие
+      // на входе, и замер обязан отсекать так же.
+      const playable = (m: Minion): boolean => (m.tags['LITERALLY_UNPLAYABLE'] ?? 0) <= 0;
+      const plain = (m: Minion): boolean => playable(m) && !isHandWorker(m, cards, rules);
       const candidates: [Group, Minion | null][] = [
-        ['playsFromHand', pick((m) => playsFromHand(m, cards, rules))],
+        ['playsFromHand', pick((m) => playable(m) && playsFromHand(m, cards, rules))],
         [
           'growsInHand',
-          pick((m) => isHandWorker(m, cards, rules) && !playsFromHand(m, cards, rules)),
+          pick(
+            (m) => playable(m) && isHandWorker(m, cards, rules) && !playsFromHand(m, cards, rules),
+          ),
         ],
         [feederOnBoard ? 'feeders' : 'control', pick(plain)],
       ];
@@ -285,6 +310,22 @@ function main(): void {
     `    1b растёт в руке: ${(byGroup.get('growsInHand')?.mean ?? 0).toFixed(3)} п.п. — ` +
       'ближайший бой роста не видит, вердикт по группе не выносится',
   );
+
+  // Диагностика, НЕ предрегистрированная и на вердикт не влияющая: на
+  // большинстве точек обе ветви дают тождественный исход (борд решает бой
+  // и без лишнего тела). У парной разности с нулями среднее и ошибка
+  // сжимаются вместе, поэтому отношение то же, — но читать группы рядом
+  // проще по точкам, где ветви вообще разошлись.
+  console.log('\n  диагностика (не предрегистрирована) — только разошедшиеся точки:');
+  for (const group of ['playsFromHand', 'growsInHand', 'feeders', 'control'] as const) {
+    const s = summary(
+      points.filter((p) => p.group === group && Math.abs(p.delta) > 0.05).map((p) => p.delta),
+    );
+    console.log(
+      `    ${group.padEnd(14)} n=${String(s.n).padStart(2)}  среднее ${s.mean.toFixed(2).padStart(6)} п.п.` +
+        `  порог ${(2 * s.se).toFixed(2)}`,
+    );
+  }
 
   // Диагностика, НЕ предрегистрированная: самые крупные расхождения по карте.
   const worst = [...points].sort((a, b) => a.delta - b.delta).slice(0, 5);
