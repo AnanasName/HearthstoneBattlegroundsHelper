@@ -72,6 +72,8 @@ const FIXTURES = [
   'data/fixtures/part17/game.log',
   'data/fixtures/part18/game.log',
   'data/fixtures/part19/game.log',
+  'data/fixtures/part20/game.log',
+  'data/fixtures/part21/game.log',
 ] as const;
 
 /** Разделение статов замера: сумма одна, розданы по-разному. */

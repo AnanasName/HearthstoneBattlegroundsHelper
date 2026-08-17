@@ -17,7 +17,7 @@ import { DATASET_DIR, type DatasetRecord } from './recorder.js';
  * Скрипт идемпотентен: существующие файлы не перезаписываются.
  */
 
-const FIXTURES = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
+const FIXTURES = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21] as const;
 
 function main(): void {
   mkdirSync(DATASET_DIR, { recursive: true });

@@ -223,6 +223,22 @@ export function part20Game(): string {
 }
 
 /**
+ * Партия 21 — 17.08.2026 (15:47–16:12), тринадцатая партия с оверлеем
+ * (наги на заклинаниях, 2-е место). Два пункта обратной связи, оба про
+ * ЗАКЛИНАНИЯ НА МИНЬОНА. Фактура: магниты заклинаний (Lava Lurker
+ * `BG23_009` — «The first Spellcraft spell played from hand on this each
+ * turn is permanent», заряд в живом теге TAG_SCRIPT_DATA_NUM_1; Fleeing
+ * Fugitive `BG36_921` — «Whenever you cast a spell on this, gain +{0}
+ * Health», у нас {0}=1), временное усиление («+2 Attack until next turn»
+ * у чародейского токена Mini-Trident `BG23_000t`), носитель ралли
+ * с призывом ИЗ РУКИ (Expert Aviator `BG34_140` — из-за него в симулятор
+ * поехала рука).
+ */
+export function part21Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part21', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция
