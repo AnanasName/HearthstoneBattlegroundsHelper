@@ -29,6 +29,7 @@
     "update:bgstats": "tsx src/data/updateBgStats.ts",
     "update:cardstats": "tsx src/data/updateCardStats.ts",
     "dataset:backfill": "tsx src/dataset/backfill.ts",
+    "ml:eval": "tsx src/ml/report.ts",
     "measure:cardstats": "tsx src/advisors/tavern/measureCardStats.ts",
     "analyze:cardstats": "tsx src/advisors/tavern/analyzeCardStats.ts",
     "typecheck": "tsc --noEmit",
