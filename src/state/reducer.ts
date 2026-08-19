@@ -2,9 +2,10 @@ import {
   insideBlock,
   readPowerEvents,
   SOURCE_OF_TRUTH,
+  type BlockContext,
   type PowerEvent,
 } from '../parser/blocks.js';
-import { parseEntityDescriptor } from '../parser/entity.js';
+import { entityIdOf, parseEntityDescriptor } from '../parser/entity.js';
 import { readPlayers, type Players } from './players.js';
 import {
   BOARD_VISUAL_STATE_COMBAT,
@@ -15,8 +16,11 @@ import {
   type Enchantment,
   type GameState,
   type GlobalInfo,
+  type LobbyPlayer,
   type Minion,
   type Phase,
+  type PlayerAction,
+  type PlayerActionType,
 } from './types.js';
 
 /**
@@ -56,6 +60,16 @@ const DARK_GIFT_BUTTON = 'BG36_Button_DarkGift';
 
 /** Кнопка обновления витрины — её `COST` и есть живая цена реролла. */
 const REROLL_BUTTON = 'TB_BaconShop_8p_Reroll_Button';
+
+/**
+ * Перетаскиватели покупки и продажи: блок `PLAY` на них несёт карту-цель
+ * в `Target=[…]` (part17: 19 покупок миньонов, 9 заклинаний, 44 продажи —
+ * все этой формой). Кнопка заморозки держит всю витрину разом.
+ */
+const DRAG_BUY = 'TB_BaconShop_DragBuy';
+const DRAG_BUY_SPELL = 'TB_BaconShop_DragBuy_Spell';
+const DRAG_SELL = 'TB_BaconShop_DragSell';
+const LOCK_ALL_BUTTON = 'TB_BaconShopLockAll_Button';
 
 /**
  * Заголовок открытия выбора: `id=3 Player=AngryMem#2886 TaskList= ChoiceType=GENERAL …`.
@@ -197,6 +211,40 @@ export function createReducer(players: Players): Reducer {
   let heroPowerUsedThisTurn = false;
   let darkGiftUsedThisTurn = false;
   const activatedEntityIds = new Set<number>();
+
+  /**
+   * Журнал своих действий за партию — сырьё фазы 6 («какие действия ведут
+   * к победе» не выучить, не записывая действий). Блок PLAY стоит в стеке
+   * у многих событий подряд, а действие он значит ОДНО: WeakSet по самому
+   * объекту блока делает запись одноразовой — стек держит один объект
+   * от открытия до закрытия, и события несут ссылки на него.
+   */
+  const actions: PlayerAction[] = [];
+  const journaledBlocks = new WeakSet<BlockContext>();
+
+  const journal = (
+    block: BlockContext,
+    type: PlayerActionType,
+    cardId: string | null,
+    entityId: number | null,
+  ): void => {
+    if (journaledBlocks.has(block)) return;
+    journaledBlocks.add(block);
+    actions.push({ turn, type, cardId: cardId === '' ? null : cardId, entityId });
+  };
+
+  /** Карта-цель блока покупки или продажи — из `Target=[…]` его строки. */
+  const targetOf = (block: BlockContext): { cardId: string | null; entityId: number | null } => {
+    const t = block.target;
+    if (t === null) return { cardId: null, entityId: null };
+    if (t.kind === 'descriptor') {
+      return {
+        cardId: t.descriptor.cardId === '' ? null : t.descriptor.cardId,
+        entityId: t.descriptor.id,
+      };
+    }
+    return { cardId: null, entityId: entityIdOf(t) };
+  };
 
   /** Сущность, к которой относятся идущие следом строки `tag=…`. */
   let current: Entity | null = null;
@@ -559,16 +607,44 @@ export function createReducer(players: Players): Reducer {
     // Нажатия силы героя, тёмного дара и активаций миньонов видны только
     // по блокам PLAY на их сущностях — тега-расхода у них нет. Смотрим стек
     // каждого события: блок открылся раньше, чем пришло его содержимое.
+    // Тем же проходом ведётся журнал действий: покупка и продажа — блоки
+    // на перетаскивателях с картой-целью, кнопки — обновление, подъём,
+    // заморозка, розыгрыш — блок на карте, стоявшей в руке.
     for (const block of event.blocks) {
       if (block.blockType !== 'PLAY' || block.entityId === null) continue;
       const pressed = entities.get(block.entityId);
       if (pressed === undefined || pressed.controller !== players.selfPlayerId) continue;
-      if (pressed.cardType === 'HERO_POWER') heroPowerUsedThisTurn = true;
-      else if (pressed.cardId === DARK_GIFT_BUTTON) darkGiftUsedThisTurn = true;
-      else if (pressed.cardType === 'MINION' && pressed.zone === 'PLAY') {
+      if (pressed.cardType === 'HERO_POWER') {
+        heroPowerUsedThisTurn = true;
+        journal(block, 'heroPower', pressed.cardId, pressed.id);
+      } else if (pressed.cardId === DARK_GIFT_BUTTON) {
+        darkGiftUsedThisTurn = true;
+        journal(block, 'darkGift', pressed.cardId, pressed.id);
+      } else if (pressed.cardType === 'MINION' && pressed.zone === 'PLAY') {
         // Активация: блок PLAY на миньоне, уже СТОЯЩЕМ на борде, — розыгрыш
         // из руки отличается зоной сущности (part14, Suspicious Prisonguard).
         activatedEntityIds.add(pressed.id);
+        journal(block, 'activate', pressed.cardId, pressed.id);
+      } else if (pressed.cardId === DRAG_BUY || pressed.cardId === DRAG_BUY_SPELL) {
+        const bought = targetOf(block);
+        journal(block, 'buy', bought.cardId, bought.entityId);
+      } else if (pressed.cardId === DRAG_SELL) {
+        const sold = targetOf(block);
+        journal(block, 'sell', sold.cardId, sold.entityId);
+      } else if (pressed.cardId === REROLL_BUTTON) {
+        journal(block, 'roll', null, null);
+      } else if (TECH_UP_BUTTON_RE.test(pressed.cardId)) {
+        journal(block, 'levelUp', null, null);
+      } else if (pressed.cardId === LOCK_ALL_BUTTON) {
+        journal(block, 'freeze', null, null);
+      } else {
+        // Розыгрыш из руки: зона берётся из дескриптора строки BLOCK_START —
+        // к следующим событиям блока карта уже успевает сменить зону.
+        const zoneAtPress =
+          block.entity !== null && block.entity.kind === 'descriptor'
+            ? block.entity.descriptor.zone
+            : pressed.zone;
+        if (zoneAtPress === 'HAND') journal(block, 'play', pressed.cardId, pressed.id);
       }
     }
 
@@ -875,7 +951,12 @@ export function createReducer(players: Players): Reducer {
     // может быть представлен несколькими сущностями героя (пересадки,
     // дубликаты в SETASIDE), поэтому значения сливаются в множество.
     const trinketsByPlayer: Record<number, number[]> = {};
+    // Тем же проходом собираются сущности героев для таблицы лобби ниже:
+    // снимок делается на каждом шаге разбора, и второй обход всей карты
+    // сущностей стоит дороже, чем сортировка двух десятков героев.
+    const heroEntities: Entity[] = [];
     for (const e of entities.values()) {
+      if (e.cardType === 'HERO' && e.zone !== 'REMOVEDFROMGAME') heroEntities.push(e);
       const first = e.tags.get('BACON_FIRST_TRINKET_DATABASE_ID') ?? 0;
       const second = e.tags.get('BACON_SECOND_TRINKET_DATABASE_ID') ?? 0;
       if (first <= 0 && second <= 0) continue;
@@ -885,6 +966,39 @@ export function createReducer(players: Players): Reducer {
       for (const dbfId of [first, second]) {
         if (dbfId > 0 && !known.includes(dbfId)) known.push(dbfId);
       }
+    }
+
+    // Игроки лобби — по сущностям ГЕРОЕВ: тег `PLAYER_ID` связывает сущность
+    // с игроком, остальное лежит тегами там же (`PLAYER_TECH_LEVEL`,
+    // `PLAYER_LEADERBOARD_PLACE`, `HEALTH`/`DAMAGE`/`ARMOR`).
+    //
+    // Сущностей героя у одного игрока НЕСКОЛЬКО, и лишние врут. Живые
+    // изменения приходят на ту, что создана в начале партии; копии для
+    // модальных выборов (варианты «Дружеской ставки», кандидаты муллигана)
+    // создаются позже и остаются с тегами момента создания — у них
+    // и `PLAYER_TECH_LEVEL=0`, и место чужое. Поэтому: отработавшие копии
+    // отсеиваются зоной `REMOVEDFROMGAME`, а из оставшихся берётся сущность
+    // с НАИМЕНЬШИМ id — настоящий герой; остальные лишь дополняют пустые
+    // поля.
+    const lobby: Record<number, LobbyPlayer> = {};
+    // Сортируются только герои (их два десятка), а не все сущности. Порядок
+    // убывающий, а запись перетирает: значит, последней ложится сущность
+    // с НАИМЕНЬШИМ id — настоящий герой, — а старшие лишь заполняют пустые
+    // поля через `previous`.
+    heroEntities.sort((a, b) => b.id - a.id);
+    for (const e of heroEntities) {
+      const owner = heroOwner.get(e.id) ?? e.tags.get('PLAYER_ID');
+      if (owner === undefined) continue;
+      const previous = lobby[owner];
+      lobby[owner] = {
+        playerId: owner,
+        heroCardId: e.cardId === '' ? (previous?.heroCardId ?? '') : e.cardId,
+        health: e.tags.get('HEALTH') ?? previous?.health ?? null,
+        damage: e.tags.get('DAMAGE') ?? previous?.damage ?? 0,
+        armor: e.tags.get('ARMOR') ?? previous?.armor ?? 0,
+        techLevel: e.tags.get('PLAYER_TECH_LEVEL') ?? previous?.techLevel ?? null,
+        place: e.tags.get('PLAYER_LEADERBOARD_PLACE') ?? previous?.place ?? null,
+      };
     }
 
     return {
@@ -908,6 +1022,7 @@ export function createReducer(players: Players): Reducer {
       wonLastCombat,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
       lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
+      lobby,
       darkGiftCost: darkGiftButton(),
       darkGiftUsedThisTurn,
       trinketOffer,
@@ -949,6 +1064,9 @@ export function createReducer(players: Players): Reducer {
       buildNumber,
       playerBattleTag: players.selfName,
       playerId: self,
+      // Копия на снимок: журнал растёт по ходу партии, а снимок обязан
+      // быть неизменным. Порядок — порядок совершения, он детерминирован.
+      actions: [...actions],
       board: mine('PLAY'),
       hand: mine('HAND'),
       // Заклинания руки — отдельным списком: белый список CARDTYPE=SPELL,

@@ -63,6 +63,12 @@ export interface BlockContext {
   readonly entity: EntityRef | null;
   /** Идентификатор источника, если он выводится из ссылки. */
   readonly entityId: number | null;
+  /**
+   * Цель блока из `Target=[…]` — у покупки и продажи это карта-цель
+   * (part17: `Entity=[…DragBuy…] Target=[…Трескучий циклон…]`).
+   * `Target=0` — без цели, здесь null.
+   */
+  readonly target: EntityRef | null;
   /** Отступ строки BLOCK_START — по нему блок и закрывается. */
   readonly indent: number;
 }
@@ -83,10 +89,13 @@ function parseBlockStart(line: LogLine): BlockContext | null {
   if (blockType === undefined) return null;
 
   const entity = parseEntityFrom(line.content);
+  const target = parseEntityFrom(line.content, 'Target=');
   return {
     blockType,
     entity,
     entityId: entity === null ? null : entityIdOf(entity),
+    // `Target=0` разбирается в голый id 0 — это «без цели», не сущность.
+    target: target !== null && entityIdOf(target) === 0 ? null : target,
     indent: line.indent,
   };
 }

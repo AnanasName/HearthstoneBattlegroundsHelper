@@ -87,6 +87,19 @@ export interface CardIndex {
    * `BACON_FIRST/SECOND_TRINKET_DATABASE_ID` несут числовой идентификатор.
    */
   readonly infoByDbfId: (dbfId: number) => CardInfo | null;
+  /**
+   * Миньоны пула Battlegrounds указанного тира.
+   *
+   * Нужны там, где текст карты называет ТИР, а не витрину: «Get a random
+   * Tier 1 minion» (Recruit a Trainee) приносит миньона из пула первого тира,
+   * и на четвёртом тире это совсем не то же, что средняя карта витрины
+   * (part23, ход 11 — жалоба игрока: «получать за 2 золота существо из 1
+   * таверны не настолько хорошая идея»).
+   *
+   * Золотые копии (`_G`) из пула исключены: в витрине и в наградах ходит
+   * обычная версия, а золотая — та же карта, посчитанная дважды.
+   */
+  readonly poolOfTier: (techLevel: number) => readonly CardInfo[];
   readonly size: number;
 }
 
@@ -121,6 +134,7 @@ export function normalizeCardText(text: string): string {
 export function createCardIndex(raw: readonly unknown[]): CardIndex {
   const byId = new Map<string, CardInfo>();
   const byDbfId = new Map<number, CardInfo>();
+  const byTier = new Map<number, CardInfo[]>();
 
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue;
@@ -145,11 +159,18 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
     };
     byId.set(card.id, info);
     if (info.dbfId !== null) byDbfId.set(info.dbfId, info);
+
+    if (info.isBaconPool && info.type === 'MINION' && info.techLevel !== null && !info.id.endsWith('_G')) {
+      const tier = byTier.get(info.techLevel);
+      if (tier === undefined) byTier.set(info.techLevel, [info]);
+      else tier.push(info);
+    }
   }
 
   return {
     size: byId.size,
     infoByDbfId: (dbfId) => byDbfId.get(dbfId) ?? null,
+    poolOfTier: (techLevel) => byTier.get(techLevel) ?? [],
     info: (cardId) => {
       const direct = byId.get(cardId);
       if (direct !== undefined) return direct;

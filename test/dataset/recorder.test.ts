@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DatasetRecorder, type DatasetRecord } from '../../src/dataset/recorder.js';
+import { DatasetRecorder, gameSignature, type DatasetRecord } from '../../src/dataset/recorder.js';
 import { EMPTY_STATE, type GameState, type Hero } from '../../src/state/types.js';
 import { board } from '../minions.js';
 
@@ -99,5 +99,71 @@ describe('накопитель датасета', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]?.checkpoints).toHaveLength(1);
     expect(saved[0]?.checkpoints[0]?.state.shop[0]?.entityId).toBe(900);
+  });
+
+  it('журнал действий из финального состояния попадает в запись', () => {
+    const { recorder, saved } = recorderWithSink();
+    const actions = [
+      { turn: 1, type: 'buy', cardId: 'BGS_119', entityId: 329 },
+      { turn: 1, type: 'play', cardId: 'BGS_119', entityId: 329 },
+    ] as const;
+
+    recorder.update(tavern(1, { gold: 3, goldTotal: 3 }));
+    recorder.update({ ...tavern(1), phase: 'gameOver', finalPlace: 2, actions });
+
+    expect(saved[0]?.actions).toEqual(actions);
+  });
+});
+
+describe('отпечаток партии', () => {
+  /**
+   * Одна и та же партия попадает в датасет двумя путями: живой режим пишет
+   * её на конце сам, а `dataset:backfill` досыпает её из фикстуры. Имена
+   * файлов у них разные (время против номера партии), и проверка «такого
+   * файла ещё нет» их не сводила — так в датасете и оказались пять партий
+   * по два раза. Отпечаток сводит записи по СОДЕРЖАНИЮ.
+   */
+  const record = (patch: Partial<DatasetRecord> = {}): DatasetRecord => ({
+    savedAt: '2026-08-17T20:15:27.000Z',
+    buildNumber: 248348,
+    heroCardId: 'BG34_HERO_000',
+    finalPlace: 3,
+    checkpoints: [{ turn: 1, state: tavern(1) }],
+    ...patch,
+  });
+
+  it('время записи в отпечаток не входит: два пути — одна партия', () => {
+    const live = record({ savedAt: '2026-08-17T20:15:27.000Z' });
+    const backfilled = record({ savedAt: '2026-08-18T09:00:00.000Z' });
+    expect(gameSignature(live)).toBe(gameSignature(backfilled));
+  });
+
+  it('герой, место и билд партию не различают — различает витрина первого хода', () => {
+    // В датасете уже лежат две партии одним героем и с одним местом:
+    // билда, героя и места мало.
+    const same = record();
+    const other = record({ checkpoints: [{ turn: 1, state: tavern(1, { shop: board([999]) }) }] });
+    expect(gameSignature(same)).not.toBe(gameSignature(other));
+  });
+
+  it('другой герой, другое место, другой билд — другая партия', () => {
+    const base = record();
+    expect(gameSignature(record({ heroCardId: 'BG20_HERO_202' }))).not.toBe(gameSignature(base));
+    expect(gameSignature(record({ finalPlace: 4 }))).not.toBe(gameSignature(base));
+    expect(gameSignature(record({ buildNumber: 246003 }))).not.toBe(gameSignature(base));
+  });
+
+  it('порядок карт витрины отпечатка не меняет', () => {
+    const straight = record({
+      checkpoints: [{ turn: 1, state: tavern(1, { shop: board([201, 202]) }) }],
+    });
+    const reversed = record({
+      checkpoints: [{ turn: 1, state: tavern(1, { shop: board([202, 201]) }) }],
+    });
+    expect(gameSignature(straight)).toBe(gameSignature(reversed));
+  });
+
+  it('запись без единой точки решения отпечаток всё же имеет', () => {
+    expect(() => gameSignature(record({ checkpoints: [] }))).not.toThrow();
   });
 });

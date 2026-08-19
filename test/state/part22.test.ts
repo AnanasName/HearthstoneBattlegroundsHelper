@@ -16,6 +16,7 @@ import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
 import { part22Game } from '../fixtures.js';
+import { changesAdvisorState, MINION_STAT_MARKERS } from '../snapshots.js';
 
 /**
  * part22 — четырнадцатая партия с оверлеем (17.08.2026, Грибомант Флургл,
@@ -42,6 +43,14 @@ describe('part22: рука как позиция, сила героя, удво�
     const reducer = createReducer(readPlayers(text));
     for (const event of readPowerEvents(text)) {
       reducer.step(event);
+      // Снимок состояния стоит девяти проходов по карте сущностей, а событий
+      // в логе под двести тысяч: снимаем только там, где менялось что-то
+      // из читаемого селекторами (тот же приём, что в part18 и part19).
+      // Здесь к зонам и ресурсам добавлен канал ВЫБОРОВ — без него не виден
+      // `openChoice` хода 23.
+      const { content } = event.line;
+      // Статы: селектор конца хода 17 ловит счетовода в руке на 208/206.
+      if (!changesAdvisorState(content, MINION_STAT_MARKERS)) continue;
       const s = reducer.snapshot();
 
       // Выбор «Выберите одно» на ходу 23 — ровно эти три мурлока. Проверять
@@ -266,13 +275,30 @@ describe('part22: рука как позиция, сила героя, удво�
     expect(fromShop(trainee)).toBe(false);
   });
 
-  it('пункт 3 (НЕ ЗАКРЫТ до слова игрока): совет заморозки лассо остаётся', () => {
+  /**
+   * ЗАКРЫТ 17.08 — слово игрока пришло в part23: «это работает для ранней
+   * игры; дальше получать за 2 золота существо из 1 таверны не настолько
+   * хорошая идея».
+   *
+   * Ответ оказался не про заморозку, а про ЦЕНУ: заклинание тратит золото
+   * того же хода, что и покупка, и обязано перебить покупку — «свежую карту
+   * своего тира». Планка растёт с тиром сама, и на втором тире лассо её уже
+   * не берёт (8.4 у свежей карты против ~5.5 у средней доживающей). Правило
+   * part19, внесённое по обратной стороне того же спора, отменено вместе
+   * с этим — там тест переписан и хранит историю.
+   */
+  it('пункт 3 (ЗАКРЫТ part23): лассо не держит витрину на втором тире', () => {
     expect(turn7).not.toBeNull();
     if (turn7 === null) return;
 
+    expect(turn7.techLevel).toBe(2);
     const plan = spendPlan(turn7, { cards });
-    expect(plan.steps.some((s) => s.recommendation.action === 'levelUp')).toBe(true);
-    expect(plan.steps.some((s) => s.recommendation.spellCardId === 'BG28_512')).toBe(true);
+    expect(plan.steps.some((s) => s.recommendation.spellCardId === 'BG28_512')).toBe(false);
+    // Витрину план всё же держит — но ради ДРУГОГО и по другой планке:
+    // River Skipper платит продажей, и цепочка «купить-разыграть-продать»
+    // стоит дешевле покупки (part25). Заклинание тут ни при чём.
+    const freeze = plan.steps.find((s) => s.recommendation.action === 'freeze');
+    expect(freeze?.recommendation.minion?.cardId).toBe('BG33_140');
   });
 
   /**

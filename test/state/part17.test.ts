@@ -16,6 +16,7 @@ import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
 import { part17Game } from '../fixtures.js';
+import { changesAdvisorState } from '../snapshots.js';
 
 /**
  * part17 — девятая партия с оверлеем (15.08.2026, элементали, 1-е место),
@@ -50,9 +51,7 @@ describe('part17: лассо в заморозку, цель провокаци�
     for (const event of readPowerEvents(text)) {
       reducer.step(event);
       const { content } = event.line;
-      if (!content.includes('ZONE') && !content.includes('RESOURCES') && !content.includes('COST')) {
-        continue;
-      }
+      if (!changesAdvisorState(content)) continue;
       const s = reducer.snapshot();
       if (s.phase !== 'tavern') continue;
 

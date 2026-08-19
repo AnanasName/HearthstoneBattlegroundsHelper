@@ -16,7 +16,7 @@
  * достаётся телу, которое и так самое крупное, а размен телами — то,
  * ради чего его покупают. Такое различают замером, а не мнением: у нас
  * есть симулятор, который ралли-призыв МОДЕЛИРУЕТ (`expert-aviator.js`),
- * и восемнадцать партий текущего билда.
+ * и все партии текущего билда (`CURRENT_BUILD_PARTS`, сейчас 23).
  *
  * Замер стал возможен только вместе с передачей РУКИ в симулятор (part21):
  * без неё ралли-призыв не срабатывал вовсе, и любая цифра про носителя
@@ -73,28 +73,11 @@ import { toBattleInfo, withPlayerBoard } from '../battle/mapper.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import { battleQuestion } from '../position/advisor.js';
 import { withSeededRandom } from '../position/rng.js';
+import { summarize } from './statAnalysis.js';
 import { readTavernTurns } from './turns.js';
+import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
 
-const FIXTURES = [
-  'data/fixtures/part4/game.log',
-  'data/fixtures/part5/game.log',
-  'data/fixtures/part6/game.log',
-  'data/fixtures/part7/game.log',
-  'data/fixtures/part8/game.log',
-  'data/fixtures/part9/game.log',
-  'data/fixtures/part10/game.log',
-  'data/fixtures/part11/game.log',
-  'data/fixtures/part12/game.log',
-  'data/fixtures/part13/game.log',
-  'data/fixtures/part14/game.log',
-  'data/fixtures/part15/game.log',
-  'data/fixtures/part16/game.log',
-  'data/fixtures/part17/game.log',
-  'data/fixtures/part18/game.log',
-  'data/fixtures/part19/game.log',
-  'data/fixtures/part20/game.log',
-  'data/fixtures/part21/game.log',
-] as const;
+const FIXTURES = CURRENT_BUILD_LOGS;
 
 const SIMULATIONS = 2000;
 const SEED = 20_260_817;
@@ -189,22 +172,8 @@ function main(): void {
     return;
   }
 
-  const summary = (
-    values: readonly number[],
-  ): { n: number; mean: number; se: number; moved: number } => {
-    const n = values.length;
-    const mean = values.reduce((a, b) => a + b, 0) / n;
-    const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1);
-    return {
-      n,
-      mean,
-      se: Math.sqrt(variance / n),
-      moved: values.filter((v) => Math.abs(v) > 0.05).length,
-    };
-  };
-
-  const pure = summary(points.map((p) => p.pure));
-  const whole = summary(points.map((p) => p.whole));
+  const pure = summarize(points.map((p) => p.pure));
+  const whole = summarize(points.map((p) => p.whole));
 
   console.log('\n═══ итог ═══');
   console.log(`  точек решения:            ${String(pure.n)} (пропущено ${String(skipped)})`);
@@ -233,7 +202,7 @@ function main(): void {
   // было прочесть как «эффект мал», когда он просто редко бывает виден:
   // у парной разности с нулями среднее и ошибка сжимаются вместе, и
   // отношение — то же самое.
-  const movedOnly = summary(points.map((p) => p.pure).filter((v) => Math.abs(v) > 0.05));
+  const movedOnly = summarize(points.map((p) => p.pure).filter((v) => Math.abs(v) > 0.05));
   console.log(
     `\n  диагностика (не предрегистрирована): по ${String(movedOnly.n)} точкам, где ветви ` +
       `разошлись, среднее ${movedOnly.mean.toFixed(3)} п.п. при пороге ${(2 * movedOnly.se).toFixed(3)}`,

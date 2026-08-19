@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { GameState } from '../state/types.js';
+import type { GameState, PlayerAction } from '../state/types.js';
 
 /**
  * Накопление датасета собственных партий — сырьё фазы 6 (ML).
@@ -34,6 +34,54 @@ export interface DatasetRecord {
   readonly heroCardId: string | null;
   readonly finalPlace: number | null;
   readonly checkpoints: readonly DatasetCheckpoint[];
+  /**
+   * Журнал действий всей партии — из финального состояния (с 19.08).
+   * У записей, сделанных раньше, поля нет; досбор дописывает его
+   * из фикстур, а живой путь получает из `GameState.actions` сам.
+   */
+  readonly actions?: readonly PlayerAction[];
+}
+
+/**
+ * Отпечаток ПАРТИИ — чтобы одна и та же игра не попала в датасет дважды.
+ *
+ * Нужен он потому, что путей записи два: живой режим пишет партию на её
+ * конце сам, а `dataset:backfill` досыпает партии из фикстур. Одна и та же
+ * партия проходит обоими путями — фикстура это и есть лог той партии, —
+ * и разойтись они могут только именем файла (время записи у них разное).
+ * Досбор проверял ровно имя, поэтому пять партий (part17–part21) лежат
+ * в датасете ДВАЖДЫ: и живой записью, и досбором. Для обучения это
+ * не «чуть больше данных», а вес партии, удвоенный без причины.
+ *
+ * Из чего складывается отпечаток: билд, герой, финальное место и ПЕРВАЯ
+ * точка решения — её ход и состав витрины. Билда с героем и местом мало:
+ * в этом же датасете две партии одним героем и с одним местом уже есть.
+ * Витрина первого хода — случайные пять карт, совпадения между разными
+ * партиями практически исключены, а между двумя записями ОДНОЙ партии
+ * она тождественна: живой и пакетный пути дают одно состояние, и это
+ * отдельно закреплено тестом.
+ *
+ * Честная граница: помощник, запущенный ПОСРЕДИ партии, начинает точки
+ * не с первого хода, и отпечаток у такой записи будет другим. Тогда
+ * досбор добавит полную запись рядом с обрывочной — данных это не портит
+ * (полная честнее), но одной партией датасет всё же посчитает две.
+ */
+export function gameSignature(record: DatasetRecord): string {
+  const first = record.checkpoints[0];
+  const shop =
+    first === undefined
+      ? ''
+      : [...first.state.shop]
+          .map((m) => m.cardId)
+          .sort()
+          .join(',');
+  return [
+    record.buildNumber ?? 'unknown',
+    record.heroCardId ?? 'unknown',
+    record.finalPlace ?? 'x',
+    first?.turn ?? -1,
+    shop,
+  ].join('|');
 }
 
 export interface DatasetRecorderDeps {
@@ -129,6 +177,7 @@ export class DatasetRecorder {
       heroCardId: state.hero?.cardId ?? null,
       finalPlace: state.finalPlace,
       checkpoints,
+      actions: state.actions,
     };
     this.#save(fileNameFor(record), record);
   }

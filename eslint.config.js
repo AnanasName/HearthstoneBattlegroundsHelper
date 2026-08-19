@@ -3,7 +3,22 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'data/**'],
+    /**
+     * Черновики замеров (`*-tmp.ts`, профили, дампы) в tsconfig не входят,
+     * и типизированные правила на них падают ошибкой разбора — то есть
+     * `npm run lint` краснеет от файлов, которые к проекту не относятся.
+     * Тот же список исключён и в .gitignore, но flat-config eslint его
+     * не читает, поэтому правило приходится повторять здесь.
+     */
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'data/**',
+      '*-tmp.ts',
+      '*-tmp.mjs',
+      'analyze-prof*.mjs',
+      'bench-prof*/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

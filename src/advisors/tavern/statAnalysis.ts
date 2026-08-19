@@ -171,6 +171,41 @@ export function pairedDeltas(base: RankingResult, other: RankingResult): number[
 export const mean = (xs: readonly number[]): number =>
   xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
 
+/** Сводка замера: сколько точек, среднее, его стандартная ошибка и сколько сдвинулось. */
+export interface SpikeSummary {
+  readonly n: number;
+  readonly mean: number;
+  readonly se: number;
+  /** Точек, где разность выше шума округления, — остальные ветви тождественны. */
+  readonly moved: number;
+}
+
+/**
+ * Приёмочная арифметика замеров, одна на все спайки.
+ *
+ * Порог приёмки у нас всегда «среднее против 2·SE», а `moved` отделяет точки,
+ * где ветви дали хоть какую-то разницу, от тождественных — без него выборка
+ * выглядит больше, чем она есть (у замера провокации 47 точек из 62 были
+ * тождественны). Формула живёт ЗДЕСЬ, потому что её числа записаны в docs
+ * как предрегистрированный критерий: три копии в трёх спайках расходились бы
+ * молча, и разошедшийся замер выглядел бы как новый результат.
+ */
+export function summarize(values: readonly number[]): SpikeSummary {
+  const n = values.length;
+  const divisor = Math.max(1, n);
+  const m = mean(values);
+  const variance = values.reduce((a, b) => a + (b - m) ** 2, 0) / Math.max(1, n - 1);
+  return {
+    n,
+    mean: m,
+    se: Math.sqrt(variance / divisor),
+    moved: values.filter((v) => Math.abs(v) > MOVED_EPSILON).length,
+  };
+}
+
+/** Ниже этого разность считается нулём: ветви дали тождественный исход. */
+const MOVED_EPSILON = 0.05;
+
 /** Ранги с усреднением связок — для Спирмена. */
 function ranks(values: readonly number[]): number[] {
   const order = values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);

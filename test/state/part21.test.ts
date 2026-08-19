@@ -18,6 +18,7 @@ import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState, Minion } from '../../src/state/types.js';
 import { part21Game } from '../fixtures.js';
+import { changesAdvisorState } from '../snapshots.js';
 
 /**
  * part21 — тринадцатая партия с оверлеем (17.08.2026, наги на заклинаниях,
@@ -40,6 +41,11 @@ describe('part21: магниты заклинаний, временное уси
     const reducer = createReducer(readPlayers(text));
     for (const event of readPowerEvents(text)) {
       reducer.step(event);
+      // Снимок состояния стоит девяти проходов по карте сущностей, а событий
+      // в логе полтораста тысяч: снимаем только там, где менялось что-то
+      // из читаемого селекторами (тот же приём, что в part18 и part19).
+      const { content } = event.line;
+      if (!changesAdvisorState(content)) continue;
       const s = reducer.snapshot();
       if (s.phase !== 'tavern') continue;
 

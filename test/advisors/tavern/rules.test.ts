@@ -20,6 +20,7 @@ import {
   poisonAmongSeen,
   rerollCostOf,
   rerollRule,
+  sellForGoldRule,
   sellRule,
   shopSpellRules,
   spellEffect,
@@ -42,23 +43,26 @@ import { minion } from '../../minions.js';
  * от того, что именно лежит в снапшоте на 35 тысяч карт, а тест не должен
  * его читать. Настоящий снапшот проверяется отдельно, в сквозном тесте.
  */
+// `type` у заготовок настоящий: по нему справочник собирает пул миньонов
+// тира (`poolOfTier`), а на пуле стоят и тёмный дар, и планка заморозки.
 const cards = createCardIndex([
   {
     id: 'SKIPPER',
     name: 'Речной пропойца',
+    type: 'Minion',
     techLevel: 1,
     races: ['MURLOC'],
     isBaconPool: true,
     text: 'When you sell this, get a random Tier 1 minion.',
   },
-  { id: 'MURLOC_1', name: 'Мурлок', techLevel: 1, races: ['MURLOC'], isBaconPool: true },
-  { id: 'MURLOC_2', name: 'Другой мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
-  { id: 'MURLOC_3', name: 'Третий мурлок', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
-  { id: 'MURLOC_5', name: 'Пятый мурлок', techLevel: 5, races: ['MURLOC'], isBaconPool: true },
-  { id: 'DRAGON_1', name: 'Дракон', techLevel: 3, races: ['DRAGON'], isBaconPool: true },
-  { id: 'AMALGAM', name: 'Амальгама', techLevel: 4, races: ['ALL'], isBaconPool: true },
-  { id: 'NEUTRAL', name: 'Нейтральный', techLevel: 2, races: [], isBaconPool: true },
-  { id: 'NEUTRAL_2', name: 'Другой нейтральный', techLevel: 2, races: [], isBaconPool: true },
+  { id: 'MURLOC_1', name: 'Мурлок', type: 'Minion', techLevel: 1, races: ['MURLOC'], isBaconPool: true },
+  { id: 'MURLOC_2', name: 'Другой мурлок', type: 'Minion', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
+  { id: 'MURLOC_3', name: 'Третий мурлок', type: 'Minion', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
+  { id: 'MURLOC_5', name: 'Пятый мурлок', type: 'Minion', techLevel: 5, races: ['MURLOC'], isBaconPool: true },
+  { id: 'DRAGON_1', name: 'Дракон', type: 'Minion', techLevel: 3, races: ['DRAGON'], isBaconPool: true },
+  { id: 'AMALGAM', name: 'Амальгама', type: 'Minion', techLevel: 4, races: ['ALL'], isBaconPool: true },
+  { id: 'NEUTRAL', name: 'Нейтральный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+  { id: 'NEUTRAL_2', name: 'Другой нейтральный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
 ]);
 const deps = { cards };
 
@@ -509,6 +513,90 @@ describe('правило прокрутки: купить-разыграть-п�
     expect(spinRule(full, spinDeps, DEFAULT_TAVERN_RULES, buyRules(full, spinDeps))).toBeNull();
   });
 
+  it('продажный генератор прокручивается той же цепочкой (part25)', () => {
+    // part25, ход 7: Patient Scout («When you sell this, Discover a Tier 1
+    // minion») — купить за 3, разыграть, продать за 1: миньон за чистых два.
+    // Обещанное отдаёт ПРОДАЖА, а не клич, и прежде таких карт правило
+    // не видело вовсе.
+    const s = state({ gold: 5, shop: [shopMinion(301, 'SKIPPER'), shopMinion(302, 'MURLOC_2')] });
+    const spin = spinRule(s, deps, DEFAULT_TAVERN_RULES, buyRules(s, deps));
+
+    expect(spin?.minion?.cardId).toBe('SKIPPER');
+    expect(spin?.cost).toBe(2);
+    expect(spin?.reason).toContain('продажа даст миньона тира 1');
+    expect(spin?.reason).toContain('чистая цена 2');
+  });
+
+  it('продажный генератор прокручивается, даже будучи лучшей покупкой', () => {
+    // Запрет «лучшую покупку не прокручивают» — про батлкрайного генератора:
+    // его хочется оставить телом. У продажного наоборот: держать его телом
+    // значит не получить обещанного никогда (part18).
+    const alone = state({ gold: 5, shop: [shopMinion(301, 'SKIPPER')] });
+    const buys = buyRules(alone, deps);
+    expect(buys[0]?.minion?.cardId).toBe('SKIPPER');
+    expect(spinRule(alone, deps, DEFAULT_TAVERN_RULES, buys)?.minion?.cardId).toBe('SKIPPER');
+  });
+
+  it('витрина держится ради продажного генератора, пока он дешевле покупки', () => {
+    // part25, ход 3 (скриншот): золота 0, в витрине River Skipper. Заморозка
+    // — это ставка на ход, где пять золотых дадут ДВА тела: купить за 3,
+    // продать за 1 (придёт миньон) и купить ещё одного. Игрок сделал её сам.
+    const early = state({
+      turn: 3,
+      techLevel: 1,
+      gold: 0,
+      board: [shopMinion(1, 'NEUTRAL')],
+      shop: [shopMinion(301, 'SKIPPER'), shopMinion(302, 'MURLOC_1')],
+    });
+    const keep = freezeRule(early, deps);
+    expect(keep?.minion?.cardId).toBe('SKIPPER');
+    expect(keep?.reason).toContain('купить-разыграть-продать');
+    expect(keep?.reason).toContain('миньона тира 1');
+  });
+
+  it('реальный снапшот: на пятом тире та же карта витрины уже не держит', () => {
+    // Планка растёт вместе с тирами витрины, а обещанный тир остаётся
+    // первым — то же самоограничение, что у заклинания витрины (part23,
+    // «это работает для ранней игры»). Проверяется на НАСТОЯЩЕМ снапшоте:
+    // на подставном справочнике из десяти карт средние по пулам ничего
+    // про игру не говорят.
+    const real = loadCardIndex();
+    const skipper = minion(301, { cardId: 'BG33_140', attack: 1, health: 1, techLevel: 1 });
+    const late = state({
+      turn: 17,
+      techLevel: 5,
+      gold: 0,
+      board: [minion(1, { cardId: 'BG32_324', attack: 2, health: 7, techLevel: 5 })],
+      shop: [skipper, minion(302, { cardId: 'BG34_Giant_034', attack: 10, health: 6, techLevel: 5 })],
+    });
+    expect(freezeRule(late, { cards: real })).toBeNull();
+
+    // А на первом тире — держит: карта та же, разница только в планке.
+    const early = state({
+      turn: 3,
+      techLevel: 1,
+      gold: 0,
+      board: [minion(1, { cardId: 'BGS_127', attack: 3, health: 3, techLevel: 1 })],
+      shop: [skipper, minion(302, { cardId: 'BG32_330', attack: 3, health: 3, techLevel: 1 })],
+    });
+    expect(freezeRule(early, { cards: real })?.minion?.cardId).toBe('BG33_140');
+  });
+
+  it('заморозка ради прокрутки молчит, когда карта по карману сегодня', () => {
+    // Что покупается сегодня — сегодня и прокручивается, витрины это не стоит.
+    const rich = state({
+      turn: 3,
+      techLevel: 1,
+      gold: 3,
+      board: [shopMinion(1, 'NEUTRAL')],
+      shop: [shopMinion(301, 'SKIPPER'), shopMinion(302, 'MURLOC_1')],
+    });
+    expect(freezeRule(rich, deps)).toBeNull();
+    expect(spinRule(rich, deps, DEFAULT_TAVERN_RULES, buyRules(rich, deps))?.minion?.cardId).toBe(
+      'SKIPPER',
+    );
+  });
+
   it('«получить» вне боевого клича — не прокрутка', () => {
     // «At the end of your turn, get…» дарит, только пока стоит на борде, —
     // цепочка «купить-разыграть-продать» его эффекта не получает.
@@ -728,18 +816,32 @@ describe('правило тёмного дара', () => {
     state({ darkGiftCost: 3, board: [shopMinion(1, 'MURLOC_1')], ...patch });
 
   it('дар по карману советуется', () => {
-    const rec = darkGiftRule(giftable());
+    const rec = darkGiftRule(giftable(), deps);
     expect(rec?.action).toBe('darkGift');
     expect(rec?.cost).toBe(3);
   });
 
   it('нажатый в этом ходу дар не советуется', () => {
-    expect(darkGiftRule(giftable({ darkGiftUsedThisTurn: true }))).toBeNull();
+    expect(darkGiftRule(giftable({ darkGiftUsedThisTurn: true }), deps)).toBeNull();
   });
 
   it('без кнопки и без золота — молчание', () => {
-    expect(darkGiftRule(state({ darkGiftCost: null }))).toBeNull();
-    expect(darkGiftRule(giftable({ gold: 2 }))).toBeNull();
+    expect(darkGiftRule(state({ darkGiftCost: null }), deps)).toBeNull();
+    expect(darkGiftRule(giftable({ gold: 2 }), deps)).toBeNull();
+  });
+
+  /**
+   * Тир предложения растёт по ходам таверны (таблица игрока), и ценность
+   * дара растёт вместе с ним. Прежний плоский вес вёл себя наоборот.
+   */
+  it('тир предложения читается таблицей по ходу ТАВЕРНЫ', () => {
+    // Наш ход 5 — третий ход таверны: таблица обещает 2-й тир.
+    const early = darkGiftRule(giftable({ turn: 5, techLevel: 2, gold: 3 }), deps);
+    expect(early?.reason).toContain('тир 2');
+    // Наш ход 15 — восьмой ход таверны: 4-й или 5-й.
+    const late = darkGiftRule(giftable({ turn: 15, techLevel: 5, gold: 3 }), deps);
+    expect(late?.reason).toContain('тир 4 или 5');
+    expect(late?.score).toBeGreaterThan(early?.score ?? 0);
   });
 
   it('при отставании от графика золото уступается подъёму', () => {
@@ -751,7 +853,7 @@ describe('правило тёмного дара', () => {
       tavernUpgradeCost: 5,
       tavernUpgradeTarget: 3,
     });
-    expect(darkGiftRule(s)).toBeNull();
+    expect(darkGiftRule(s, deps)).toBeNull();
   });
 
   it('по графику дар не блокируется доступным подъёмом', () => {
@@ -763,7 +865,7 @@ describe('правило тёмного дара', () => {
       tavernUpgradeCost: 5,
       tavernUpgradeTarget: 4,
     });
-    expect(darkGiftRule(s)).not.toBeNull();
+    expect(darkGiftRule(s, deps)).not.toBeNull();
   });
 });
 
@@ -2852,5 +2954,392 @@ describe('боевой эффект «вашим племени» без сво�
   it('призыв («Summon a Beast») от борда не зависит', () => {
     const bat = minion(9, { cardId: 'BAT', attack: 1, health: 3, techLevel: 1 });
     expect(minionValue(bat, state({ board: [] }), d).battle).toBeGreaterThan(0);
+  });
+});
+
+describe('кэш ожидания по пулу тиров', () => {
+  /**
+   * `averagePoolValue` кэширует ответ по ССЫЛКЕ на массив борда: без кэша
+   * один ход плана стоил вдвое дороже. Значит, ключ обязан покрывать всё
+   * остальное, от чего ответ зависит, — справочник, таблицу правил, руку,
+   * заклинания руки и силу героя. Иначе первый спросивший отвечает за всех,
+   * и это не падение, а тихо неверное число: тот же борд, другой вопрос.
+   *
+   * Спрашивается ответ тёмным даром: его очки — ровно ожидание по пулу
+   * названных тиров плюс надбавка, а надбавка нулевая.
+   */
+  const own = { id: 'OWN', name: 'Свой', type: 'Minion', techLevel: 1, races: [], attack: 1, health: 1 };
+  const weak = createCardIndex([
+    own,
+    { id: 'P2', name: 'Слабый пул', type: 'Minion', techLevel: 2, races: [], isBaconPool: true, attack: 1, health: 1 },
+  ]);
+  const strong = createCardIndex([
+    own,
+    { id: 'P2', name: 'Сильный пул', type: 'Minion', techLevel: 2, races: [], isBaconPool: true, attack: 20, health: 20 },
+  ]);
+
+  // Ход 5 — третий ход таверны: таблица дара обещает тир 2.
+  const giftState = (board: Minion[], patch: Partial<GameState> = {}): GameState =>
+    state({ turn: 5, gold: 5, techLevel: 2, darkGiftCost: 1, board, ...patch });
+
+  it('справочник входит в ключ: тот же борд, другой снапшот — другое число', () => {
+    // ОДИН И ТОТ ЖЕ массив борда: именно на нём кэш и промахивался.
+    const board = [minion(1, { cardId: 'OWN' })];
+    const s = giftState(board);
+
+    const weakScore = darkGiftRule(s, { cards: weak })?.score;
+    const strongScore = darkGiftRule(s, { cards: strong })?.score;
+    expect(weakScore).toBeDefined();
+    expect(strongScore).toBeDefined();
+    expect(strongScore).toBeGreaterThan(weakScore ?? 0);
+  });
+
+  it('таблица правил входит в ключ: свой вес тира — своё число', () => {
+    const board = [minion(1, { cardId: 'OWN' })];
+    const s = giftState(board);
+    const dearTier = {
+      ...DEFAULT_TAVERN_RULES,
+      value: { ...DEFAULT_TAVERN_RULES.value, perTechLevel: DEFAULT_TAVERN_RULES.value.perTechLevel * 10 },
+    };
+
+    const plain = darkGiftRule(s, { cards: weak })?.score ?? 0;
+    const dear = darkGiftRule(s, { cards: weak }, dearTier)?.score ?? 0;
+    expect(dear).toBeGreaterThan(plain);
+  });
+
+  it('заклинания руки входят в ключ: борда розыгрыш не трогает вовсе', () => {
+    // Пул из магнита-РАСТУЩЕГО: его ценность зависит от заклинаний руки,
+    // а розыгрыш заклинания не меняет ни борда, ни длины руки — прежний
+    // ключ на этих двух состояниях был буквально одинаковым.
+    const idx = createCardIndex([
+      own,
+      {
+        id: 'MAGNET',
+        name: 'Растущий магнит',
+        type: 'Minion',
+        techLevel: 2,
+        races: [],
+        isBaconPool: true,
+        attack: 1,
+        health: 1,
+        // Литерал, а не плейсхолдер: у заготовок ПУЛА живых тегов нет
+        // вовсе, и `{0}` там честно читается нулём.
+        text: 'Whenever you cast a spell on this, gain +2 Health.',
+      },
+      { id: 'BUFF', name: 'Усиление', type: 'Spell', text: 'Give a minion +2/+2.' },
+    ]);
+    const board = [minion(1, { cardId: 'OWN' })];
+    const spell = {
+      entityId: 50,
+      cardId: 'BUFF',
+      cost: 0,
+      scriptData: [1, 1],
+      unplayable: false,
+    };
+
+    const withSpell = giftState(board, { handSpells: [spell] });
+    const played = giftState(board, { handSpells: [] });
+
+    const withScore = darkGiftRule(withSpell, { cards: idx })?.score ?? 0;
+    const afterScore = darkGiftRule(played, { cards: idx })?.score ?? 0;
+    // Заклинание в руке делает магнит из пула дороже; после розыгрыша —
+    // дешевле. Одинаковые числа означали бы, что второй вопрос получил
+    // ответ на первый.
+    expect(withScore).toBeGreaterThan(afterScore);
+  });
+});
+
+describe('дневной заряд магнита-хранителя', () => {
+  /**
+   * «The first Spellcraft spell played from hand on this each turn is
+   * permanent» — заряд ОДИН на ход, и второе чародейское заклинание руки
+   * постоянным на нём уже не станет. Ценность покупки складывала выгоду
+   * по ВСЕМ заклинаниям руки, и хранитель при двух трезубцах получал
+   * вдвое больше статов, чем даст на самом деле (part21).
+   */
+  const idx = createCardIndex([
+    {
+      id: 'KEEPER',
+      name: 'Хранитель заклинаний',
+      type: 'Minion',
+      techLevel: 3,
+      races: ['NAGA'],
+      isBaconPool: true,
+      text: 'The first Spellcraft spell played from hand on this each turn is permanent.',
+    },
+    {
+      id: 'CRAFTER',
+      name: 'Чародей',
+      type: 'Minion',
+      techLevel: 2,
+      races: ['NAGA'],
+      isBaconPool: true,
+      mechanics: ['BACON_SPELLCRAFT_ID'],
+    },
+    // Токен чародейства — по соглашению «id миньона плюс t».
+    {
+      id: 'CRAFTERt',
+      name: 'Трезубец',
+      type: 'Spell',
+      text: 'Give a minion +2 Attack until next turn.',
+    },
+  ]);
+  const d = { cards: idx };
+  const keeper = minion(9, { cardId: 'KEEPER', attack: 2, health: 2, techLevel: 3 });
+  const trident = (entityId: number) => ({
+    entityId,
+    cardId: 'CRAFTERt',
+    cost: 0,
+    scriptData: [] as readonly (number | null)[],
+    unplayable: false,
+  });
+
+  it('одно заклинание руки — одна выгода', () => {
+    const s = state({ board: [], handSpells: [trident(50)] });
+    expect(minionValue(keeper, s, d).spellMagnet).toBe(2 * DEFAULT_TAVERN_RULES.value.perStatPoint);
+  });
+
+  it('два заклинания руки — выгода ВСЁ ТА ЖЕ: заряд один на ход', () => {
+    const one = state({ board: [], handSpells: [trident(50)] });
+    const two = state({ board: [], handSpells: [trident(50), trident(51)] });
+    expect(minionValue(keeper, two, d).spellMagnet).toBe(minionValue(keeper, one, d).spellMagnet);
+  });
+
+  it('исчерпанный заряд из тега — выгоды нет вовсе', () => {
+    const spent = minion(9, {
+      cardId: 'KEEPER',
+      attack: 2,
+      health: 2,
+      techLevel: 3,
+      scriptData: [0],
+    });
+    const s = state({ board: [], handSpells: [trident(50), trident(51)] });
+    expect(minionValue(spent, s, d).spellMagnet).toBe(0);
+  });
+
+  it('РАСТУЩИЙ магнит по-прежнему суммирует: заряда у него нет', () => {
+    const growing = createCardIndex([
+      {
+        id: 'GROWER',
+        name: 'Растущий',
+        type: 'Minion',
+        techLevel: 3,
+        races: [],
+        isBaconPool: true,
+        text: 'Whenever you cast a spell on this, gain +1 Health.',
+      },
+      { id: 'BUFF', name: 'Усиление', type: 'Spell', text: 'Give a minion +2/+2.' },
+    ]);
+    const g = { cards: growing };
+    const grower = minion(9, { cardId: 'GROWER', attack: 1, health: 1, techLevel: 3 });
+    const buff = (entityId: number) => ({
+      entityId,
+      cardId: 'BUFF',
+      cost: 0,
+      scriptData: [] as readonly (number | null)[],
+      unplayable: false,
+    });
+
+    const one = minionValue(grower, state({ board: [], handSpells: [buff(50)] }), g).spellMagnet;
+    const two = minionValue(
+      grower,
+      state({ board: [], handSpells: [buff(50), buff(51)] }),
+      g,
+    ).spellMagnet;
+    expect(two).toBe(one * 2);
+  });
+});
+
+describe('продажа ради ещё одной траты', () => {
+  /**
+   * `sellForGoldRule` продаёт карту, чьё обещание отдаёт продажа, — но
+   * только когда золото открывает ЕЩЁ ОДНУ покупку. Две правки: витрина
+   * обязана эту покупку предлагать, и удерживаемая ценность считается
+   * против ОСТАЛЬНОГО борда, той же функцией, что у `weakestOwn`.
+   */
+  const idx = createCardIndex([
+    {
+      id: 'SKIP',
+      name: 'Пропойца',
+      type: 'Minion',
+      techLevel: 1,
+      races: ['MURLOC'],
+      isBaconPool: true,
+      attack: 1,
+      health: 1,
+      text: 'When you sell this, get a random Tier 1 minion.',
+    },
+    {
+      id: 'MUR',
+      name: 'Мурлок',
+      type: 'Minion',
+      techLevel: 2,
+      races: ['MURLOC'],
+      isBaconPool: true,
+    },
+    {
+      id: 'BIG',
+      name: 'Крупный',
+      type: 'Minion',
+      techLevel: 4,
+      races: [],
+      isBaconPool: true,
+      attack: 8,
+      health: 8,
+    },
+  ]);
+  const d = { cards: idx };
+  const big = (entityId: number) =>
+    minion(entityId, { cardId: 'BIG', attack: 8, health: 8, techLevel: 4 });
+
+  it('витрина без ДОПОЛНИТЕЛЬНОЙ покупки — правило молчит', () => {
+    // Пять золота покупают одного, шесть — двоих; но в витрине
+    // один-единственный миньон, и продавать тело за монету, которой некуда
+    // деться, незачем.
+    const s = state({
+      gold: 5,
+      goldTotal: 5,
+      board: [minion(1, { cardId: 'SKIP', attack: 1, health: 1, techLevel: 1 })],
+      shop: [big(20)],
+    });
+    expect(sellForGoldRule(s, d)).toBeNull();
+
+    // Второй миньон в витрине — и та самая дополнительная покупка появилась.
+    expect(sellForGoldRule({ ...s, shop: [big(20), big(21)] }, d)).not.toBeNull();
+  });
+
+  it('удерживаемая ценность считается против ОСТАЛЬНОГО борда', () => {
+    const skipper = minion(1, { cardId: 'SKIP', attack: 1, health: 1, techLevel: 1 });
+    const mates = [2, 3, 4, 5].map((id) => minion(id, { cardId: 'MUR', techLevel: 2 }));
+    const s = state({
+      gold: 5,
+      goldTotal: 5,
+      board: [skipper, ...mates],
+      shop: [big(20), big(21)],
+    });
+
+    const rest = minionValue(skipper, { ...s, board: mates }, d);
+    const alone = minionValue(skipper, { ...s, board: [skipper] }, d);
+    const retained = rest.total - rest.copies - rest.economy;
+    // Против четырёх соплеменников скипер дороже, чем «сам с собой»:
+    // прежняя база считала его собственным соплеменником и теряла связи.
+    expect(retained).toBeGreaterThan(alone.total - alone.economy);
+
+    const rec = sellForGoldRule(s, d);
+    expect(rec?.reason).toContain(retained.toFixed(1) + ' очков телом');
+  });
+});
+
+describe('прокрутка: отбор кандидата и бамп порядка — разные числа', () => {
+  /**
+   * Бамп («иди впереди лучшей покупки») отвечает на вопрос о ПОРЯДКЕ,
+   * а не о том, какая из прокруток лучше. Пока он писался в то же поле,
+   * по которому шёл отбор, слабый генератор выигрывал у сильного просто
+   * потому, что помещался в один ход с дорогой покупкой.
+   */
+  const idx = createCardIndex([
+    {
+      id: 'GEN_FOUR',
+      name: 'Щедрый генератор',
+      type: 'Minion',
+      techLevel: 1,
+      races: [],
+      isBaconPool: true,
+      attack: 1,
+      health: 1,
+      text: 'Battlecry: Get four Slimy Shields.',
+    },
+    {
+      id: 'GEN_TWO',
+      name: 'Скупой генератор',
+      type: 'Minion',
+      techLevel: 1,
+      races: [],
+      isBaconPool: true,
+      attack: 1,
+      health: 1,
+      text: 'Battlecry: Get two Slimy Shields.',
+    },
+    {
+      id: 'BIG',
+      name: 'Крупный',
+      type: 'Minion',
+      techLevel: 5,
+      races: [],
+      isBaconPool: true,
+      attack: 10,
+      health: 10,
+    },
+  ]);
+  const d = { cards: idx };
+
+  it('берётся сильная прокрутка, хоть слабая и помещается рядом с покупкой', () => {
+    const four = minion(10, { cardId: 'GEN_FOUR', attack: 1, health: 1, techLevel: 1 });
+    // Скидка 2: чистая цена ноль, и эта прокрутка помещается рядом с покупкой.
+    const two = minion(11, {
+      cardId: 'GEN_TWO',
+      attack: 1,
+      health: 1,
+      techLevel: 1,
+      tags: { BACON_REDUCE_BUY_COST: 2 },
+    });
+    const strong = minion(12, { cardId: 'BIG', attack: 10, health: 10, techLevel: 5 });
+    const s = state({ gold: 4, goldTotal: 4, board: [], shop: [four, two, strong] });
+
+    const rec = spinRule(s, d, DEFAULT_TAVERN_RULES, buyRules(s, d));
+    expect(rec?.minion?.cardId).toBe('GEN_FOUR');
+    // Совет называет число ТОГО генератора, который советует.
+    expect(rec?.reason).toContain('клич даст 4 карт');
+  });
+});
+
+describe('ставка на чужой бой: скины героев', () => {
+  /**
+   * Варианты «Дружеской ставки» приходят БАЗОВЫМИ картами героев, а в таблице
+   * лобби тот же игрок стоит со своим скином (part26). Сырое сравнение
+   * их не сводило, и половина ставки уходила в «оценить не берёмся».
+   */
+  const idx = createCardIndex([
+    { id: 'TB_BaconShop_HP_081', name: 'Дружеская ставка', type: 'Hero_power' },
+    { id: 'BG27_HERO_801', name: 'Торим', type: 'Hero' },
+    { id: 'TB_BaconShop_HERO_33', name: 'Смотритель', type: 'Hero' },
+  ]);
+  const d = { cards: idx };
+
+  const lobbyPlayer = (playerId: number, heroCardId: string, techLevel: number) => ({
+    playerId,
+    heroCardId,
+    health: 40,
+    damage: 0,
+    armor: 0,
+    techLevel,
+    place: playerId,
+  });
+
+  it('игрок со скином опознаётся, и ранжирование по тиру работает', () => {
+    const s = state({
+      lobby: {
+        // Тот же герой, что в варианте, но со скином — как в логе.
+        5: lobbyPlayer(5, 'BG27_HERO_801_SKIN_A', 3),
+        6: lobbyPlayer(6, 'TB_BaconShop_HERO_33', 4),
+      },
+      openChoice: {
+        id: 13,
+        sourceCardId: 'TB_BaconShop_HP_081',
+        options: [
+          { entityId: 4902, cardId: 'BG27_HERO_801' },
+          { entityId: 4903, cardId: 'TB_BaconShop_HERO_33' },
+        ],
+      },
+    });
+
+    const advice = choiceAdvice(s, d);
+    expect(advice).toHaveLength(2);
+    // Ни один вариант не остался без оценки: скин сведён к базовой карте.
+    expect(advice.every((a) => a.score !== null)).toBe(true);
+    // Впереди тот, у кого тир выше, — и сказано это про тир.
+    expect(advice[0]?.option.cardId).toBe('TB_BaconShop_HERO_33');
+    expect(advice[0]?.reason).toContain('впереди по тиру');
+    expect(advice[1]?.reason).toContain('тир 3');
   });
 });

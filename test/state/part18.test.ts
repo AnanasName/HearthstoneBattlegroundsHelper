@@ -8,6 +8,7 @@ import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
 import { part18Game } from '../fixtures.js';
+import { changesAdvisorState } from '../snapshots.js';
 
 /**
  * part18 — десятая партия с оверлеем (16.08.2026, наги на заклинаниях,
@@ -33,9 +34,7 @@ describe('part18: продажа в план, раннее обновление,
     for (const event of readPowerEvents(text)) {
       reducer.step(event);
       const { content } = event.line;
-      if (!content.includes('ZONE') && !content.includes('RESOURCES') && !content.includes('COST')) {
-        continue;
-      }
+      if (!changesAdvisorState(content)) continue;
       const s = reducer.snapshot();
       if (s.phase !== 'tavern') continue;
 
@@ -80,6 +79,11 @@ describe('part18: продажа в план, раннее обновление,
     // Подъём за 5 из 6 золотых, остаётся 1. Прежний план тратил его
     // на обновление: после подъёма кнопки уже нет, и запрет раннего реролла
     // (он привязан к доступному подъёму) переставал действовать.
+    //
+    // 17.08 сам подъём отсюда ушёл: по решению игрока развилка плана судит
+    // цепочку с подъёмом, и шесть золотых уходят на борд целиком (part25).
+    // Проверяемое здесь правило это не отменяет — раннего платного
+    // обновления в плане по-прежнему нет, а теперь нет и остатка под него.
     expect(turn7).not.toBeNull();
     if (turn7 === null) return;
 
@@ -87,9 +91,11 @@ describe('part18: продажа в план, раннее обновление,
     expect(turn7.tavernUpgradeCost).toBe(5);
 
     const plan = spendPlan(turn7, { cards });
-    expect(plan.steps.some((s) => s.recommendation.action === 'levelUp')).toBe(true);
     expect(plan.steps.some((s) => s.recommendation.action === 'reroll')).toBe(false);
-    expect(plan.goldLeft).toBe(1);
+    expect(plan.goldLeft).toBe(0);
+    // Подъём остаётся ВЕРХНИМ СОВЕТОМ списка: список ранжирует отдельные
+    // действия, а тратит золото план.
+    expect(adviseTavern(turn7, { cards })?.recommendations[0]?.action).toBe('levelUp');
   });
 
   it('ход 17: нага со Spellcraft обходит демона на борде заклинаний (пункт 3)', () => {

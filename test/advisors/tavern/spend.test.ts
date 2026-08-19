@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Recommendation } from '../../../src/advisors/tavern/advisor.js';
+import { spellRules, type Recommendation } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../../src/advisors/tavern/rules.js';
 import { applyRecommendation, spendPlan } from '../../../src/advisors/tavern/spend.js';
 import { createCardIndex } from '../../../src/data/cards.js';
@@ -298,5 +298,130 @@ describe('план трат хода', () => {
     expect(plan.steps.some((st) => st.recommendation.action === 'reroll')).toBe(false);
     expect(plan.goldLeft).toBe(1);
     expect(spendPlanLine(plan, cards)).toContain('остаётся 1 — сгорит');
+  });
+});
+
+describe('дневной заряд хранителя в плане', () => {
+  /**
+   * Заряд читается как `scriptData[0] ?? 1`: тега нет — заряд есть. Значит,
+   * расход обязан ЗАПИСАТЬСЯ и туда, где массива тегов не было вовсе, —
+   * иначе следующий шаг цепочки снова видит заряд и обещает постоянство
+   * второй раз за ход (part21).
+   */
+  const keeper = (scriptData: readonly (number | null)[]) =>
+    minion(7, { cardId: 'BODY_1', scriptData });
+
+  const castOn = (target: Minion): Recommendation => ({
+    action: 'play',
+    minion: null,
+    spellCardId: 'TRIDENT',
+    score: 5,
+    cost: 0,
+    requiresSlot: false,
+    sellFirst: null,
+    reason: 'тест',
+    targetMinion: target,
+    spendsMagnetCharge: true,
+  });
+
+  it('заряд списывается и когда живого тега не было', () => {
+    const target = keeper([]);
+    const s = state({ board: [target] });
+    const next = applyRecommendation(s, castOn(target));
+    expect(next?.state.board[0]?.scriptData[0]).toBe(0);
+  });
+
+  it('заряд списывается и из живого тега', () => {
+    const target = keeper([1, null]);
+    const s = state({ board: [target] });
+    const next = applyRecommendation(s, castOn(target));
+    expect(next?.state.board[0]?.scriptData[0]).toBe(0);
+    // Соседние теги не тронуты.
+    expect(next?.state.board[0]?.scriptData[1]).toBeNull();
+  });
+
+  it('совет без заряда борда не трогает', () => {
+    const target = keeper([1]);
+    const s = state({ board: [target] });
+    const next = applyRecommendation(s, { ...castOn(target), spendsMagnetCharge: false });
+    expect(next?.state.board[0]?.scriptData[0]).toBe(1);
+  });
+});
+
+describe('золото заклинания доезжает до следующего шага', () => {
+  /**
+   * `grantsGold` — ВАЛОВОЕ золото из текста: цену `applyRecommendation`
+   * вычитает само, общей для всех шагов строкой. Чистое значение означало
+   * бы вычесть цену дважды, и обещанная советом покупка снова не
+   * открывалась бы — тот же симптом part24, ради которого поле заводилось.
+   */
+  const idx = createCardIndex([
+    { id: 'COIN', name: 'Щедрая монета', type: 'Spell', text: 'Gain 3 Gold.' },
+    {
+      id: 'BODY',
+      name: 'Тело',
+      type: 'Minion',
+      techLevel: 3,
+      races: [],
+      isBaconPool: true,
+      attack: 4,
+      health: 4,
+    },
+  ]);
+  const d = { cards: idx };
+  // Цена 2 при трёх золотых из текста: чистыми 1, валовыми 3. На этой
+  // разнице покупка за 3 либо открывается, либо нет.
+  const coin = {
+    entityId: 40,
+    cardId: 'COIN',
+    cost: 2,
+    scriptData: [] as readonly (number | null)[],
+    unplayable: false,
+  };
+  const withCoin = (): GameState =>
+    state({
+      gold: 2,
+      goldTotal: 6,
+      techLevel: 3,
+      board: [],
+      shop: [minion(20, { cardId: 'BODY', attack: 4, health: 4, techLevel: 3 })],
+      handSpells: [coin],
+    });
+
+  it('совет несёт валовое золото, а остаток считается через цену', () => {
+    // Два золота: покупки за 3 не хватает, с монетой хватит ровно.
+    const s = withCoin();
+
+    const rec = spellRules(s, d).find((r) => r.spellCardId === 'COIN');
+    expect(rec?.grantsGold).toBe(3);
+
+    // 2 − 2 + 3 = 3: на покупку за 3 хватает ровно.
+    const next = applyRecommendation(s, rec as Recommendation);
+    expect(next?.state.gold).toBe(3);
+    // `goldSpent` держится согласованным с остатком.
+    expect(next?.state.goldSpent).toBe(s.goldTotal - 3);
+  });
+
+  it('заклинание не по карману не советуется — как и всё остальное', () => {
+    // Найдено не ревью, а при разборе соседней правки: ветка усиления
+    // проверяет «по карману ли», а экономическая — не проверяла.
+    const poor = state({
+      gold: 1,
+      goldTotal: 6,
+      techLevel: 3,
+      board: [],
+      shop: [minion(20, { cardId: 'BODY', attack: 4, health: 4, techLevel: 3 })],
+      handSpells: [coin],
+    });
+    expect(spellRules(poor, d).some((r) => r.spellCardId === 'COIN')).toBe(false);
+
+    // Двух золотых хватает — совет возвращается.
+    expect(spellRules(withCoin(), d).some((r) => r.spellCardId === 'COIN')).toBe(true);
+  });
+
+  it('план и вправду делает обещанную покупку следующим шагом', () => {
+    const plan = spendPlan(withCoin(), d);
+    const actions = plan.steps.map((step) => step.recommendation.action);
+    expect(actions.slice(0, 2)).toEqual(['play', 'buy']);
   });
 });

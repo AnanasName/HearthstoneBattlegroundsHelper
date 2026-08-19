@@ -1,6 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { adviseTavern, spellEffect, weakestOwn } from '../../src/advisors/tavern/advisor.js';
+import {
+  adviseTavern,
+  freezeRule,
+  spellEffect,
+  weakestOwn,
+} from '../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../src/advisors/tavern/rules.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { endOfTurnAuraGains, withEndOfTurnAuras } from '../../src/advisors/battle/endOfTurn.js';
@@ -15,6 +20,7 @@ import { createReducer } from '../../src/state/reducer.js';
 import { recommendationLine } from '../../src/ui/format.js';
 import type { GameState, Minion } from '../../src/state/types.js';
 import { part19Game } from '../fixtures.js';
+import { changesAdvisorState } from '../snapshots.js';
 
 /**
  * part19 — одиннадцатая партия с оверлеем (16–17.08.2026, Nightmare Lord
@@ -42,14 +48,7 @@ describe('part19: заморозка после подъёма, ветви Choos
     for (const event of readPowerEvents(text)) {
       reducer.step(event);
       const { content } = event.line;
-      if (
-        !content.includes('ZONE') &&
-        !content.includes('RESOURCES') &&
-        !content.includes('TECH_LEVEL') &&
-        !content.includes('COST')
-      ) {
-        continue;
-      }
+      if (!changesAdvisorState(content)) continue;
       const s = reducer.snapshot();
       if (s.phase !== 'tavern') continue;
 
@@ -77,11 +76,32 @@ describe('part19: заморозка после подъёма, ветви Choos
     expect(finalState.buildNumber).toBe(248348);
   });
 
-  it('ход 3: подъём таверны не отменяет заморозку ради заклинания (пункт 1)', () => {
-    // Ходом раньше план советовал заморозить Enchanted Lasso, игрок так
-    // и сделал. На ходу 3 он поднял таверну — и совет исчез, хотя лассо
-    // на месте, денег на него по-прежнему нет, а заморозку каждый ход надо
-    // продлевать заново.
+  /**
+   * Пункт 1 (ход 3): «заморозил лассо по совету, поднял таверну — и совет
+   * исчез, хотя заморозку каждый ход надо продлевать».
+   *
+   * ПРАВИЛО ОТМЕНЕНО 17.08 ПО СЛОВАМ ТОГО ЖЕ ИГРОКА (part23), и тест
+   * переписан, а не удалён: он теперь держит НОВОЕ поведение и хранит
+   * историю спора.
+   *
+   * Здесь было внесено правило «в ход подъёма заморозка ради заклинания
+   * не молчит». В part22 (ход 7) игрок пожаловался на тот же совет с тем же
+   * лассо на том же втором тире: «практического эффекта от карты не вижу».
+   * Два отзыва расходились, и вопрос был вынесен ему прямо. Ответ пришёл
+   * в part23: «это работает для ранней игры; дальше получать за 2 золота
+   * существо из 1 таверны не настолько хорошая идея».
+   *
+   * Ответ оказался не про подъём, а про ЦЕНУ: заклинание тратит золото того
+   * же хода, что и покупка, и обязано перебить покупку — «свежую карту
+   * своего тира». Планка растёт с тиром сама, и ветка умолкает там, где
+   * игрок и просил: на первом тире лассо её берёт (part17, ход 1 — там он
+   * совет одобрил), со второго уже нет.
+   *
+   * Про сам подъём правило осталось прежним: заклинания свежая витрина
+   * не обещает вовсе, и в ход подъёма ветка не отключается — она просто
+   * не проходит по цене.
+   */
+  it('ход 3 (ПРАВИЛО ОТМЕНЕНО part23): лассо не держит витрину на втором тире', () => {
     expect(turn3Decision).not.toBeNull();
     expect(turn3AfterUpgrade).not.toBeNull();
     if (turn3Decision === null || turn3AfterUpgrade === null) return;
@@ -89,19 +109,15 @@ describe('part19: заморозка после подъёма, ветви Choos
     expect(turn3Decision.shopSpells.map((s) => s.cardId)).toContain('BG28_512');
     expect(turn3Decision.techLevel).toBe(1);
 
-    // План хода целиком: подняться на всё золото и заморозить остаток
-    // витрины — ровно то, что игрок сыграл сам.
+    // План хода — подъём на всё золото; заморозки в нём больше нет.
     const plan = spendPlan(turn3Decision, { cards });
-    expect(plan.steps.map((s) => s.recommendation.action)).toEqual(['levelUp', 'freeze']);
-    expect(plan.steps[1]?.recommendation.spellCardId).toBe('BG28_512');
+    expect(plan.steps.map((s) => s.recommendation.action)).toEqual(['levelUp']);
 
-    // И в самом состоянии после подъёма совет тот же, а не «НИЧЕГО».
+    // И после подъёма — тоже: лассо даёт среднюю карту СТАРОЙ витрины,
+    // а покупка следующего хода — свежую карту второго тира.
     expect(turn3AfterUpgrade.techLevelUpTurn).toBe(3);
     expect(turn3AfterUpgrade.shopSpells.map((s) => s.cardId)).toContain('BG28_512');
-    const top = adviseTavern(turn3AfterUpgrade, { cards })?.recommendations[0];
-    expect(top?.action).toBe('freeze');
-    expect(top?.spellCardId).toBe('BG28_512');
-    expect(top?.score).toBeGreaterThan(0);
+    expect(freezeRule(turn3AfterUpgrade, { cards })?.spellCardId).toBeUndefined();
   });
 
   it('ход 7: у модального заклинания названы ветви, а статы не удвоены (пункт 2)', () => {

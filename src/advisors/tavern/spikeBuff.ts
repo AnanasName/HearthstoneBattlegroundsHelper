@@ -13,8 +13,11 @@
  * и цель, а какой эффект брать — промолчал.
  *
  * Выдумывать правило («атака всегда лучше») нельзя — это было бы чужое
- * мнение под видом факта. Зато есть симулятор и шестнадцать партий
- * текущего билда: вопрос решается замером.
+ * мнение под видом факта. Зато есть симулятор и все партии текущего билда
+ * (`CURRENT_BUILD_PARTS`, сейчас 23): вопрос решается замером. Список
+ * общий намеренно — своя копия у каждого замера уже разъезжалась, и цена
+ * названа вслух: с каждой новой фикстурой записанные числа устаревают
+ * до перезапуска.
  *
  * ## Предрегистрация — объявлено ДО прогона
  *
@@ -52,30 +55,12 @@ import { toBattleInfo, withPlayerBoard } from '../battle/mapper.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import { battleQuestion } from '../position/advisor.js';
 import { withSeededRandom } from '../position/rng.js';
+import { summarize, type SpikeSummary } from './statAnalysis.js';
 import { buffTarget } from './advisor.js';
 import { readTavernTurns } from './turns.js';
+import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
 
-const FIXTURES = [
-  'data/fixtures/part4/game.log',
-  'data/fixtures/part5/game.log',
-  'data/fixtures/part6/game.log',
-  'data/fixtures/part7/game.log',
-  'data/fixtures/part8/game.log',
-  'data/fixtures/part9/game.log',
-  'data/fixtures/part10/game.log',
-  'data/fixtures/part11/game.log',
-  'data/fixtures/part12/game.log',
-  'data/fixtures/part13/game.log',
-  'data/fixtures/part14/game.log',
-  'data/fixtures/part15/game.log',
-  'data/fixtures/part16/game.log',
-  'data/fixtures/part17/game.log',
-  'data/fixtures/part18/game.log',
-  'data/fixtures/part19/game.log',
-  'data/fixtures/part20/game.log',
-  'data/fixtures/part21/game.log',
-  'data/fixtures/part22/game.log',
-] as const;
+const FIXTURES = CURRENT_BUILD_LOGS;
 
 /** Разделение статов замера: сумма одна, розданы по-разному. */
 const SPLIT = { attack: 3, health: 1 } as const;
@@ -145,14 +130,8 @@ function main(): void {
     return;
   }
 
-  const summary = (
-    rows: readonly { readonly diff: number }[],
-  ): { n: number; mean: number; se: number; moved: number } => {
-    const n = rows.length;
-    const mean = rows.reduce((a, b) => a + b.diff, 0) / n;
-    const variance = rows.reduce((a, b) => a + (b.diff - mean) ** 2, 0) / Math.max(1, n - 1);
-    return { n, mean, se: Math.sqrt(variance / n), moved: rows.filter((r) => Math.abs(r.diff) > 0.05).length };
-  };
+  const summary = (rows: readonly { readonly diff: number }[]): SpikeSummary =>
+    summarize(rows.map((r) => r.diff));
 
   const all = summary(diffs);
 

@@ -161,6 +161,20 @@ export interface OpenChoice {
   readonly options: readonly ChoiceOption[];
 }
 
+/** Игрок лобби, каким его видно из лога: герой, тир, здоровье, место. */
+export interface LobbyPlayer {
+  readonly playerId: number;
+  readonly heroCardId: string;
+  /** Здоровье героя без учёта урона — тег `HEALTH`. */
+  readonly health: number | null;
+  readonly damage: number;
+  readonly armor: number;
+  /** Тир таверны — тег `PLAYER_TECH_LEVEL`. */
+  readonly techLevel: number | null;
+  /** Текущее место в таблице — тег `PLAYER_LEADERBOARD_PLACE`. */
+  readonly place: number | null;
+}
+
 export interface Hero {
   readonly entityId: number;
   readonly cardId: string;
@@ -234,6 +248,44 @@ export const EMPTY_GLOBAL_INFO: GlobalInfo = {
   elementalAttackBuff: null,
   elementalHealthBuff: null,
 };
+
+/**
+ * Действие игрока в таверне, каким его видно из лога.
+ *
+ * Каждое действие — блок `BlockType=PLAY` канала-источника на своей
+ * сущности: покупка и продажа — на перетаскивателях `TB_BaconShop_DragBuy`
+ * (`…_Spell`) и `TB_BaconShop_DragSell` с картой в `Target=[…]`, обновление
+ * витрины, подъём и заморозка — на кнопках, розыгрыш — на карте в `HAND`,
+ * сила героя, тёмный дар и активация — как и прежде у их флагов (part8,
+ * part14). Журнал нужен датасету фазы 6: «какие действия ведут к победе»
+ * не выучить, не записывая действий.
+ */
+export type PlayerActionType =
+  | 'buy'
+  | 'sell'
+  | 'roll'
+  | 'levelUp'
+  /**
+   * НАЖАТИЕ кнопки заморозки — и включение, и снятие: кнопка одна на оба
+   * направления, а блок `PLAY` у них тождественный (part25: 14 нажатий
+   * за партию, среди них снятия). Различить их можно только по тегу
+   * `FROZEN` витрины ДО нажатия; пока этого нет, читать журнал надо как
+   * «игрок трогал заморозку», а не «заморозил».
+   */
+  | 'freeze'
+  | 'play'
+  | 'heroPower'
+  | 'darkGift'
+  | 'activate';
+
+export interface PlayerAction {
+  /** Ход партии (`GameState.turn`), на котором действие сделано. */
+  readonly turn: number;
+  readonly type: PlayerActionType;
+  /** Карта действия: у покупки/продажи — цель, у розыгрыша — сама карта. */
+  readonly cardId: string | null;
+  readonly entityId: number | null;
+}
 
 export interface GameState {
   readonly phase: Phase;
@@ -365,6 +417,20 @@ export interface GameState {
    */
   readonly lastSeenBoardTurns: Readonly<Record<number, number>>;
   /**
+   * Все игроки лобби по `PlayerID`: герой, тир таверны, здоровье, место.
+   *
+   * Требование ТЗ («последний увиденный борд каждого оппонента + его
+   * hp/tier»), которого долго не было: борд копился, а hp и тир — нет.
+   * Всё это лог сообщает открыто и про ВСЕХ восьмерых — тегами на сущности
+   * героя (`PLAYER_ID`, `PLAYER_TECH_LEVEL`, `PLAYER_LEADERBOARD_PLACE`,
+   * `HEALTH`/`DAMAGE`/`ARMOR`), а не только про тех, с кем дрались.
+   *
+   * Понадобилось «Дружеской ставке» (`TB_BaconShop_HP_081`, part26):
+   * сила героя предлагает угадать, КТО из двух игроков выиграет свой
+   * следующий бой, и без тира и здоровья сказать об этом нечего.
+   */
+  readonly lobby: Readonly<Record<number, LobbyPlayer>>;
+  /**
    * Цена нажатия тёмного дара — тег `COST` кнопки `BG36_Button_DarkGift`.
    *
    * `null`, когда кнопки нет (партия без даров или кнопка убрана). Кнопка —
@@ -448,6 +514,15 @@ export interface GameState {
   readonly playerBattleTag: string | null;
   /** Номер контроллера игрока. */
   readonly playerId: number | null;
+  /**
+   * Журнал СВОИХ действий с начала партии, в порядке совершения.
+   *
+   * Накапливается всю партию (это история, а не «сейчас») и сбрасывается
+   * только с новой партией — как борды соперников. После переподключения
+   * журнал начинается заново: дамп реконнекта несёт состояние, но
+   * не историю (та же честная граница, что у `lastSeenBoards`).
+   */
+  readonly actions: readonly PlayerAction[];
 }
 
 export const EMPTY_STATE: GameState = {
@@ -476,6 +551,7 @@ export const EMPTY_STATE: GameState = {
   wonLastCombat: null,
   lastSeenBoards: {},
   lastSeenBoardTurns: {},
+  lobby: {},
   darkGiftCost: null,
   darkGiftUsedThisTurn: false,
   activatedEntityIds: [],
@@ -488,4 +564,5 @@ export const EMPTY_STATE: GameState = {
   buildNumber: null,
   playerBattleTag: null,
   playerId: null,
+  actions: [],
 };

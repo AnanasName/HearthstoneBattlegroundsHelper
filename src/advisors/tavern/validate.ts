@@ -18,33 +18,14 @@ import {
   measureBuyQuality,
   type BuyComparison,
 } from './buyQuality.js';
+import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
 
 // Партии текущего патча: сверка идёт симулятором, а он отражает нынешние
 // правила игры. Старые партии остаются для проверки разбора лога.
 // 14.08 набор расширен с part4–7 на все десять партий билда 248348:
 // на 13 решающих ходах выборка была слишком мала, чтобы отличать
 // системную слепоту от случайности.
-const FIXTURES = [
-  'data/fixtures/part4/game.log',
-  'data/fixtures/part5/game.log',
-  'data/fixtures/part6/game.log',
-  'data/fixtures/part7/game.log',
-  'data/fixtures/part8/game.log',
-  'data/fixtures/part9/game.log',
-  'data/fixtures/part10/game.log',
-  'data/fixtures/part11/game.log',
-  'data/fixtures/part12/game.log',
-  'data/fixtures/part13/game.log',
-  'data/fixtures/part14/game.log',
-  'data/fixtures/part15/game.log',
-  'data/fixtures/part16/game.log',
-  'data/fixtures/part17/game.log',
-  'data/fixtures/part18/game.log',
-  'data/fixtures/part19/game.log',
-  'data/fixtures/part20/game.log',
-  'data/fixtures/part21/game.log',
-  'data/fixtures/part22/game.log',
-] as const;
+const FIXTURES = CURRENT_BUILD_LOGS;
 
 function main(): void {
   const cards = loadCardIndex();

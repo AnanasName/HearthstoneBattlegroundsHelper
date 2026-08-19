@@ -11,6 +11,7 @@ import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
 import { part16Game } from '../fixtures.js';
+import { changesAdvisorState } from '../snapshots.js';
 
 /**
  * part16 — восьмая партия с оверлеем (14.08.2026, АПМ-пираты, 4-е место),
@@ -40,7 +41,7 @@ describe('part16: прокрутка, бафф соседям, нецелево�
     for (const event of readPowerEvents(text)) {
       reducer.step(event);
       const { content } = event.line;
-      if (!content.includes('ZONE') && !content.includes('RESOURCES')) continue;
+      if (!changesAdvisorState(content)) continue;
       const s = reducer.snapshot();
       if (s.phase !== 'tavern') continue;
       if (s.turn === 7 && sylvarTurn7 === null && s.board.some((m) => m.cardId.startsWith('BG32_235'))) {

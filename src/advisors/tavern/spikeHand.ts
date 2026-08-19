@@ -110,12 +110,13 @@ import { toBattleInfo } from '../battle/mapper.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import { battleQuestion } from '../position/advisor.js';
 import { withSeededRandom } from '../position/rng.js';
+import { summarize, type SpikeSummary } from './statAnalysis.js';
+import { isHandWorker } from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 import { readTavernTurns } from './turns.js';
+import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
 
-const FIXTURES = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(
-  (n) => `data/fixtures/part${String(n)}/game.log`,
-);
+const FIXTURES = CURRENT_BUILD_LOGS;
 
 const SIMULATIONS = 2000;
 const SEED = 20_260_817;
@@ -137,10 +138,9 @@ function matches(text: string, words: readonly string[]): boolean {
   return text !== '' && words.some((w) => new RegExp(w, 'i').test(text));
 }
 
-/** Карта, чей текст привязывает её ценность к руке. */
-function isHandWorker(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
-  return matches(textOf(m, cards), rules.handWorkerWords);
-}
+// «Карта, работающая из руки» берётся ИЗ ПРАВИЛА, а не переписывается здесь:
+// замер тем и ценен, что меряет ровно ту популяцию, которую отбирает советник.
+// Своя копия предиката тихо разошлась бы с ним при первой же правке слов.
 
 /** Он же, но с призывом: эффект случается в самом бою (Flighty Scout). */
 function playsFromHand(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
@@ -256,24 +256,10 @@ function main(): void {
     return;
   }
 
-  const summary = (
-    values: readonly number[],
-  ): { n: number; mean: number; se: number; moved: number } => {
-    const n = Math.max(1, values.length);
-    const mean = values.reduce((a, b) => a + b, 0) / n;
-    const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1);
-    return {
-      n: values.length,
-      mean,
-      se: Math.sqrt(variance / n),
-      moved: values.filter((v) => Math.abs(v) > 0.05).length,
-    };
-  };
-
   console.log('\n═══ итог ═══');
-  const byGroup = new Map<Group, ReturnType<typeof summary>>();
+  const byGroup = new Map<Group, SpikeSummary>();
   for (const group of ['playsFromHand', 'growsInHand', 'feeders', 'control'] as const) {
-    const s = summary(points.filter((p) => p.group === group).map((p) => p.delta));
+    const s = summarize(points.filter((p) => p.group === group).map((p) => p.delta));
     byGroup.set(group, s);
     console.log(`\n  ${GROUP_LABEL[group]}`);
     if (s.n === 0) {
@@ -318,7 +304,7 @@ function main(): void {
   // проще по точкам, где ветви вообще разошлись.
   console.log('\n  диагностика (не предрегистрирована) — только разошедшиеся точки:');
   for (const group of ['playsFromHand', 'growsInHand', 'feeders', 'control'] as const) {
-    const s = summary(
+    const s = summarize(
       points.filter((p) => p.group === group && Math.abs(p.delta) > 0.05).map((p) => p.delta),
     );
     console.log(

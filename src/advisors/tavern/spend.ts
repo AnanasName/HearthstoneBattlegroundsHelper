@@ -98,6 +98,14 @@ export interface AppliedStep {
 /**
  * Тот же борд, но у цели совета израсходован дневной заряд хранителя
  * заклинаний. Ничего не трогает, если совет заряда не тратит.
+ *
+ * Заряд ПИШЕТСЯ по индексу, а не отображается на месте: `map` по пустому
+ * `scriptData` не делает ничего, а ровно этот случай — «тега нет» — обе
+ * стороны читают как «заряд есть» (`scriptData[0] ?? 1`). То есть на
+ * миньоне без живого тега `TAG_SCRIPT_DATA_NUM_1` расход заряда молча
+ * не записывался, и план советовал два чародейских заклинания подряд
+ * на одного хранителя — ровно та двойная трата, ради которой поле
+ * `spendsMagnetCharge` и заводилось (part21).
  */
 function withoutMagnetCharge(
   board: readonly Minion[],
@@ -105,11 +113,12 @@ function withoutMagnetCharge(
 ): readonly Minion[] {
   const target = rec.targetMinion;
   if (rec.spendsMagnetCharge !== true || target == null) return board;
-  return board.map((m) =>
-    m.entityId === target.entityId
-      ? { ...m, scriptData: m.scriptData.map((v, i) => (i === 0 ? Math.max(0, (v ?? 1) - 1) : v)) }
-      : m,
-  );
+  return board.map((m) => {
+    if (m.entityId !== target.entityId) return m;
+    const scriptData = [...m.scriptData];
+    scriptData[0] = Math.max(0, (scriptData[0] ?? 1) - 1);
+    return { ...m, scriptData };
+  });
 }
 
 /**
@@ -141,7 +150,12 @@ export function applyRecommendation(
    */
   const paid = (patch: Partial<GameState> = {}): GameState => {
     const next = { ...state, gold: state.gold - rec.cost, ...patch };
-    return { ...next, goldSpent: state.goldTotal - next.gold };
+    // Золото, которое действие ПРИНОСИТ, известно числом из текста карты —
+    // и обязано доехать до следующего шага. Иначе план обещает «откроется
+    // покупка» и тут же её не делает (part24, ход 9).
+    const gained = rec.grantsGold ?? 0;
+    const withGold = gained > 0 ? { ...next, gold: next.gold + gained } : next;
+    return { ...withGold, goldSpent: state.goldTotal - withGold.gold };
   };
 
   switch (rec.action) {
@@ -305,17 +319,24 @@ export function applyRecommendation(
  * карта покупается и разыгрывается однажды. Состояние это и так отражает
  * (купленный миньон уходит из витрины), но подъём отдельным полем.
  */
-function planNextStep(
+function planSteps(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
   used: ReadonlySet<string>,
-): Recommendation | null {
+  withoutLevelUp = false,
+): readonly Recommendation[] {
   const advice = adviseTavern(state, deps, rules);
-  if (advice === null) return null;
+  if (advice === null) return [];
 
   const usable = advice.recommendations.filter((rec) => {
     if (SKIPPED_ACTIONS.has(rec.action)) return false;
+    // Ветка развилки «не поднимать в этот ход»: подъём выключен во всей
+    // цепочке, а не только на первом шаге. Иначе сравнение выходило бы
+    // не «подъём против покупок», а «две цепочки, и в обеих подъём»:
+    // после вынужденного первого шага он снова становится верхним советом
+    // и возвращается вторым (part24, ход 7).
+    if (withoutLevelUp && rec.action === 'levelUp') return false;
     if (rec.cost > state.gold) return false;
     // Совет без ценности планом не считается: «ничего» и нулевые довески
     // заканчивают ход, а не наполняют план.
@@ -327,7 +348,18 @@ function planNextStep(
   // Заморозка — действие КОНЦА хода: пока есть что делать с золотом, она ждёт.
   // Иначе план обрывался бы на ней, не потратив ни монеты: очки заморозки
   // считаются по своей шкале и легко обгоняют покупку.
-  return usable.find((rec) => rec.action !== 'freeze') ?? usable[0] ?? null;
+  const spending = usable.filter((rec) => rec.action !== 'freeze');
+  return spending.length > 0 ? spending : usable.slice(0, 1);
+}
+
+function planNextStep(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  used: ReadonlySet<string>,
+  withoutLevelUp = false,
+): Recommendation | null {
+  return planSteps(state, deps, rules, used, withoutLevelUp)[0] ?? null;
 }
 
 /**
@@ -360,12 +392,120 @@ export interface SpendPlanOptions {
  * его, — дело интерфейса (одношаговый план и есть верхняя строка советов,
  * и оверлей его прячет). Обрезка здесь ломала бы замер: план из одного
  * действия он читал бы как «ничего не делать».
+ *
+ * ## Развилка, когда золото сгорает
+ *
+ * Жадная цепочка берёт верхний совет и живёт остатком. Пока остаток
+ * тратится, это честно; но верхний совет умеет ЗАПЕРЕТЬ остаток — оставить
+ * золото, которого не хватает ни на что. Случай part23 (ход 5, пять золота):
+ * тёмный дар за 3 (8.0 очков) — и два золота сгорают, тогда как прокрутка
+ * за 2 (7.5) оставляла ровно три на покупку за 3 (7.0). Игрок сыграл именно
+ * второе и написал: «мне подсвечивает ход, где я должен потерять золото».
+ *
+ * Поэтому шаг, после которого золото сгорает, соревнуется не сам с собой,
+ * а с ЦЕПОЧКОЙ: план пробует начать с ближайших соперников верхнего совета
+ * и берёт ту, у которой «сумма очков минус сгоревшее золото» больше.
+ * Полного перебора корзин это не вводит (он замерен и отвергнут, см.
+ * `spendQuality.ts`): развилка одна, на первом шаге, и только тогда, когда
+ * жадная цепочка уже призналась, что золото сгорает.
+ *
+ * ПОДЪЁМ ТАВЕРНЫ входит в развилку с 17.08 — по решению игрока, после
+ * третьей подряд жалобы на один и тот же ход (part23 ход 5, part24 ход 7,
+ * part25 ход 7: шесть золота, подъём за 5, монета сгорает). Условие входа
+ * одно и то же для всех: жадная цепочка сама призналась, что золото горит.
+ *
+ * Честность суммы держится на `standaloneScore`. Очки подъёма в СПИСКЕ —
+ * это «лучшая покупка плюс срочность»: первое слагаемое не ценность
+ * подъёма, а планка, которую он обязан перебить, чтобы стоять выше покупок.
+ * В цепочке эта покупка делается по-настоящему и отдельным шагом, поэтому
+ * в сумму идёт только своя ценность подъёма — срочность. Ровно на этом
+ * прежняя попытка и была откачена; разница в том, что теперь двойной счёт
+ * снят явно, а не спрятан.
+ *
+ * Следствие названо заранее и принято игроком: когда золота хватает на два
+ * действия, цепочка почти всегда перевешивает срочность одного тира. Там,
+ * где покупать нечего (правило мусорной витрины, JeefHS), подъём в развилку
+ * по-прежнему не входит — `levelUpRule` не заполняет там `standaloneScore`.
  */
 export function spendPlan(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   options: SpendPlanOptions = {},
+): SpendPlan {
+  // Ранжирование на ИСХОДНОМ состоянии считается один раз: жадная цепочка
+  // берёт отсюда свой первый шаг, развилка — его ближайших соперников.
+  // Прежде и то и другое звало `adviseTavern` на одном и том же состоянии
+  // порознь, а это самый дорогой вызов хода (полная витрина, тёмный дар
+  // с усреднением по пулу, заморозка, выборы).
+  const firstOptions = planSteps(state, deps, rules, new Set<string>());
+  const greedy = buildChain(state, deps, rules, options, firstOptions[0] ?? null);
+  if (greedy.goldLeft <= 0) return greedy;
+
+  // Цепочка с подъёмом судится развилкой только тогда, когда у подъёма есть
+  // СВОЯ ценность (`standaloneScore`): без неё сумма очков считала бы лучшую
+  // покупку дважды. Не заполнено — цепочка уходит как есть, как было до
+  // 17.08 (мусорная витрина, см. `levelUpRule`).
+  const levelStep = greedy.steps.find((s) => s.recommendation.action === 'levelUp');
+  if (levelStep !== undefined && levelStep.recommendation.standaloneScore === undefined) {
+    return greedy;
+  }
+
+  // Началом АЛЬТЕРНАТИВЫ подъём не пробуется: он либо уже стоит верхним
+  // советом (и тогда он и есть жадная цепочка), либо проиграл в списке —
+  // и начинать с проигравшего незачем.
+  const alternatives = firstOptions
+    .slice(1)
+    .filter((rec) => rec.action !== 'levelUp')
+    .slice(0, rules.maxAlternativeStarts);
+
+  // Когда жадная цепочка поднимает таверну, альтернатива — это ход БЕЗ
+  // подъёма целиком: ровно тот выбор, который делает игрок.
+  const withoutLevelUp = levelStep !== undefined;
+
+  let best = greedy;
+  let bestValue = chainValue(greedy, rules);
+  for (const first of alternatives) {
+    const chain = buildChain(state, deps, rules, options, first, withoutLevelUp);
+    const value = chainValue(chain, rules);
+    // Строгое превосходство: при равенстве остаётся жадная цепочка, чтобы
+    // порядок советов и план не расходились без причины.
+    if (value > bestValue + 1e-9) {
+      best = chain;
+      bestValue = value;
+    }
+  }
+  return best;
+}
+
+/**
+ * Сколько цепочка стоит целиком: очки шагов минус сгоревшее золото.
+ *
+ * Шаг идёт в сумму своей ценностью: у покупок, прокруток и заклинаний это
+ * и есть `score` — ценность того, что действие приносит. У подъёма таверны
+ * очки списка устроены иначе («лучшая покупка плюс срочность»), и в сумму
+ * берётся `standaloneScore` — срочность без чужой покупки внутри. Иначе
+ * лучшая покупка считалась бы дважды: один раз внутри подъёма, второй —
+ * отдельным шагом соперничающей цепочки.
+ *
+ * Заморозка из суммы исключена: она ничего не тратит и решает про СЛЕДУЮЩИЙ
+ * ход, а сравниваем мы этот. Сгоревшее золото переводится в очки тем же
+ * курсом `goldPointValue`, что и везде.
+ */
+function chainValue(plan: SpendPlan, rules: TavernRules): number {
+  const gained = plan.steps
+    .filter((s) => s.recommendation.action !== 'freeze')
+    .reduce((sum, s) => sum + (s.recommendation.standaloneScore ?? s.recommendation.score), 0);
+  return gained - plan.goldLeft * rules.goldPointValue;
+}
+
+function buildChain(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  options: SpendPlanOptions,
+  forcedFirst: Recommendation | null,
+  withoutLevelUp = false,
 ): SpendPlan {
   const maxSteps = options.maxSteps ?? 8;
   const steps: SpendStep[] = [];
@@ -374,7 +514,10 @@ export function spendPlan(
   let truncated = false;
 
   for (let i = 0; i < maxSteps; i += 1) {
-    const rec = planNextStep(current, deps, rules, used);
+    const rec =
+      i === 0 && forcedFirst !== null
+        ? forcedFirst
+        : planNextStep(current, deps, rules, used, withoutLevelUp);
     if (rec === null) break;
     const key = stepKey(rec);
     if (key !== null) used.add(key);

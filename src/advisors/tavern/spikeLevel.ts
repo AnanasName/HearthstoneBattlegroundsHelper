@@ -37,9 +37,10 @@ import { loadCardIndex } from '../../data/cards.js';
 import { adviseTavern } from './advisor.js';
 import { tavernTurnOf } from './rules.js';
 import { readTavernTurns } from './turns.js';
+import { CURRENT_BUILD_PARTS, fixtureLogPath } from '../../data/fixtureGames.js';
 
 /** Партии текущего билда 248348 — те же, на которых считается качество советов. */
-const PARTS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+const PARTS = CURRENT_BUILD_PARTS;
 
 interface PartResult {
   readonly part: number;
@@ -49,7 +50,7 @@ interface PartResult {
 }
 
 function measurePart(part: number, cards: ReturnType<typeof loadCardIndex>): PartResult | null {
-  const path = `data/fixtures/part${String(part)}/game.log`;
+  const path = fixtureLogPath(part);
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
