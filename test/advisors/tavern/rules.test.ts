@@ -5,10 +5,12 @@ import {
   buyCostOf,
   buyRules,
   choiceAdvice,
+  copiesForTriple,
   copiesOwned,
   darkGiftRule,
   freeHeroPowerRule,
   freezeRule,
+  heroPowerPlayStats,
   heroPowerRule,
   heroPowerSpellRule,
   levelUpRule,
@@ -45,7 +47,7 @@ import { board, minion } from '../../minions.js';
  */
 // `type` у заготовок настоящий: по нему справочник собирает пул миньонов
 // тира (`poolOfTier`), а на пуле стоят и тёмный дар, и планка заморозки.
-const cards = createCardIndex([
+const STUB_CARDS = [
   {
     id: 'SKIPPER',
     name: 'Речной пропойца',
@@ -63,7 +65,8 @@ const cards = createCardIndex([
   { id: 'AMALGAM', name: 'Амальгама', type: 'Minion', techLevel: 4, races: ['ALL'], isBaconPool: true },
   { id: 'NEUTRAL', name: 'Нейтральный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
   { id: 'NEUTRAL_2', name: 'Другой нейтральный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
-]);
+];
+const cards = createCardIndex(STUB_CARDS);
 const deps = { cards };
 
 const hero = (health: number, damage = 0, armor = 0): Hero => ({
@@ -797,6 +800,150 @@ describe('правило обновления витрины', () => {
       shop: [shopMinion(9, 'MURLOC_1', { attack: 2, health: 2 })],
     });
     expect(rerollRule(s, deps)).not.toBeNull();
+  });
+});
+
+/**
+ * Сила героя меняет не только советы — она меняет наши КОНСТАНТЫ.
+ *
+ * Замер 26.08 по 24 партиям датасета: в 14 из них советник не брал из силы
+ * ровно ничего, а по пулу таких сил 126 из 174. Две из них делают наши числа
+ * не «недооценёнными», а прямо неверными, и обе закрыты здесь: порог тройки
+ * (`Double Time`, факт лога — в part7.test.ts) и статы за розыгрыш
+ * (`Hat Trick`, партия part27).
+ */
+describe('сила героя меняет константы правил', () => {
+  const real = loadCardIndex();
+  const realDeps = { cards: real };
+
+  // Разбор ТЕКСТА проверяется на настоящем снапшоте (у него переносы строк
+  // посреди предложения), а поведение правил — на подставном справочнике,
+  // как и все прочие юнит-тесты. Поэтому в заготовку доложены те же две
+  // силы с теми же текстами.
+  const constCards = createCardIndex([
+    ...STUB_CARDS,
+    {
+      id: 'BG34_HERO_002p',
+      name: 'Double Time',
+      type: 'Hero_power',
+      text: 'You only need 2 copies to make minions Golden. They give Tavern Coins instead of Triple Rewards.',
+    },
+    {
+      id: 'TB_BaconShop_HP_042',
+      name: 'Hat Trick',
+      type: 'Hero_power',
+      text: '[x]When you play a minion,\ngive it a +1/+1 hat\n that passes to a friendly\nminion when sold.',
+    },
+    { id: 'BG36_HERO_105p', name: 'Feel Devastation', type: 'Hero_power', text: 'Every 4 turns, Discover a minion with a Dark Gift.' },
+  ]);
+  const constDeps = { cards: constCards };
+
+  const withPower = (powerCardId: string | null, patch: Partial<GameState> = {}): GameState => {
+    const base = state(patch);
+    return {
+      ...base,
+      hero: base.hero === null ? null : { ...base.hero, heroPowerCardId: powerCardId },
+    };
+  };
+
+  it('порог тройки читается из текста силы, иначе остаётся тремя', () => {
+    // «You only need 2 copies to make minions Golden» — Double Time.
+    expect(copiesForTriple(withPower('BG34_HERO_002p'), real)).toBe(2);
+    // Обычная сила порога не трогает, как и её отсутствие.
+    expect(copiesForTriple(withPower('BG36_HERO_105p'), real)).toBe(3);
+    expect(copiesForTriple(withPower(null), real)).toBe(3);
+  });
+
+  it('на Double Time тройку собирает ПЕРВАЯ копия, а не вторая', () => {
+    const own = shopMinion(1, 'MURLOC_2');
+    const candidate = shopMinion(2, 'MURLOC_2');
+    const one = { board: [own], hand: [], shop: [candidate] };
+
+    const doubled = minionValue(candidate, withPower('BG34_HERO_002p', one), constDeps);
+    expect(doubled.copiesOwned).toBe(1);
+    expect(doubled.completesTriple).toBe(true);
+    expect(doubled.tripleBet).toBe(false);
+    expect(doubled.copies).toBe(DEFAULT_TAVERN_RULES.copiesBonus.at(-1));
+
+    const usual = minionValue(candidate, withPower('BG36_HERO_105p', one), constDeps);
+    expect(usual.completesTriple).toBe(false);
+    expect(usual.tripleBet).toBe(true);
+    expect(usual.copies).toBe(DEFAULT_TAVERN_RULES.copiesBonus[1]);
+  });
+
+  it('причина заморозки и цель обновления называют копию правильным числом', () => {
+    // Пара на борде + третья в витрине, которую сейчас не купить.
+    const pair = [shopMinion(1, 'MURLOC_2'), shopMinion(2, 'MURLOC_2')];
+    const frozen = freezeRule(
+      withPower('BG36_HERO_105p', {
+        gold: 0,
+        board: pair,
+        shop: [shopMinion(3, 'MURLOC_2')],
+      }),
+      constDeps,
+    );
+    expect(frozen?.reason).toContain('третья копия под тройку');
+
+    // На Double Time та же тройка собирается со второй копии, и совет
+    // обязан назвать её второй — игрок сверяет причину, а не число.
+    const half = freezeRule(
+      withPower('BG34_HERO_002p', {
+        gold: 0,
+        board: [shopMinion(1, 'MURLOC_2')],
+        shop: [shopMinion(3, 'MURLOC_2')],
+      }),
+      constDeps,
+    );
+    expect(half?.reason).toContain('вторая копия под тройку');
+  });
+
+  it('статы за розыгрыш читаются из силы и входят в ценность покупки', () => {
+    // «When you play a minion, give it a +1/+1 hat…» — Hat Trick, part27.
+    // Проверка идёт по НАСТОЯЩЕМУ снапшоту: у этого текста перенос строки
+    // стоит посреди предложения, и шаблон обязан его терпеть.
+    expect(heroPowerPlayStats(withPower('TB_BaconShop_HP_042'), real)).toBe(2);
+    expect(heroPowerPlayStats(withPower('BG36_HERO_105p'), real)).toBe(0);
+    expect(heroPowerPlayStats(withPower(null), real)).toBe(0);
+
+    const candidate = minion(7, { cardId: 'BGS_039', attack: 3, health: 3, techLevel: 1 });
+    const shop = { board: [], hand: [], shop: [candidate] };
+    const hatted = minionValue(candidate, withPower('TB_BaconShop_HP_042', shop), realDeps);
+    const plain = minionValue(candidate, withPower('BG36_HERO_105p', shop), realDeps);
+
+    // Величина — на нашей же шкале статов, своего веса у слагаемого нет.
+    expect(hatted.heroPowerPlay).toBe(2 * DEFAULT_TAVERN_RULES.value.perStatPoint);
+    expect(plain.heroPowerPlay).toBe(0);
+    expect(hatted.total - plain.total).toBeCloseTo(hatted.heroPowerPlay, 10);
+  });
+
+  it('шляпа не считается дважды: у своего миньона она уже в статах', () => {
+    // Борд полон, и правило продажи взвешивает СВОИХ. Шляпа Hat Trick —
+    // настоящий энчант, её +1/+1 уже сидят в `attack`/`health` миньона:
+    // прибавить слагаемое ещё раз значило бы посчитать её дважды, и жертва
+    // продажи поехала бы вслед за этой ошибкой.
+    const full = {
+      board: [
+        minion(1, { cardId: 'MURLOC_1', attack: 1, health: 1, techLevel: 1 }),
+        ...board([2, 3, 4, 5, 6, 7], { cardId: 'MURLOC_3', attack: 6, health: 6 }),
+      ],
+      shop: [shopMinion(9, 'MURLOC_5', { attack: 9, health: 9 })],
+      gold: 3,
+    };
+    const hatted = sellRule(withPower('TB_BaconShop_HP_042', full), constDeps);
+    const plain = sellRule(withPower('BG36_HERO_105p', full), constDeps);
+
+    expect(hatted?.minion?.entityId).toBe(1);
+    expect(plain?.minion?.entityId).toBe(1);
+
+    // Счёт правила продажи — «покупка минус жертва», и шляпа входит в него
+    // РОВНО ОДИН раз: покупку ещё предстоит разыграть, а жертва свою шляпу
+    // давно носит в статах. Отсюда разница ровно в одну шляпу.
+    //
+    // Ноль означал бы, что слагаемое прибавлено и жертве тоже (сократилось),
+    // двойная шляпа — что оно прибавлено покупке дважды. Оба случая — тихо
+    // неверное число, и оба этот тест ловит.
+    const hat = 2 * DEFAULT_TAVERN_RULES.value.perStatPoint;
+    expect((hatted?.score ?? NaN) - (plain?.score ?? NaN)).toBeCloseTo(hat, 10);
   });
 });
 

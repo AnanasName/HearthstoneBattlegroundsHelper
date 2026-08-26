@@ -164,6 +164,19 @@ export interface ValueBreakdown {
   readonly namedCardMates: number;
   /** Сколько таких же карт уже есть на борде и в руке. */
   readonly copiesOwned: number;
+  /**
+   * Соберёт ли ПОКУПКА этой карты тройку прямо сейчас.
+   *
+   * Отдельным полем, а не сравнением `copiesOwned >= 2` по месту: сколько
+   * копий нужно, решает сила героя (`copiesForTriple`), и разъехавшиеся
+   * копии этого сравнения — ровно тот способ, которым правило живёт
+   * в одном месте и не живёт в семи (урок `CURRENT_BUILD_PARTS`).
+   */
+  readonly completesTriple: boolean;
+  /** Копия есть, но тройку она пока не собирает — ставка на будущую. */
+  readonly tripleBet: boolean;
+  /** Статы, которые даёт розыгрыш этой карты по силе героя (Hat Trick). */
+  readonly heroPowerPlay: number;
 }
 
 /** Один вариант открытого предложения тринкетов с оценкой. */
@@ -537,6 +550,102 @@ export function copiesOwned(candidate: Minion, state: GameState): number {
   return state.board.filter(same).length + state.hand.filter(same).length;
 }
 
+/**
+ * Сколько копий собирают золотого В ЭТОЙ партии.
+ *
+ * Правило игры — три, но сила героя его меняет, и число написано в её
+ * тексте: «You only need 2 copies to make minions Golden» (Double Time).
+ * Проверено логом part7 — все три золотых там собрались на двух копиях,
+ * при контроле в три на обычных героях (part17, part19).
+ *
+ * Ниже двух не опускается: одна копия — это сам купленный миньон, и тройка
+ * «из одного» сломала бы весь счёт копий, а не улучшила его.
+ */
+export function copiesForTriple(
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  const powerId = state.hero?.heroPowerCardId ?? null;
+  if (powerId === null) return rules.tripleCopies;
+  return memoByCard(TRIPLE_COPIES_CACHE, powerId, cards, rules, () => {
+    const text = cards.info(powerId)?.text ?? '';
+    for (const word of rules.tripleCopiesWords) {
+      const hit = new RegExp(word, 'i').exec(text);
+      const n = hit?.[1] === undefined ? NaN : Number.parseInt(hit[1], 10);
+      if (Number.isFinite(n) && n >= 2) return n;
+    }
+    return rules.tripleCopies;
+  });
+}
+
+const TRIPLE_COPIES_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, number>>
+>();
+
+/**
+ * Статы, которые сила героя даёт КАЖДОМУ разыгранному миньону.
+ *
+ * «When you play a minion, give it a +1/+1 hat…» (Hat Trick, part27):
+ * миньон, попавший на борд, стоит на эти статы больше, и число читается
+ * из текста той же шкалой `perStatPoint`, что и всё остальное. Сила
+ * пассивная, нажимать нечего — без этого слагаемого советник не брал
+ * из неё вообще ничего за всю партию.
+ */
+export function heroPowerPlayStats(
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  const powerId = state.hero?.heroPowerCardId ?? null;
+  if (powerId === null) return 0;
+  return memoByCard(HERO_POWER_PLAY_CACHE, powerId, cards, rules, () => {
+    const text = cards.info(powerId)?.text ?? '';
+    for (const word of rules.heroPowerPlayStatsWords) {
+      const hit = new RegExp(word, 'i').exec(text);
+      if (hit === undefined || hit === null) continue;
+      const attack = Number.parseInt(hit[1] ?? '', 10);
+      const health = Number.parseInt(hit[2] ?? '', 10);
+      if (Number.isFinite(attack) && Number.isFinite(health)) return attack + health;
+    }
+    return 0;
+  });
+}
+
+const HERO_POWER_PLAY_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, number>>
+>();
+
+/**
+ * Бонус за уже имеющиеся копии — по РАССТОЯНИЮ до тройки, а не по их числу.
+ *
+ * Последний элемент таблицы достаётся тому, кого покупка делает золотым;
+ * остальные — ставке на будущую тройку. При обычных трёх копиях выходит
+ * ровно прежняя таблица (0 → 0, 1 → 3, 2+ → 12), при двух — 0 → 0, 1 → 12.
+ */
+function copiesBonusOf(owned: number, needed: number, rules: TavernRules): number {
+  const last = rules.copiesBonus.length - 1;
+  const index = owned >= needed - 1 ? last : Math.min(owned, Math.max(0, last - 1));
+  return rules.copiesBonus[index] ?? 0;
+}
+
+/**
+ * Какая по счёту копия собирает тройку — словом, для причины совета.
+ * У Double Time это вторая, у всех остальных третья, и совет обязан
+ * называть её правильно: игрок сверяет причину, а не число.
+ *
+ * Падеж — параметром: причина заморозки говорит «третья копия под тройку»,
+ * а цель обновления — «искать третью копию X». Одна форма на оба места
+ * даёт «третья копию» — заметно и стыдно.
+ */
+function nthCopyWord(needed: number, form: 'nom' | 'acc'): string {
+  if (needed === 2) return form === 'nom' ? 'вторая' : 'вторую';
+  if (needed === 3) return form === 'nom' ? 'третья' : 'третью';
+  return `${String(needed)}-${form === 'nom' ? 'я' : 'ю'}`;
+}
+
 /** Ценность миньона: во что складываются веса из таблицы правил. */
 export function minionValue(
   candidate: Minion,
@@ -567,8 +676,11 @@ export function minionValue(
     (candidate.reborn ? Math.min(w.reborn, stats) : 0);
 
   const owned = copiesOwned(candidate, state);
-  // Больше двух копий бонус не растёт: тройка собирается ровно из трёх.
-  const copies = rules.copiesBonus[Math.min(owned, rules.copiesBonus.length - 1)] ?? 0;
+  // Сколько копий собирают золотого, решает сила героя, а не константа:
+  // «Double Time» делает тройку из двух (part7). Выше порога бонус не растёт.
+  const needed = copiesForTriple(state, cards, rules);
+  const completesTriple = owned >= needed - 1;
+  const copies = copiesBonusOf(owned, needed, rules);
 
   const golden = candidate.golden ? w.golden : 0;
 
@@ -725,6 +837,12 @@ export function minionValue(
     if (heroSells && cardSells) heroPower += w.economy;
   }
 
+  // Статы за сам розыгрыш (Hat Trick, part27). Слагаемое ОДИНАКОВО у всех
+  // кандидатов и потому порядок покупок не меняет — оно меняет другое:
+  // покупку против обновления, розыгрыш против «ничего». Считается
+  // на нашей шкале статов, своего веса у него нет намеренно.
+  const heroPowerPlay = heroPowerPlayStats(state, cards, rules) * w.perStatPoint;
+
   return {
     techLevel: tech,
     stats,
@@ -740,6 +858,7 @@ export function minionValue(
     spellMagnet,
     doubler,
     heroPower,
+    heroPowerPlay,
     total:
       tech +
       stats +
@@ -754,12 +873,15 @@ export function minionValue(
       namedCard +
       spellMagnet +
       doubler +
-      heroPower,
+      heroPower +
+      heroPowerPlay,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
     namedCardMates: namedMates,
     copiesOwned: owned,
+    completesTriple,
+    tripleBet: owned > 0 && !completesTriple,
   };
 }
 
@@ -1024,6 +1146,10 @@ export function levelUpRule(
   state: GameState,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   buys: readonly Recommendation[] = [],
+  // Сколько копий собирают тройку. Числом, а не справочником: правилу
+  // подъёма `CardIndex` не нужен ни для чего другого, а ответ на этот
+  // вопрос уже посчитан у того, кто правило зовёт (`copiesForTriple`).
+  copiesToTriple: number = rules.tripleCopies,
 ): Recommendation | null {
   const cost = state.tavernUpgradeCost;
   const target = state.tavernUpgradeTarget;
@@ -1071,7 +1197,7 @@ export function levelUpRule(
   const shopIsTrash = bestBuy !== null && bestBuy < trashThreshold;
   if (behind > 0 && bestBuy !== null) {
     const triple = buys
-      .filter((b) => b.minion !== null && copiesOwned(b.minion, state) >= 2)
+      .filter((b) => b.minion !== null && copiesOwned(b.minion, state) >= copiesToTriple - 1)
       .reduce((best: number | null, b) => (best === null || b.score > best ? b.score : best), null);
     const affordBoth = state.gold >= cost + rules.minionCost;
 
@@ -1170,7 +1296,12 @@ function ownValue(
   // покупка соберёт тройку. У миньона, который уже на борде, ничего собирать
   // не надо, и оставленный бонус делает своих неотчуждаемыми — борд из семи
   // одинаковых токенов оценивался бы дороже любой витрины.
-  return value.total - value.copies;
+  //
+  // Статы за розыгрыш вычитаются по той же причине, но довод сильнее: шляпа
+  // Hat Trick — это НАСТОЯЩИЙ энчант на миньоне, и его +1/+1 уже посчитаны
+  // в `stats` этого же разбора. Оставить слагаемое значило бы посчитать
+  // одну и ту же шляпу дважды (part27).
+  return value.total - value.copies - value.heroPowerPlay;
 }
 
 /**
@@ -1256,12 +1387,12 @@ export function buyRules(
       let requiresSlot = false;
 
       if (full && host === null) {
-        if (value.copiesOwned >= 2 && copiesOnBoard >= 1) {
+        if (value.completesTriple && copiesOnBoard >= 1) {
           // Тройка собирается, и хотя бы одна копия на борде: слияние заберёт
           // её и освободит слот — продавать никого не нужно (part10, ход 13:
           // советник предлагал продать Тавматурга ради третьего дракончика).
           notes.push('соберёт тройку — место освободится само');
-        } else if (value.copiesOwned >= 1) {
+        } else if (value.tripleBet) {
           // Вторая копия покупается В РУКУ, под будущую тройку: слот ей
           // не нужен, пока её не разыгрываешь.
           notes.push('борд полон — в руку, под тройку');
@@ -1284,9 +1415,9 @@ export function buyRules(
       }
 
       // Пометка про копии не дублирует ветку тройки на полном борде выше.
-      if (value.copiesOwned >= 2 && !notes.some((n) => n.includes('тройку'))) {
+      if (value.completesTriple && !notes.some((n) => n.includes('тройку'))) {
         notes.unshift('собирает тройку');
-      } else if (value.copiesOwned === 1 && !notes.some((n) => n.includes('тройку'))) {
+      } else if (value.tripleBet && !notes.some((n) => n.includes('тройку'))) {
         notes.unshift('вторая копия');
       }
       if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
@@ -1442,8 +1573,8 @@ export function playRules(
     const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
     const notes: string[] = [];
     if (doomed) notes.push('умрёт при розыгрыше в этот ход — но хрип/перерождение сработают');
-    if (value.copiesOwned >= 2) notes.push('собирает тройку');
-    else if (value.copiesOwned === 1) notes.push('вторая копия');
+    if (value.completesTriple) notes.push('собирает тройку');
+    else if (value.tripleBet) notes.push('вторая копия');
     if (minion.golden) notes.push('золотой');
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
     if (value.textTribeMates > 0) {
@@ -1782,8 +1913,12 @@ export function sellForGoldRule(
       // синергия, которую он теряет.
       const value = ownBreakdown(minion, state, deps, rules);
       // Экономика этой карты — обещание продажи, а не причина держать;
-      // бонус за копии — про приобретение, а не про удержание (`ownValue`).
-      return { minion, retained: value.total - value.copies - value.economy };
+      // бонус за копии и статы за розыгрыш — про приобретение, а не про
+      // удержание, и шляпа вдобавок уже сидит в статах (`ownValue`).
+      return {
+        minion,
+        retained: value.total - value.copies - value.economy - value.heroPowerPlay,
+      };
     })
     .sort((a, b) => a.retained - b.retained);
   const victim = scored[0];
@@ -1851,12 +1986,18 @@ function rerollFreezeGoal(
     if (info.techLevel === null || info.techLevel > state.techLevel) return null;
     return info;
   };
+  // «Пара» — это столько копий, что следующая собирает тройку, а сколько
+  // их нужно, решает сила героя: у Double Time тройку собирает ВТОРАЯ копия,
+  // и целью обновления там становится одиночка, а не пара (part7).
+  const needed = copiesForTriple(state, deps.cards, rules);
   const pair = own
-    .filter((m) => (counts.get(m.cardId) ?? 0) >= 2)
+    .filter((m) => (counts.get(m.cardId) ?? 0) >= needed - 1)
     .map((m) => offerable(m.cardId))
     .filter((info): info is CardInfo => info !== null)
     .sort((a, b) => (b.techLevel ?? 0) - (a.techLevel ?? 0))[0];
-  if (pair !== undefined) return `третью копию ${pair.name} — соберётся тройка`;
+  if (pair !== undefined) {
+    return `${nthCopyWord(needed, 'acc')} копию ${pair.name} — соберётся тройка`;
+  }
 
   if (state.board.length >= rules.boardSize) return null;
   // В ход подъёма заморозка ради племени молчит (свежая витрина будет
@@ -2057,6 +2198,8 @@ export function freezeRule(
       return {
         minion: m,
         value: value.total,
+        completes: value.completesTriple,
+        bet: value.tripleBet,
         copies: value.copiesOwned,
         tier: m.techLevel ?? deps.cards.info(m.cardId)?.techLevel ?? 1,
         mates: justLevelled ? 0 : strictMates(m),
@@ -2086,8 +2229,8 @@ export function freezeRule(
     .filter(
       (v) =>
         v.value >= threshold &&
-        (v.copies >= 2 ||
-          (v.copies === 1 && v.tier >= state.techLevel) ||
+        (v.completes ||
+          (v.bet && v.tier >= state.techLevel) ||
           (v.mates >= rules.freeze.minTribeMates && v.tier >= state.techLevel)) &&
         // Карта, которую мы сами не купим, витрины не стоит: на полном борде
         // она обязана перебивать жертву так же, как при покупке (part17,
@@ -2384,9 +2527,9 @@ export function freezeRule(
 
   const name = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
   const why =
-    best.copies >= 2
-      ? 'третья копия под тройку'
-      : best.copies === 1
+    best.completes
+      ? `${nthCopyWord(copiesForTriple(state, deps.cards, rules), 'nom')} копия под тройку`
+      : best.bet
         ? 'вторая копия'
         : `своих по племени ${String(best.mates)}`;
 
@@ -3715,7 +3858,12 @@ export function spellRules(
       // Подъём таверны, до которого не хватает ровно этой добавки.
       const upgrade = state.tavernUpgradeCost;
       if (upgrade !== null && state.gold < upgrade && richer.gold >= upgrade) {
-        const levelled = levelUpRule(richer, rules, buyRules(richer, deps, rules));
+        const levelled = levelUpRule(
+          richer,
+          rules,
+          buyRules(richer, deps, rules),
+          copiesForTriple(richer, deps.cards, rules),
+        );
         if (levelled !== null && levelled.score > 0) {
           return [
             {
@@ -4468,8 +4616,8 @@ export function choiceAdvice(
     const value = minionValue(candidate, state, deps, rules);
 
     const notes: string[] = [];
-    if (value.copiesOwned >= 2) notes.push('собирает тройку');
-    else if (value.copiesOwned === 1) notes.push('вторая копия');
+    if (value.completesTriple) notes.push('собирает тройку');
+    else if (value.tripleBet) notes.push('вторая копия');
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
     if (value.textTribeMates > 0) {
       notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
@@ -4613,7 +4761,7 @@ export function adviseTavern(
     ...plays,
     ...spellRules(state, deps, rules),
     ...shopSpellRules(state, deps, rules),
-    levelUpRule(state, rules, buys),
+    levelUpRule(state, rules, buys, copiesForTriple(state, deps.cards, rules)),
     heroPowerRule(state, deps, rules),
     freeHeroPowerRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),

@@ -343,6 +343,9 @@ describe('вид оверлея', () => {
       textMechMates: 0,
       namedCardMates: 0,
       copiesOwned: 0,
+      completesTriple: false,
+      tripleBet: false,
+      heroPowerPlay: 0,
     });
     const withChoice: TavernAdvice = {
       ...tavern,
