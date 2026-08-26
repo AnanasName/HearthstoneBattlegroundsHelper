@@ -31,6 +31,7 @@
     "dataset:backfill": "tsx src/dataset/backfill.ts",
     "ml:eval": "tsx src/ml/report.ts",
     "ml:imitation": "tsx src/ml/imitationReport.ts",
+    "ml:track": "tsx src/ml/track.ts",
     "measure:cardstats": "tsx src/advisors/tavern/measureCardStats.ts",
     "analyze:cardstats": "tsx src/advisors/tavern/analyzeCardStats.ts",
     "typecheck": "tsc --noEmit",
