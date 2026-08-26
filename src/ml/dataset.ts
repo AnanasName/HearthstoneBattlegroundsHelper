@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { sameGameBuild } from '../data/builds.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from '../dataset/recorder.js';
 
 /**
@@ -12,10 +13,16 @@ import { DATASET_DIR, gameSignature, type DatasetRecord } from '../dataset/recor
  * партии — `gameSignature`, тот же, что у досбора.
  *
  * Фильтр билда обязателен по той же причине, что у `CURRENT_BUILD_PARTS`:
- * учиться на партиях старого билда — учиться другой игре (замерено
- * на калибровке: 3.9 → 9.0 п.п. без единой правки кода). Берётся новейший
- * билд среди записей — датасет живёт дольше любого патча, и жёсткое число
- * здесь разъехалось бы с реальностью молча.
+ * учиться на партиях старого ПАТЧА — учиться другой игре (замерено
+ * на калибровке: 3.9 → 9.0 п.п. без единой правки кода). Точка отсчёта —
+ * новейший билд среди записей: датасет живёт дольше любого патча,
+ * и жёсткое число здесь разъехалось бы с реальностью молча.
+ *
+ * Но отбор идёт не по РАВЕНСТВУ номера, а по таблице совместимости
+ * (`src/data/builds.ts`): баланс и багфиксы меняют номер билда, оставляя
+ * пул карт и правила прежними, и терять из-за них весь накопленный
+ * датасет — формальность. Контентный патч в группу не попадает, и тогда
+ * накопление честно начинается заново.
  */
 
 export interface RecordFile {
@@ -77,9 +84,14 @@ export interface LoadedDataset {
    * Нужно, чтобы смена патча не выглядела поломкой: в день выхода патча
    * новая партия остаётся в выборке одна, а два десятка прежних честно
    * отбрасываются фильтром билда — и об этом надо говорить числом,
-   * а не молчанием.
+   * а не молчанием. Поле `learned` отвечает, вошёл ли билд в выборку:
+   * билды одной группы совместимости учатся вместе (`src/data/builds.ts`).
    */
-  readonly recordsByBuild: readonly { readonly build: number | null; readonly records: number }[];
+  readonly recordsByBuild: readonly {
+    readonly build: number | null;
+    readonly records: number;
+    readonly learned: boolean;
+  }[];
   readonly duplicates: DedupeResult['duplicates'];
   /** Записи чужого (не новейшего) билда — вслух, не молча. */
   readonly droppedOtherBuild: readonly string[];
@@ -122,12 +134,15 @@ export function loadDataset(dir: string = DATASET_DIR): LoadedDataset {
     counts.set(f.record.buildNumber, (counts.get(f.record.buildNumber) ?? 0) + 1);
   }
   const recordsByBuild = [...counts.entries()]
-    .map(([b, records]) => ({ build: b, records }))
+    .map(([b, records]) => ({ build: b, records, learned: sameGameBuild(b, build) }))
     .sort((a, b) => (b.build ?? -1) - (a.build ?? -1));
 
-  const currentBuild = files.filter((f) => f.record.buildNumber === build);
+  // Отбор идёт не по равенству билда, а по таблице совместимости
+  // (`src/data/builds.ts`): баланс и багфиксы меняют номер билда, но игру
+  // оставляют прежней, и терять из-за них накопленное — формальность.
+  const currentBuild = files.filter((f) => sameGameBuild(f.record.buildNumber, build));
   const droppedOtherBuild = files
-    .filter((f) => f.record.buildNumber !== build)
+    .filter((f) => !sameGameBuild(f.record.buildNumber, build))
     .map((f) => f.fileName);
 
   const { kept, duplicates } = dedupeBySignature(currentBuild);
