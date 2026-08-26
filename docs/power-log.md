@@ -680,6 +680,50 @@ D 22:38:52 GameState.SendChoices() -   m_chosenEntities[0]=[entityName=Зача�
   хода 11 part9 зонами видны 3 варианта из 4, а канал выбора называет
   все четыре сразу.
 
+
+## «Choose One» у МИНЬОНА: SETASIDE, PARENT_CARD и SubOption (part28)
+
+Модальный миньон — `Snare Trapper` `BG36_332`, «Choose One — Get a random
+Quilboar; or Increase your maximum Gold by {0}» — **каналом выборов
+не приходит вовсе**. Его ветви живут отдельными сущностями:
+
+```
+D 23:19:38 GameState.DebugPrintPower() -         FULL_ENTITY - Creating ID=4690 CardID=BG36_332t
+D 23:19:38 GameState.DebugPrintPower() -         FULL_ENTITY - Creating ID=4691 CardID=BG36_332t2
+D 21:16:17 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Обездвижить цель id=6218 zone=SETASIDE zonePos=0 cardId=BG36_332t player=2] tag=PARENT_CARD value=6217
+```
+
+Что из этого следует и что легко прочитать неверно:
+
+- **Ветви создаются при появлении карты в витрине, а не при розыгрыше.**
+  В part28 они созданы в 23:19:38, а разыграл карту игрок в 23:20:31 —
+  то есть зона `SETASIDE` признаком «экран выбора открыт» НЕ является,
+  и поймать открытый выбор нечем. `DebugPrintEntityChoices` для такого
+  выбора не пишется, `openChoice` остаётся пуст.
+- **Что выбрал игрок, говорит `SubOption` в блоке `PLAY`**: `SubOption=0` —
+  первая ветвь, `SubOption=1` — вторая; у действий без выбора там `-1`.
+
+  ```
+  D 23:20:31 GameState.DebugPrintPower() - BLOCK_START BlockType=PLAY Entity=[entityName=Мастер ловушек id=4700 zone=HAND zonePos=3 cardId=BG36_332 player=6] … SubOption=0
+  ```
+
+  Следом ветвь и отрабатывает: `FULL_ENTITY - Creating ID=4847
+  CardID=BG20_101` (Roadboar, тир 2 при таверне 4 — то есть «random
+  Quilboar» берётся из пула тиров 1..N) плюс энчант `TB_BaconShopBadsongE`,
+  то есть карта приходит в руку и играется бесплатно.
+- **Плейсхолдер ветви лежит на сущности ветви и на родителе**:
+  `TAG_SCRIPT_DATA_NUM_1 value=1` у `BG36_332` и у `BG36_332t2` — «+1
+  к максимуму золота».
+
+## Предел золота бывает БОЛЬШЕ десяти
+
+Тег `RESOURCES` — это максимум золота хода, и правилом игры он растёт
+до 10. Карты его поднимают выше, и это видно логом: в part27 значения
+доходят до **19** (14 строк со значением 11, дальше 12, 13, …, 19),
+в part28 у соперника — 11. Значит эффект «Increase your maximum Gold
+by N» — не «плюс монета в этот ход» и не «быстрее упрёшься в потолок»,
+а по монете каждый оставшийся ход до конца партии.
+
 ## Заклинания в руке и плейсхолдеры текстов
 
 Заклинания приходят обычными сущностями с `CARDTYPE=SPELL`. Факты part10:

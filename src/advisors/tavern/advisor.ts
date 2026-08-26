@@ -1597,6 +1597,22 @@ export function playRules(
       notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
     }
 
+    // Модальный миньон: игра спросит «эту ветвь или ту», и совет обязан
+    // отвечать — иначе выбор целиком остаётся на игроке (part28, ход 13).
+    // Считается ветвь на том борде, который БУДЕТ к моменту выбора: сам
+    // миньон уже стоит (у «случайного соплеменника» он же и соплеменник),
+    // а жертва, если борд был полон, уже продана — иначе место под второе
+    // тело обещалось бы дважды одной и той же продажей.
+    const boardAfter =
+      host !== null
+        ? state.board
+        : [
+            ...state.board.filter((x) => x.entityId !== victim?.minion.entityId),
+            minion,
+          ];
+    const modal = modalBranchAdvice(minion, { ...state, board: boardAfter }, deps, rules);
+    if (modal !== null) notes.push(modal.note);
+
     return [
       {
         action: 'play' as const,
@@ -1606,6 +1622,7 @@ export function playRules(
         requiresSlot: full && host === null,
         sellFirst: full && host === null ? (victim?.minion ?? null) : null,
         magnetizeTo: host,
+        spellBranches: modal?.branches,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
           `ценность ${value.total.toFixed(1)}` +
@@ -2634,6 +2651,21 @@ function firstMatch(patterns: readonly string[], text: string): string | null {
 }
 
 /**
+ * Все группы первого совпавшего шаблона — или `null`.
+ *
+ * Отличается от `firstMatch` тем, что отдаёт совпадение целиком: у чисел,
+ * которые бывают и плейсхолдером, и литералом, групп две, и выбирать между
+ * ними умеет `placeholderValue`.
+ */
+function firstMatchAll(patterns: readonly string[], text: string): RegExpExecArray | null {
+  for (const pattern of patterns) {
+    const m = new RegExp(pattern, 'i').exec(text);
+    if (m !== null) return m;
+  }
+  return null;
+}
+
+/**
  * Миньон-заготовка из карты снапшота — чтобы оценить пул той же шкалой,
  * что и витрину.
  *
@@ -2753,6 +2785,10 @@ function averagePoolValue(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
+  // Племя, которым пул ОГРАНИЧЕН: «Get a random Quilboar» (part28) берёт
+  // не любую карту тира, а квилбоара, и на борде квилбоаров это разные
+  // числа — 18.8 против 11.6 по всему пулу тиров 1–4.
+  race: string | null = null,
 ): number | null {
   // Кэш по БОРДУ: ценность пула зависит только от того, что у нас стоит
   // (племя, копии), а сотня `minionValue` на вызов — дорого. План строит
@@ -2776,7 +2812,7 @@ function averagePoolValue(
   //    заморозки и дар, посчитанные с уже разыгранным заклинанием;
   //  - СИЛА ГЕРОЯ: её текст входит в ценность покупки с part22.
   const key =
-    `${tiers.join(',')}` +
+    `${tiers.join(',')}|${race ?? ''}` +
     `|${state.hand.map((m) => `${m.cardId}${m.golden ? '_G' : ''}`).join(',')}` +
     `|${state.handSpells.map((s) => `${s.cardId}:${s.scriptData.join('.')}`).join(',')}` +
     `|${state.hero?.heroPowerCardId ?? ''}`;
@@ -2801,7 +2837,11 @@ function averagePoolValue(
 
   // Пул склеивается только на ПРОМАХЕ: тиры 1..6 — это 382 заготовки,
   // и на попадании этот массив строился и выбрасывался впустую.
-  const pool = tiers.flatMap((t) => tierPool(t, deps));
+  const whole = tiers.flatMap((t) => tierPool(t, deps));
+  const pool =
+    race === null
+      ? whole
+      : whole.filter((m) => deps.cards.info(m.cardId)?.races.includes(race) ?? false);
   if (pool.length === 0) return null;
 
   const value =
@@ -3163,6 +3203,16 @@ export interface SpellEffect {
    */
   readonly givesMinion: boolean;
   /**
+   * ПРЕДЕЛ золота, поднятый навсегда: «Increase your maximum Gold by {0}».
+   *
+   * Отдельно от `gold` намеренно — это разные величины. Разовая монета
+   * тратится в тот же ход, а поднятый предел приносит по золотому КАЖДЫЙ
+   * оставшийся ход, и потолка «десять» у него нет: в part27 тег RESOURCES
+   * доходил до 19. Сложить их в одно поле значило бы приравнять «+1 золото
+   * сейчас» к «+1 золото до конца партии» (part28, ход 13).
+   */
+  readonly maxGold: number;
+  /**
    * Ветви модального заклинания «Choose One», в порядке снапшота.
    *
    * Пусто у обычного заклинания. У модального остальные поля эффекта —
@@ -3332,6 +3382,223 @@ function chooseOneEffect(
   // Разделить нечем. Эффект берётся от первой ветви — они равны, и это
   // всё равно честнее суммы обеих, — а совет называет обе.
   return { ...first.effect, branches, chosen: null };
+}
+
+/**
+ * Сколько ходов таверны у нас ещё впереди — таблицей замера по датасету.
+ *
+ * Нужно всему, что отдаёт не разово, а КАЖДЫЙ ход: пределу золота (part28),
+ * а дальше и любой такой экономике. Первый ход таверны — индекс 0; за концом
+ * таблицы остаётся её последнее значение, то есть ноль.
+ *
+ * Оговорки — у самой таблицы (`rules.remainingTavernTurns`): это среднее
+ * по нашим 25 партиям, без поправки на здоровье. Число заведомо грубое,
+ * и совет обязан называть его вслух, чтобы игрок мог возразить.
+ */
+export function remainingTurns(
+  state: GameState,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  const table = rules.remainingTavernTurns;
+  if (table.length === 0) return 0;
+  const turn = tavernTurnOf(state.turn);
+  if (turn < 1) return table[0] ?? 0;
+  return table[Math.min(turn, table.length) - 1] ?? 0;
+}
+
+/**
+ * Племя, которое текст обещает миньоном: «Get a random Quilboar».
+ *
+ * Слова «minion» в таком тексте нет вовсе — его заменяет племя, ровно как
+ * «Discover a Buddy» у E.T.C. (part12) и «Discover a Naga» у Короля наг.
+ * Шаблон строится из той же таблицы `tribeTextWords`, что и везде, и живёт
+ * ЗДЕСЬ, а не в общем `givesMinionWords`: общая таблица кормит правила
+ * покупки и заморозки, и расширять её значит перемерять их все.
+ */
+function tribeMinionRace(text: string, rules: TavernRules): string | null {
+  for (const [race, pattern] of Object.entries(rules.tribeTextWords)) {
+    if (new RegExp(`\\b(?:discover|get|add)s?\\b[^.]*\\b(?:${pattern})\\b`, 'i').test(text)) {
+      return race;
+    }
+  }
+  return null;
+}
+
+/** Ценность одной ветви «Choose One» — на нашем состоянии, а не по шаблону. */
+interface BranchValue {
+  readonly score: number;
+  readonly note: string;
+}
+
+/**
+ * Что ветвь стоит НА НАШЕМ СОСТОЯНИИ.
+ *
+ * Отличие от `branchScore` принципиальное, а не стилистическое: тот считает
+ * скаляр из одних весов, потому что зовут его из `spellEffect`, у которого
+ * состояния нет и кэш ключуется одной картой. Ветви модального МИНЬОНА так
+ * не рассудить — весь вопрос в борде и ходе: «случайный квилбоар» на борде
+ * квилбоаров стоит 18.8, а по всему пулу тиров 1–4 — 11.6, и предел золота
+ * на третьем ходу таверны стоит вдвое дороже, чем на десятом.
+ *
+ * Возвращается `null`, если ветвь оценить не берёмся, — и тогда выбор
+ * честно возвращается игроку целиком (обе ветви названы, ни одна
+ * не рекомендована). Молчание про одну ветвь не значит, что она хуже.
+ */
+function branchValue(
+  cardId: string,
+  scriptData: readonly (number | null)[],
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): BranchValue | null {
+  const text = deps.cards.info(cardId)?.text ?? '';
+  if (text === '') return null;
+  const effect = spellEffect(cardId, scriptData, deps.cards, rules);
+
+  // ПРЕДЕЛ ЗОЛОТА — не монета в руке, а по золотому каждый оставшийся ход.
+  if (effect !== null && effect.maxGold > 0) {
+    const turns = remainingTurns(state, rules);
+    return {
+      score: effect.maxGold * turns * rules.goldPointValue,
+      note:
+        `+${String(effect.maxGold)} к пределу золота — ` +
+        `по золотому ещё ${turns.toFixed(1)} ходов таверны`,
+    };
+  }
+
+  // МИНЬОН НАЗВАННОГО ПЛЕМЕНИ — ожиданием по пулу ЭТОГО племени, той же
+  // шкалой и на том же борде, что всё остальное. На полном борде карта
+  // приходит в руку, и место ей освобождает продажа слабейшего: считать
+  // её там полной ценностью значило бы обещать слот, которого нет.
+  const race = tribeMinionRace(text, rules);
+  if (race !== null) {
+    const average = averagePoolValue(shopTiers(state.techLevel), state, deps, rules, race);
+    if (average !== null) {
+      const victim =
+        state.board.length >= rules.boardSize ? weakestOwn(state, deps, rules) : null;
+      const victimName =
+        victim === null
+          ? ''
+          : `, борд полон — место через продажу ${
+              deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId
+            } (${victim.value.toFixed(1)})`;
+      return {
+        score: average - (victim?.value ?? 0),
+        note: `случайный из пула — в среднем ${average.toFixed(1)}${victimName}`,
+      };
+    }
+  }
+
+  // МИНЬОН без племени — общей веткой «даёт миньона».
+  if (effect !== null && effect.givesMinion) {
+    const tiered = namedTierPool(text, state, deps, rules);
+    const { score, average } = givesMinionValue(
+      state,
+      deps,
+      rules,
+      rules.minionCost,
+      false,
+      tiered ?? undefined,
+    );
+    return { score, note: `даёт миньона — ${minionSourceNote(tiered, average)}` };
+  }
+
+  // БЕСПЛАТНЫЕ ОБНОВЛЕНИЯ — по ЖИВОЙ цене кнопки, как у Leaf Through
+  // the Pages (part23): при уже бесплатных обновлениях дарить нечего.
+  const refresh = firstMatch(rules.freeRefreshWords, text);
+  if (refresh !== null && refresh !== '') {
+    const price = rerollCostOf(state, rules);
+    return {
+      score: Number(refresh) * price * rules.goldPointValue,
+      note: `${refresh} бесплатных обновлений по цене ${String(price)}`,
+    };
+  }
+
+  // Статы, щит, золото — тем же скаляром, что у ветвей заклинаний.
+  if (effect !== null) {
+    const pair = statPair(text, scriptData);
+    return {
+      score: branchScore(effect, rules),
+      note:
+        pair === null
+          ? `эффект на ${branchScore(effect, rules).toFixed(1)}`
+          : `+${String(pair.attack)}/+${String(pair.health)}`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Какую ветвь «Choose One» брать у МИНЬОНА — и что об этом сказать.
+ *
+ * Случай part28 (ход 13): Snare Trapper 4/4 («Choose One — Get a random
+ * Quilboar; or Increase your maximum Gold by {0}») советовался к розыгрышу
+ * молча, и игрок остался с выбором один на один — ровно та же жалоба, что
+ * на Alliance Flag в part19, только у заклинания ветвь уже называлась,
+ * а у миньона — нет.
+ *
+ * Экран выбора поймать нельзя, и это не недоделка: ветви создаются
+ * сущностями в SETASIDE с тегом `PARENT_CARD` ещё при появлении карты
+ * в витрине, а не при розыгрыше (part28: 23:19:38 против 23:20:31),
+ * и `openChoice` тут не заполняется вовсе — канал выборов молчит. Значит
+ * называть ветвь надо ЗАРАНЕЕ, в самом совете «разыграть», — что и делает
+ * поле `spellBranches`, уже понятное оверлею.
+ *
+ * Очки миньона правка НЕ трогает: ценность ветви в них не входит, порядок
+ * покупок прежний, сверки не устаревают. Это осознанная граница — модальных
+ * миньонов в пуле семь, и вносить их эффекты в ценность надо вместе
+ * с перезамером, а не заодно.
+ */
+export function modalBranchAdvice(
+  minion: Minion,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly branches: readonly SpellBranch[]; readonly note: string } | null {
+  const info = deps.cards.info(minion.cardId);
+  if (!(info?.mechanics.includes('CHOOSE_ONE') ?? false)) return null;
+
+  const all = ['t', 't2']
+    .map((suffix) => deps.cards.info(minion.cardId + suffix))
+    .flatMap((branch) => {
+      if (branch === null) return [];
+      const pair = statPair(branch.text ?? '', minion.scriptData);
+      return [
+        {
+          value: branchValue(branch.id, minion.scriptData, state, deps, rules),
+          branch: {
+            cardId: branch.id,
+            name: branch.name,
+            label: pair === null ? '' : `+${String(pair.attack)}/+${String(pair.health)}`,
+          },
+        },
+      ];
+    });
+  if (all.length < 2) return null;
+
+  const branches = all.map((b) => b.branch);
+  const judged = all.flatMap((b) => (b.value === null ? [] : [{ ...b, value: b.value }]));
+
+  // Одну из ветвей оценить не вышло — сравнивать не с чем, и «берите ту,
+  // которую поняли» здесь было бы враньём: неоценённая ветвь не значит
+  // худшая. Тот же ответ, что у модальных заклинаний (part19).
+  if (judged.length < all.length) {
+    const listed = all
+      .map((b) => `${b.branch.name} — ${b.value?.note ?? 'оценить не берёмся'}`)
+      .join('; ');
+    return { branches, note: `ветви: ${listed}` };
+  }
+
+  const best = judged.reduce((a, b) => (b.value.score > a.value.score ? b : a));
+  const worst = judged.reduce((a, b) => (b.value.score < a.value.score ? b : a));
+  const note = judged
+    .map((b) => `${b.branch.name} ${b.value.score.toFixed(1)} (${b.value.note})`)
+    .join(' против ');
+
+  // Равные ветви не разделяются выдуманным доводом: совет называет обе,
+  // как у «+3/+1 против +1/+3» (замер `npm run spike:buff` разницы не нашёл).
+  if (best.value.score === worst.value.score) return { branches, note };
+  return { branches: [best.branch], note };
 }
 
 /**
@@ -3536,7 +3803,14 @@ function computeSpellEffect(
   const givesMinion =
     !transforms && rules.givesMinionWords.some((w) => new RegExp(w, 'i').test(text));
 
-  if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt && !givesMinion) {
+  // ПРЕДЕЛ золота: «Increase your maximum Gold by {0}» — ветвь Collect
+  // the Bounty (part28) и заклинания витрины Strike Oil. Число читается
+  // так же, как везде: плейсхолдер — индекс в теги, литерал — сам собой.
+  const maxGoldHit = firstMatchAll(rules.maxGoldWords, text);
+  const maxGold =
+    maxGoldHit === null ? 0 : placeholderValue(maxGoldHit[1], maxGoldHit[2], scriptData);
+
+  if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt && !givesMinion && maxGold === 0) {
     return null;
   }
   return {
@@ -3550,6 +3824,7 @@ function computeSpellEffect(
     grantsTaunt,
     untargeted,
     givesMinion,
+    maxGold,
     branches: [],
     chosen: null,
   };
@@ -3754,6 +4029,7 @@ export function buffTarget(
     grantsTaunt: false,
     untargeted: false,
     givesMinion: false,
+    maxGold: 0,
     branches: [],
     chosen: null,
   };
@@ -3998,6 +4274,35 @@ export function shopSpellRules(
       ];
     }
 
+
+    // ПРЕДЕЛ золота — экономика, растянутая на всю оставшуюся партию:
+    // «Increase your maximum Gold by 1» (Strike Oil за 2, тир 2). Прежде
+    // разбор возвращал по такому тексту `null`, и заклинание было невидимо
+    // целиком — тот же класс, что «Gain 2 free Refreshes» до part23.
+    //
+    // Считается оно как обновления: чистое золото по курсу, только золото
+    // тут не разовое, а по одному за каждый оставшийся ход таверны
+    // (`remainingTurns`, замер по датасету). Поздним ходом ветка гаснет
+    // сама — в конце партии предел поднимать уже некуда.
+    if (effect.maxGold > 0) {
+      const turns = remainingTurns(state, rules);
+      const netGold = effect.maxGold * turns - spell.cost;
+      if (netGold <= 0) return [];
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score: netGold * rules.goldPointValue,
+          cost: spell.cost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} за ${String(spell.cost)} — предел золота +${String(effect.maxGold)}, ` +
+            `по золотому ещё ${turns.toFixed(1)} ходов таверны, чистыми ${netGold.toFixed(1)}`,
+        },
+      ];
+    }
     // Заклинание, дающее миньона, — это покупка дешевле трёх золота, и оно
     // сравнимо с покупками напрямую: та же шкала, что у силы героя (part17,
     // ход 1: Enchanted Lasso за 2 при витрине из двух миньонов). Пустой
@@ -4326,12 +4631,9 @@ function heroPowerChoiceValue(
   // у E.T.C. (part12). Шаблон строится из той же таблицы слов племён,
   // что и везде, и живёт ЗДЕСЬ, а не в общем `givesMinionWords`: общая
   // таблица кормит правила покупки и заморозки, и расширять её значит
-  // перемерять их все.
-  const tribeWord = Object.values(rules.tribeTextWords).join('|');
-  const givesTribeMinion = new RegExp(
-    `\\b(?:discover|get|add)s?\\b[^.]*\\b(?:${tribeWord})\\b`,
-    'i',
-  ).test(text);
+  // перемерять их все. Тот же разбор судит ветви модальных миньонов
+  // (part28), поэтому и вынесен в `tribeMinionRace`.
+  const givesTribeMinion = tribeMinionRace(text, rules) !== null;
 
   // ЗАМЕНА идёт раньше «даёт миньона», и это не тонкость: «Destroy
   // a friendly Undead to get a random Undead» (Rune of Damnation) даёт

@@ -1639,6 +1639,7 @@ describe('заклинания руки', () => {
       grantsTaunt: false,
       untargeted: false,
       givesMinion: false,
+      maxGold: 0,
       // Ветви — только у модального «Choose One» (part19); у обычного
       // заклинания их нет, и выбирать нечего.
       branches: [],
@@ -1703,6 +1704,7 @@ describe('заклинания руки', () => {
       grantsTaunt: false,
       untargeted: false,
       givesMinion: false,
+      maxGold: 0,
       branches: [],
       chosen: null,
     });
