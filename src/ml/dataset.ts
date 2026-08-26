@@ -71,6 +71,15 @@ export interface LoadedDataset {
   readonly games: readonly DatasetGame[];
   /** Новейший билд среди записей — только он и учится. */
   readonly build: number | null;
+  /**
+   * Сколько записей какого билда лежит в датасете, по убыванию билда.
+   *
+   * Нужно, чтобы смена патча не выглядела поломкой: в день выхода патча
+   * новая партия остаётся в выборке одна, а два десятка прежних честно
+   * отбрасываются фильтром билда — и об этом надо говорить числом,
+   * а не молчанием.
+   */
+  readonly recordsByBuild: readonly { readonly build: number | null; readonly records: number }[];
   readonly duplicates: DedupeResult['duplicates'];
   /** Записи чужого (не новейшего) билда — вслух, не молча. */
   readonly droppedOtherBuild: readonly string[];
@@ -108,6 +117,14 @@ export function loadDataset(dir: string = DATASET_DIR): LoadedDataset {
     return b !== null && (max === null || b > max) ? b : max;
   }, null);
 
+  const counts = new Map<number | null, number>();
+  for (const f of files) {
+    counts.set(f.record.buildNumber, (counts.get(f.record.buildNumber) ?? 0) + 1);
+  }
+  const recordsByBuild = [...counts.entries()]
+    .map(([b, records]) => ({ build: b, records }))
+    .sort((a, b) => (b.build ?? -1) - (a.build ?? -1));
+
   const currentBuild = files.filter((f) => f.record.buildNumber === build);
   const droppedOtherBuild = files
     .filter((f) => f.record.buildNumber !== build)
@@ -126,5 +143,5 @@ export function loadDataset(dir: string = DATASET_DIR): LoadedDataset {
     games.push({ fileName: file.fileName, finalPlace: place, record: file.record });
   }
 
-  return { games, build, duplicates, droppedOtherBuild, droppedUnusable };
+  return { games, build, recordsByBuild, duplicates, droppedOtherBuild, droppedUnusable };
 }

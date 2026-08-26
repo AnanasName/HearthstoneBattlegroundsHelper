@@ -15,6 +15,8 @@ export default tseslint.config(
       'node_modules/**',
       'data/**',
       '*-tmp.ts',
+      'scratch-*.ts',
+      'scratch-*.mjs',
       '*-tmp.mjs',
       'analyze-prof*.mjs',
       'bench-prof*/**',

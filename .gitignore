@@ -31,6 +31,8 @@ data/dataset/
 # по двум причинам: `git add -A` затащит их в историю, а `npm run lint`
 # спотыкается о них (в tsconfig они не входят).
 *-tmp.ts
+scratch-*.ts
+scratch-*.mjs
 *-tmp.mjs
 *-tmp.json
 analyze-prof*.mjs
