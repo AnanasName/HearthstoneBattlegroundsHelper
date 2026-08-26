@@ -440,6 +440,44 @@ export interface TavernRules {
   readonly selfTriggerWords: readonly string[];
 
   /**
+   * Признаки ТАВЕРННОГО триггера: «After you play…», «Whenever you cast…»,
+   * «At the end of your turn…». Такой миньон — движок в таверне, а в бою
+   * обычное тело, и провокация ему не мешает.
+   *
+   * Случай part27, ход 7: «Slimy Shield» (+1/+1 и провокация) советовался
+   * на Oozeling Gladiator 3/3 — отработавший генератор, которого игрок
+   * собирался продать, — потому что крупнейший свой, Molten Rock 4/4
+   * («After you play an Elemental, gain +{1} Health»), попадал в движки
+   * словом «After». Смысл правила движка — эффект, который срабатывает
+   * В БОЮ и требует, чтобы носитель дожил (Deathstrider: «After a friendly
+   * Rally minion attacks…»). Тавернный триггер в бою не срабатывает вовсе,
+   * а смерть в бою Battlegrounds ничего не стоит — миньон возвращается
+   * в таверну целым. Беречь от ударов тут нечего.
+   *
+   * Шаблоны — ГОЛОВЫ триггера, и проверяются на той же позиции текста, где
+   * сработала голова движка из `engineTextWords`: «after you play» —
+   * таверна, «after a friendly minion attacks» — бой. Теги разметки стоят
+   * посреди фразы («after you <b>Refresh</b>»), переносы строк — посреди
+   * предложения, поэтому `\s+` и необязательные `<b>`. Граница правила
+   * названа вслух: тавернность — это «в бою не срабатывает», и у карт, чей
+   * тавернный триггер спрашивает про бой («At the start of your turn, if
+   * this minion survived last combat…» — Timewarped Winner, одна в пуле),
+   * провокация эффект режет; такая карта остаётся телом, это записано.
+   * Числа по пулу билда 248348 — в тесте part27 и docs/tavern.md.
+   */
+  readonly tavernTriggerWords: readonly string[];
+
+  /**
+   * Самое дешёвое, что продаёт таверна, — заклинание витрины за 1
+   * (Tavern Dish Banana в part27, Hasty Excavation в part24, Leaf Through
+   * the Pages в part23). «Не на что купить» после обновления — это когда
+   * золота не остаётся и на него: миньон стоит три, но заклинание за 1–2
+   * покупается, и на part12 (ход 19, два золота, обновление бесплатно)
+   * игрок ровно так и сделал — обновил и купил заклинание.
+   */
+  readonly cheapestShopPrice: number;
+
+  /**
    * Слова, которыми текст помечает усиление ВРЕМЕННЫМ: «until next turn»,
    * «for this combat».
    *
@@ -879,9 +917,44 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\b(?:two|three|four|five|six|seven|\\d+) (?:friendly|of your)\\b',
   ],
 
-  engineTextWords: ['\\bafter (?:a|an|you|your|this)\\b', '\\bwhenever\\b', '\\bat the (?:start|end) of\\b'],
+  // Пробелы — `\s+`: тексты снапшота переносят строки посреди предложения
+  // (урок part16), и голова триггера, разорванная переносом, иначе
+  // не голова. Тавернные головы ниже написаны так же — обе таблицы читают
+  // текст одинаково.
+  engineTextWords: [
+    '\\bafter\\s+(?:a|an|you|your|this)\\b',
+    '\\bwhenever\\b',
+    '\\bat\\s+the\\s+(?:start|end)\\s+of\\b',
+  ],
 
-  selfTriggerWords: ['\\b(?:after|whenever) this\\b'],
+  selfTriggerWords: ['\\b(?:after|whenever)\\s+this\\b'],
+
+  tavernTriggerWords: [
+    // Действия игрока, возможные только в таверне: разыграть, купить,
+    // продать, обновить, поднять, потратить, найти, примагнитить, передать
+    // (дуэты), сработавший клич. Двух глаголов здесь НЕТ намеренно, и это
+    // находка состязательной проверки 26.08: «cast» — заклинания таверны
+    // кастуются и посреди боя (Rally: «Cast Mighty Dragonbreath» у Crimson
+    // Vindicator, «Cast Chef's Choice» у Seafloor Recruiter), и симулятор
+    // рассылает `onTavernSpellCast` всем миньонам борда — Timecap'n Hooktail
+    // и Charging Czarina слушают его в бою и обязаны дожить; «get» оставлен,
+    // но «whenever a card is added to your hand» (Timewarped Peggy) —
+    // тоже боевой хук: карты в руку добывают Rally («Get a random Bounty»
+    // у Bigwig Bandit) и хрипы. «Trigger a Battlecry» тавернен лишь
+    // составом пула: карты, запускающие клич в бою (Rylak Metalhead,
+    // Greenskeeper), сейчас вне пула.
+    '\\b(?:after|whenever)\\s+you\\s+(?:<b>)*(?:play|buy|sell|refresh|upgrade|spend|discover|magnetize|pass|roll|use|get|trigger\\s+a\\s+(?:<b>)*battlecry)\\b',
+    // Начало и конец СВОЕГО хода. «Start of Combat» под `engineTextWords`
+    // не попадает вовсе, и это верно: он срабатывает до первого удара.
+    '\\bat\\s+the\\s+(?:start|end)\\s+of\\s+(?:your|each)\\s+turn\\b',
+    // События витрины: обновление и поглощение — только в таверне.
+    '\\bwhenever\\s+(?:it\\s+is\\s+(?:<b>)*refreshed|a\\s+minion\\s+is\\s+consumed)\\b',
+    // Дуэты: действия команды и напарника — тоже таверна.
+    '\\b(?:after|whenever)\\s+your\\s+(?:team|teammate)\\b',
+    // «After your hero takes damage» в пуле срабатывает и в таверне
+    // (самоурон Wrath Weaver), но и в бою тоже — остаётся движком:
+    // ошибка в консервативную сторону, как до правки.
+  ],
 
   temporaryBuffWords: [
     'until next turn',
@@ -992,6 +1065,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   },
 
   rerollMarginOverTier: 2,
+  cheapestShopPrice: 1,
   lateRerollTier: 4,
   trinketOfferTurns: [11, 17],
   trinketPlacePerTribeMinion: 0.3,

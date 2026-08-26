@@ -21,6 +21,10 @@ const cards = createCardIndex([
   { id: 'BODY_1', name: 'Тело', type: 'Minion', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
   { id: 'BODY_2', name: 'Другое тело', type: 'Minion', techLevel: 2, races: ['MURLOC'], isBaconPool: true },
   { id: 'BODY_3', name: 'Третье тело', type: 'Minion', techLevel: 3, races: ['MURLOC'], isBaconPool: true },
+  // Мурлок четвёртого тира: обновление при золоте, на которое не купить,
+  // советуется только под цель заморозки, и «соплеменник» — только если
+  // племя есть в пуле своего тира (part27).
+  { id: 'BODY_4', name: 'Четвёртое тело', type: 'Minion', techLevel: 4, races: ['MURLOC'], isBaconPool: true },
   { id: 'JUNK', name: 'Мусор', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
 ]);
 const deps = { cards };
@@ -265,7 +269,9 @@ describe('план трат хода', () => {
 
   it('в лейте план обрывается на обновлении витрины и говорит об этом', () => {
     // Тир от lateRerollTier: обновление — это поиск конкретной карты под
-    // заморозку, и остаток в одно золото ему не помеха.
+    // заморозку, и остаток в одно золото ему не помеха — пока есть, кого
+    // искать: после двух покупок на борде три мурлока, и цель — соплеменник
+    // своего тира (part27: без названной цели обновление молчит).
     const s = state({
       techLevel: DEFAULT_TAVERN_RULES.lateRerollTier,
       gold: 7,

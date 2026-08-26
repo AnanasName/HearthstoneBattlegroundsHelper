@@ -1810,6 +1810,81 @@ export function sellForGoldRule(
 }
 
 /**
+ * Ради чего обновлять витрину, когда найденное НЕ НА ЧТО купить.
+ *
+ * Обновление, после которого золота на покупку нет, годится только под
+ * заморозку: найденное подождёт следующего хода. Так и говорит правило
+ * «в лейте обновление — поиск карты под заморозку» (`paidRerollIsUseful`),
+ * но КОГО искать, оно не спрашивало, а в причине писало «покупать нечего»
+ * — при золоте 0 и полном борде (part27, ход 19, скриншот игрока: «даже
+ * если я обновлю, то не смогу купить существ без продажи»). Игрок читал
+ * совет как обещание покупки, которой быть не могло.
+ *
+ * Цель берётся из тех же веток, что у самой заморозки, и только из тех,
+ * ради которых стоит крутить: ТРЕТЬЯ копия под тройку (пара на борде или
+ * в руке — тройка собирается сразу и места не просит) и соплеменник
+ * на неполном борде. Вторую копию ради «ставки на тройку» целью
+ * не считаем: под неё заморозка сработает, если карта выпадет сама,
+ * но крутить ради неё — искать ставку, а не карту. Нет цели — обновление
+ * молчит: бесплатное или нет, оно ничего не даст.
+ */
+function rerollFreezeGoal(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): string | null {
+  // Пары считаются так же, как `copiesOwned`: незолотые копии на борде
+  // и в руке, золотая с обычными в тройку не складывается.
+  // Пара годится в цель, только если витрина МОЖЕТ предложить третью копию:
+  // карта из пула, миньон, тира не выше таверны. Без этого целью
+  // назывались пара Goldrinn шестого тира на пятом тире (part8, ход 21)
+  // и пара капель Water Droplet — токенов вне пула (part17, ход 23):
+  // обновление обещало то, чего не найдёт никогда (находка состязательной
+  // проверки 26.08). Из нескольких пар берётся старшая по тиру — тройка
+  // из неё дороже, а порядок сущностей на борде тут ни при чём.
+  const own = [...state.board, ...state.hand].filter((m) => !m.golden);
+  const counts = new Map<string, number>();
+  for (const m of own) counts.set(m.cardId, (counts.get(m.cardId) ?? 0) + 1);
+  const offerable = (cardId: string): CardInfo | null => {
+    const info = deps.cards.info(cardId);
+    if (info === null || !info.isBaconPool || info.type !== 'MINION') return null;
+    if (info.techLevel === null || info.techLevel > state.techLevel) return null;
+    return info;
+  };
+  const pair = own
+    .filter((m) => (counts.get(m.cardId) ?? 0) >= 2)
+    .map((m) => offerable(m.cardId))
+    .filter((info): info is CardInfo => info !== null)
+    .sort((a, b) => (b.techLevel ?? 0) - (a.techLevel ?? 0))[0];
+  if (pair !== undefined) return `третью копию ${pair.name} — соберётся тройка`;
+
+  if (state.board.length >= rules.boardSize) return null;
+  // В ход подъёма заморозка ради племени молчит (свежая витрина будет
+  // нового тира — part11) — значит, и искать соплеменника незачем: цель
+  // обязана быть той, которую заморозка возьмёт.
+  if (state.techLevelUpTurn === state.turn) return null;
+
+  // Собираемое племя — как у заморозки: без амальгам, они свои любому
+  // племени и потому не признак того, что племя собирается. Заморозка
+  // берёт соплеменника не ниже тира таверны — в пуле этого тира племя
+  // обязано быть, иначе цель шире правила.
+  const byRace = new Map<string, number>();
+  for (const m of state.board) {
+    for (const race of racesOf(m, deps.cards)) {
+      if (race === RACE_ALL) continue;
+      byRace.set(race, (byRace.get(race) ?? 0) + 1);
+    }
+  }
+  const ownTierPool = deps.cards.poolOfTier(state.techLevel);
+  const tribe = [...byRace]
+    .filter(([race, n]) => n >= rules.freeze.minTribeMates && ownTierPool.some((c) => c.races.includes(race)))
+    .sort((a, b) => b[1] - a[1])[0];
+  return tribe === undefined
+    ? null
+    : `соплеменника (${tribe[0]} тира ${String(state.techLevel)}, своих ${String(tribe[1])})`;
+}
+
+/**
  * Правило обновления витрины.
  *
  * Советуется, когда покупать нечего: лучший кандидат ниже порога. Отдельно
@@ -1826,6 +1901,14 @@ export function rerollRule(
   // Обновление ради взгляда — потеря золота: найденное должно быть на что
   // купить (part18, ход 7).
   if (!paidRerollIsUseful(state, rules)) return null;
+
+  // Найденное не на что купить даже после обновления — крутить можно
+  // только под заморозку, и цель обязана быть названа (part27, ход 19).
+  // «Не на что» — по самому дешёвому товару таверны, а не по миньону:
+  // на два золота покупается заклинание витрины (part12, ход 19).
+  const cannotBuy = state.gold - cost < rules.cheapestShopPrice;
+  const freezeGoal = cannotBuy ? rerollFreezeGoal(state, deps, rules) : null;
+  if (cannotBuy && freezeGoal === null) return null;
 
   const best =
     state.shop.length === 0
@@ -1863,6 +1946,7 @@ export function rerollRule(
     return null;
   }
 
+  const price = cost === 0 ? 'обновление бесплатно' : `обновление стоит ${String(cost)}`;
   return {
     action: 'reroll',
     minion: null,
@@ -1871,9 +1955,11 @@ export function rerollRule(
     requiresSlot: false,
     sellFirst: null,
     reason:
-      `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
-      `${String(state.techLevel)} — покупать нечего, обновление ` +
-      (cost === 0 ? 'бесплатно' : `стоит ${String(cost)}`),
+      freezeGoal !== null
+        ? `золота ${String(state.gold)} — купить нечего и после обновления, но ${price}: ` +
+          `искать под заморозку ${freezeGoal}`
+        : `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
+          `${String(state.techLevel)} — покупать нечего, ${price}`,
   };
 }
 
@@ -2068,30 +2154,89 @@ export function freezeRule(
   // настоящая покупка сильнее нашей оценки. Считать порядковую статистику
   // мы не станем (это был бы выдуманный коэффициент), и планка остаётся
   // скорее мягкой, чем строгой.
-  // Считается ЛЕНИВО: ожидание по пулу тира — это `minionValue` на сотне
-  // карт, а заклинание, дающее миньона, в витрине лежит редко. Раньше эта
-  // ветка съедала весь бюджет советника на каждом ходу без единого
-  // заклинания.
-  let cachedSpellThreshold: number | null = null;
-  const spellThresholdOf = (): number => {
-    if (cachedSpellThreshold !== null) return cachedSpellThreshold;
-    const survivors = valued.slice(affordable);
-    const freshValue = averagePoolValue(shopTiers(state.techLevel), state, deps, rules) ?? threshold;
-    const keptValue =
-      survivors.length === 0
-        ? 0
-        : survivors.reduce((sum, v) => sum + v.value, 0) / survivors.length;
-    cachedSpellThreshold = freshValue + Math.max(0, freshValue - keptValue);
-    return cachedSpellThreshold;
-  };
+  //
+  // Второе слагаемое считается по той же оговорке, и это правка part27
+  // (ход 1). Прежде «доживающая» бралась СРЕДНЕЙ по остатку витрины —
+  // а игрок покупает из замороженной витрины лучшее, как и из свежей,
+  // и дешёвка рядом с лучшей картой ему ничего не стоит. Средняя же от неё
+  // проседала: при Risen Rider 6.0 и Harmless Bonehead 3.0 в остатке цена
+  // заморозки выходила 0.98 (свежая 5.48 против средней 4.5), и лассо
+  // (6.0) планку 6.45 не брало, — а в гипотетическом состоянии ПЛАНА, где
+  // куплен был другой из двух равных миньонов и Bonehead стал соплеменником
+  // на 4.5, та же планка выходила 5.70, и план обещал «КУПИТЬ → ЗАМОРОЗИТЬ
+  // Enchanted Lasso». Игрок сделал первый шаг, и второй исчез. Число,
+  // которое решает совет, не может зависеть от того, какой из двух равных
+  // купили. Теперь цена заморозки — недобор ЛУЧШИХ доживающих до свежей,
+  // по одной на каждую покупку того хода.
+  //
+  // И не на каждую: замороженную витрину игра ДОЗАПОЛНЯЕТ свежими картами
+  // до размера витрины своего тира (`shopSizeByTier`). Проверено по всем
+  // девятнадцати заморозкам шести фикстур (part17, part19, part22, part24,
+  // part25, part27): замороженные карты возвращаются новыми сущностями,
+  // а пустые слоты приходят свежими — part27 ход 1→3: два замороженных
+  // и купленный слот, витрина из трёх, третьим пришёл Molten Rock; part24
+  // ход 13→15: три замороженных на четвёртом тире, витрина из пяти, два
+  // свежих. Подъём таверны в ход заморозки добавляет слот сам (3 → 4 на
+  // втором тире: part19, part24, part17, part25 — ход 3→5). Первые
+  // `refills` покупок следующего хода игрок делает из этих свежих карт
+  // по цене свежей карты, и недобор платят только покупки сверх них.
+  // Планка от этого мягче, а не строже, и это записано: свежая сторона
+  // по-прежнему среднее, а не лучшее-из-N (состязательная проверка 26.08
+  // назвала асимметрию прямо; принято сознательно — ранних заморозок
+  // игрок просил четыре партии подряд, а ручка, если их станет много, —
+  // свежая сторона, порядковой статистикой по пулу).
 
-  // Сколько покупок игрок сделает в тот ход, ради которого держит витрину.
-  // Золото хода таверны N — правило игры, записанное у `tavernTurnOf`:
-  // `min(2 + N, 10)`. Нужно затем, что заклинание, крадущее ИЗ ВИТРИНЫ,
-  // получит не среднюю её карту, а среднюю из ОСТАВШИХСЯ: лучшие к тому
-  // моменту будут куплены.
+  // Золото хода, ради которого держат витрину, — правило игры, записанное
+  // у `tavernTurnOf`: `min(2 + N, 10)`. Сколько ПОКУПОК из витрины игрок
+  // сделает сверх самого предложения — зависит от его цены: на четырёх
+  // золотых после лассо за 2 покупок ноль, и штрафовать доживающих
+  // за покупки, которых не будет, нельзя (состязательная проверка 26.08).
   const nextGold = Math.min(2 + tavernTurnOf(state.turn) + 1, 10);
-  const nextAffordable = Math.floor(nextGold / rules.minionCost);
+  const purchasesAfter = (spent: number): number =>
+    Math.max(0, Math.floor((nextGold - spent) / rules.minionCost));
+
+  // Замороженная витрина следующего хода — доживающие плюс `refills` свежих
+  // слотов; игрок забирает из неё `purchases` лучших. Планка считает свежие
+  // слоты за свежую карту, а вот ПУЛ ЛАССО (что останется на кражу) берётся
+  // из одних доживающих, без свежих слотов, — и это намеренная
+  // несогласованность в строгую сторону: свежий слот в пуле кражи поднимал
+  // лассо над продажным генератором на part22 (ход 7) и возвращал в план
+  // ровно тот совет, про который игрок сказал «практического эффекта
+  // не вижу» (состязательная проверка 26.08).
+  const survivors = valued.slice(affordable);
+  const freshValueOf = (): number =>
+    averagePoolValue(shopTiers(state.techLevel), state, deps, rules) ?? threshold;
+  // Свежих слотов в замороженной витрине: до размера витрины своего тира.
+  // Тир уже новый, если таверну подняли в этот ход, — и в гипотетическом
+  // состоянии плана после подъёма тоже.
+  const refills = Math.max(
+    0,
+    (rules.shopSizeByTier[state.techLevel] ?? survivors.length) - survivors.length,
+  );
+  // Считается ЛЕНИВО и кэшируется по числу покупок: ожидание по пулу тира —
+  // это `minionValue` на сотне карт, а заклинание, дающее миньона, в витрине
+  // лежит редко.
+  const thresholdByPurchases = new Map<number, number>();
+  const spellThresholdOf = (purchases: number): number => {
+    const cached = thresholdByPurchases.get(purchases);
+    if (cached !== undefined) return cached;
+    const freshValue = freshValueOf();
+    const keptShortfall = Array.from({ length: Math.max(0, purchases - refills) }, (_, i) => {
+      const kept = survivors[i];
+      return kept === undefined ? 0 : Math.max(0, freshValue - kept.value);
+    }).reduce((sum, x) => sum + x, 0);
+    const bar = freshValue + keptShortfall;
+    thresholdByPurchases.set(purchases, bar);
+    return bar;
+  };
+  // Первый ход таверны, на котором хватит и на предложение, и на покупку.
+  const turnAffordingBoth = (spent: number): number => {
+    const need = spent + rules.minionCost;
+    for (let t = tavernTurnOf(state.turn) + 1; t < 12; t++) {
+      if (Math.min(2 + t, 10) >= need) return t;
+    }
+    return tavernTurnOf(state.turn) + 1;
+  };
 
   const spellKeeper =
     state.board.length >= rules.boardSize
@@ -2108,7 +2253,14 @@ export function freezeRule(
             // держал витрину — и отнимал бесплатное обновление ради наценки
             // (part23, ход 15: «заклинание и таверна слабые, а обновления
             // из-за этого не будет»).
-            if (spell.cost > rules.minionCost) return [];
+            //
+            // Дешевле — СТРОГО: заклинание по цене покупки («Discover
+            // a Tier 1 minion» за 3, A New Sprout) на первом тире стоит
+            // ровно свежую карту, проходило планку с запасом 0.00 и вставало
+            // верхней строкой списка (part12, part18 — ход 1 после покупки;
+            // состязательная проверка 26.08). Сравнение с планкой — тоже
+            // строгое: нулевой запас советом не становится.
+            if (spell.cost >= rules.minionCost) return [];
             const spellText = deps.cards.info(spell.cardId)?.text ?? '';
             const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
             if (effect === null || !effect.givesMinion) return [];
@@ -2124,13 +2276,16 @@ export function freezeRule(
               new RegExp(w, 'i').test(spellText),
             );
 
+            const purchases = purchasesAfter(spell.cost);
             const tiered = namedTierPool(spellText, state, deps, rules);
             const pool =
               tiered ??
-              (stealsFromShop ? valued.slice(nextAffordable).map((v) => v.minion) : state.shop);
+              (stealsFromShop ? valued.slice(purchases).map((v) => v.minion) : state.shop);
             const { score } = givesMinionValue(state, deps, rules, spell.cost, false, pool);
-            const bar = spellThresholdOf();
-            return score >= bar ? [{ spell, score: score - bar }] : [];
+            const bar = spellThresholdOf(purchases);
+            return score > bar
+              ? [{ spell, score: score - bar, bothOn: turnAffordingBoth(spell.cost) }]
+              : [];
           })
           .sort((a, b) => b.score - a.score)[0];
 
@@ -2160,8 +2315,9 @@ export function freezeRule(
             if (v.copies > 0) return [];
             const spun = sellSpinValue(v.minion, state, deps, rules, false);
             if (spun === null) return [];
-            const bar = spellThresholdOf();
-            return spun.score < bar ? [] : [{ minion: v.minion, spun, score: spun.score - bar }];
+            // Покупок сверх самой цепочки: её чистая цена уже вычтена.
+            const bar = spellThresholdOf(purchasesAfter(spun.net));
+            return spun.score > bar ? [{ minion: v.minion, spun, score: spun.score - bar }] : [];
           })
           .sort((a, b) => b.score - a.score)[0];
 
@@ -2172,6 +2328,13 @@ export function freezeRule(
   // остаётся заклинание.
   const freezeForSpell = (keeper: NonNullable<typeof spellKeeper>): Recommendation => {
     const spellName = deps.cards.info(keeper.spell.cardId)?.name ?? keeper.spell.cardId;
+    // «Два тела в один ход» обещаются только тем ходом, где золота хватит
+    // на оба: на первом ходу таверны это третий (пять золота), а не второй.
+    const nextTavernTurn = tavernTurnOf(state.turn) + 1;
+    const when =
+      keeper.bothOn <= nextTavernTurn
+        ? 'со следующего хода это'
+        : `с ${String(keeper.bothOn)}-го хода таверны (заморозку продлевать) это`;
     return {
       action: 'freeze',
       minion: null,
@@ -2182,7 +2345,7 @@ export function freezeRule(
       sellFirst: null,
       reason:
         `${spellName} за ${String(keeper.spell.cost)} даёт миньона, а золота ` +
-        `${String(state.gold)} на него не хватает; со следующего хода это ` +
+        `${String(state.gold)} на него не хватает; ${when} ` +
         `покупка и заклинание в один ход — два тела вместо одного`,
     };
   };
@@ -3250,6 +3413,33 @@ function computeSpellEffect(
 }
 
 /**
+ * Есть ли в тексте триггер, который срабатывает В БОЮ.
+ *
+ * Голова триггера («After…», «Whenever…», «At the start/end of…») ищется
+ * шаблонами `engineTextWords`, и на той же позиции проверяется, не тавернная
+ * ли это голова (`tavernTriggerWords`): «After you play an Elemental»
+ * срабатывает только в таверне, «After a friendly Rally minion attacks» —
+ * только в бою. Одной боевой головы достаточно.
+ */
+function hasCombatTrigger(text: string, rules: TavernRules): boolean {
+  for (const word of rules.engineTextWords) {
+    const head = new RegExp(word, 'gi');
+    let hit: RegExpExecArray | null;
+    while ((hit = head.exec(text)) !== null) {
+      const at = hit.index;
+      const tavern = rules.tavernTriggerWords.some((t) => {
+        const re = new RegExp(t, 'iy');
+        re.lastIndex = at;
+        return re.test(text);
+      });
+      if (!tavern) return true;
+      if (hit[0].length === 0) head.lastIndex += 1;
+    }
+  }
+  return false;
+}
+
+/**
  * Миньон-«движок»: его ценность — постоянный эффект из текста (аура,
  * «After/Whenever/At the start…»), а не размен телом. Признаки — механика
  * AURA в снапшоте и слова из `engineTextWords`.
@@ -3259,14 +3449,25 @@ function computeSpellEffect(
  * эффекта, который надо беречь от ударов. Прежнее правило зачисляло такого
  * бойца в движки словом «After» и уводило провокацию на токен (part17,
  * ход 11).
+ *
+ * ТАВЕРННЫЙ триггер движком не считается тоже (part27, ход 7): «After you
+ * play an Elemental, gain +{1} Health» (Molten Rock) в бою не срабатывает,
+ * и провокации на нём терять нечего — а прежнее правило уводило её с самого
+ * крупного тела на отработавший генератор 3/3, которого игрок собирался
+ * продать. Аура остаётся движком без разбора: «Your minions have +1 Attack»
+ * живёт в бою и требует носителя живым.
  */
-function isEffectEngine(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
+export function isEffectEngine(
+  m: Minion,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): boolean {
   const info = cards.info(m.cardId);
   if (info?.mechanics.includes('AURA') ?? false) return true;
   const text = info?.text ?? '';
   if (text === '') return false;
   if (rules.selfTriggerWords.some((w) => new RegExp(w, 'i').test(text))) return false;
-  return rules.engineTextWords.some((w) => new RegExp(w, 'i').test(text));
+  return hasCombatTrigger(text, rules);
 }
 
 /**
@@ -4441,14 +4642,21 @@ export function adviseTavern(
   // Случай part11: борд полон и силён, все покупки отсеяны, 5 золота,
   // совет «НИЧЕГО» — игрок справедливо заметил, что мог обновляться.
   const idleRerollCost = rerollCostOf(state, rules);
+  // Найденное не на что купить — обновление только под названную цель
+  // заморозки, как в `rerollRule` (part27, ход 19).
+  const idleCannotBuy = state.gold - idleRerollCost < rules.cheapestShopPrice;
+  const idleGoal = idleCannotBuy ? rerollFreezeGoal(state, deps, rules) : null;
   if (
     sorted[0]?.action === 'pass' &&
     state.gold >= idleRerollCost &&
     // «Делать нечего» с золотом на покупку — повод искать; с золотом
     // на один реролл в ранней партии — нет (part18, ход 7).
     paidRerollIsUseful(state, rules) &&
+    (!idleCannotBuy || idleGoal !== null) &&
     state.shop.some((m) => !m.frozen)
   ) {
+    const idlePrice =
+      idleRerollCost === 0 ? 'обновление бесплатно' : `обновление стоит ${String(idleRerollCost)}`;
     sorted.unshift({
       action: 'reroll',
       minion: null,
@@ -4457,10 +4665,13 @@ export function adviseTavern(
       requiresSlot: false,
       sellFirst: null,
       reason:
-        idleRerollCost === 0
-          ? 'покупать нечего и некуда, а обновление бесплатно — искать лучшее'
-          : `покупать нечего и некуда, а золота ${String(state.gold)} — ` +
-            'обновление витрины в поиске лучшего',
+        idleGoal !== null
+          ? `золота ${String(state.gold)} — купить нечего и после обновления, но ${idlePrice}: ` +
+            `искать под заморозку ${idleGoal}`
+          : idleRerollCost === 0
+            ? 'покупать нечего и некуда, а обновление бесплатно — искать лучшее'
+            : `покупать нечего и некуда, а золота ${String(state.gold)} — ` +
+              'обновление витрины в поиске лучшего',
     });
   }
 

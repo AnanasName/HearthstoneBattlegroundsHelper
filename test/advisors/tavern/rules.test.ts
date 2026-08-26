@@ -34,7 +34,7 @@ import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf } from '../../../src/adv
 import { createBgStats } from '../../../src/data/bgStats.js';
 import { createCardIndex, loadCardIndex } from '../../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
-import { minion } from '../../minions.js';
+import { board, minion } from '../../minions.js';
 
 /**
  * Юнит-тесты на каждое правило — прямое требование DoD фазы 4.
@@ -647,9 +647,97 @@ describe('правило обновления витрины', () => {
     expect(rerollCostOf(state({ shop }))).toBe(DEFAULT_TAVERN_RULES.rerollCost);
     expect(rerollCostOf(state({ shop, rerollCost: 0 }))).toBe(0);
 
-    const free = rerollRule(state({ gold: 0, shop, rerollCost: 0 }), deps);
+    // Золота на покупку хватает — найденное будет на что купить.
+    const free = rerollRule(state({ gold: 3, shop, rerollCost: 0 }), deps);
     expect(free?.cost).toBe(0);
     expect(free?.reason).toContain('бесплатно');
+  });
+
+  it('когда найденное не на что купить, обновление советуется только под названную цель заморозки', () => {
+    // part27, ход 19: золото 0, борд полон, обновление бесплатно — совет
+    // «ОБНОВИТЬ — покупать нечего» обещал покупку, которой быть не могло
+    // («даже если я обновлю, то не смогу купить существ без продажи»).
+    // Витрина — нейтральное тело: соплеменник пары на борде стоил бы
+    // выше порога «покупать нечего», и обновление молчало бы по другой
+    // причине.
+    const shop = [shopMinion(9, 'NEUTRAL', { attack: 1, health: 1 })];
+    // Семь нейтральных тел без пар: карты вне справочника, витрина их
+    // не предложит, а племени у них нет.
+    const full = board([1, 2, 3, 4, 5, 6, 7]).map((m, i) => ({ ...m, cardId: `OWN_${String(i)}` }));
+
+    // Ни пары, ни места — молчит, хотя обновление бесплатно.
+    expect(rerollRule(state({ gold: 0, shop, rerollCost: 0, board: full }), deps)).toBeNull();
+
+    // Пара на борде — искать третью копию: тройка соберётся и места не спросит.
+    const withPair = (cardId: string, patch: Partial<Minion> = {}): Minion[] =>
+      full.map((m, i) => (i >= 5 ? { ...m, cardId, ...patch } : m));
+    const paired = withPair('MURLOC_2');
+    const triple = rerollRule(state({ gold: 0, shop, rerollCost: 0, board: paired }), deps);
+    expect(triple?.reason).toContain('купить нечего и после обновления');
+    expect(triple?.reason).toContain('искать под заморозку третью копию Другой мурлок');
+
+    // Золотая копия в пару не идёт: тройка собирается из обычных.
+    const golden = paired.map((m, i) => (i === 6 ? { ...m, golden: true } : m));
+    expect(rerollRule(state({ gold: 0, shop, rerollCost: 0, board: golden }), deps)).toBeNull();
+
+    // Пара, которой витрина не даст, — не цель: тир выше таверны (part8,
+    // ход 21: Goldrinn на пятом тире) и карта вне пула (part17, ход 23:
+    // капли Water Droplet).
+    expect(
+      rerollRule(state({ gold: 0, shop, rerollCost: 0, board: withPair('MURLOC_5') }), deps),
+    ).toBeNull();
+    expect(
+      rerollRule(state({ gold: 0, shop, rerollCost: 0, board: withPair('TOKEN_NOT_IN_POOL') }), deps),
+    ).toBeNull();
+
+    // Из двух пар называется старшая по тиру, а не первая по порядку.
+    const twoPairs = paired.map((m, i) => (i <= 1 ? { ...m, cardId: 'MURLOC_1' } : m));
+    expect(
+      rerollRule(state({ gold: 0, shop, rerollCost: 0, board: twoPairs }), deps)?.reason,
+    ).toContain('третью копию Другой мурлок');
+
+    // Платное обновление в лейте при том же золоте — та же проверка:
+    // «поиск карты под заморозку» обязан назвать, какой.
+    expect(
+      rerollRule(state({ gold: 1, shop, rerollCost: 1, techLevel: 4, board: full }), deps),
+    ).toBeNull();
+    expect(
+      rerollRule(state({ gold: 1, shop, rerollCost: 1, techLevel: 4, board: paired }), deps)
+        ?.reason,
+    ).toContain('третью копию');
+
+    // «Не на что купить» — по самому дешёвому товару таверны: на золото,
+    // которого хватит на заклинание витрины за 1, обновление советуется
+    // как прежде (part12, ход 19: два золота, бесплатное обновление,
+    // игрок обновил и купил заклинание).
+    const spare = rerollRule(state({ gold: 1, shop, rerollCost: 0, board: full }), deps);
+    expect(spare?.action).toBe('reroll');
+    expect(spare?.reason).toContain('покупать нечего');
+  });
+
+  it('цель «соплеменник» — только там, где заморозка его возьмёт', () => {
+    const shop = [shopMinion(9, 'NEUTRAL', { attack: 1, health: 1 })];
+    // Два РАЗНЫХ мурлока на неполном борде (пары нет) — искать мурлока
+    // своего тира.
+    const murlocs = [minion(1, { cardId: 'MURLOC_1' }), minion(2, { cardId: 'MURLOC_2' })];
+    const goal = rerollRule(state({ gold: 0, shop, rerollCost: 0, board: murlocs }), deps);
+    expect(goal?.reason).toContain('искать под заморозку соплеменника (MURLOC тира 2');
+
+    // В ход подъёма заморозка ради племени молчит (part11) — и цели нет.
+    expect(
+      rerollRule(
+        state({ gold: 0, shop, rerollCost: 0, board: murlocs, turn: 5, techLevelUpTurn: 5 }),
+        deps,
+      ),
+    ).toBeNull();
+
+    // Племя, которого в пуле своего тира нет, целью не называется: два
+    // дракона третьего тира при таверне 2 (и как пара они не годятся —
+    // тир выше таверны).
+    const dragons = board([1, 2], { cardId: 'DRAGON_1' });
+    expect(
+      rerollRule(state({ gold: 0, shop, rerollCost: 0, board: dragons, techLevel: 2 }), deps),
+    ).toBeNull();
   });
 
   it('бесплатное обновление с подъёмом не соревнуется', () => {
@@ -1080,6 +1168,13 @@ describe('правило заморозки', () => {
 
     // По карману — покупать, а не морозить.
     expect(freezeRule({ ...broke, gold: 2 }, lassoDeps)).toBeNull();
+    // Заклинание ПО ЦЕНЕ покупки — не «дешевле покупки»: на первом тире
+    // «Discover a Tier 1 minion» за 3 стоит ровно свежую карту и брало
+    // планку с нулевым запасом (part12, part18 — ход 1; состязательная
+    // проверка 26.08).
+    expect(
+      freezeRule({ ...broke, shopSpells: [{ ...lasso, cost: 3 }] }, lassoDeps),
+    ).toBeNull();
     // На полном борде телу неоткуда взяться места. Борд из чужих карт:
     // копии витрины включили бы другую ветку заморозки.
     expect(
