@@ -469,6 +469,29 @@ export function part31Game(): string {
 }
 
 /**
+ * part32 — двадцать четвёртая партия с оверлеем (27–28.08.2026, 23:48–00:21,
+ * Король-лич `TB_BaconShop_HERO_22`, нежить, **1-е место**), шестая
+ * на билде 250339. Два пункта по двум скриншотам, оба — состояния ПОСРЕДИ
+ * хода:
+ *
+ *  - **бесплатная сила «Ритуал перерождения» не советовалась** — ход 1,
+ *    золото 0/3 после покупки Glim Guardian, совет «НИЧЕГО»; сила
+ *    `TB_BaconShop_HP_024` («Give a minion Reborn until next turn»,
+ *    `HAS_ACTIVATE_POWER` без `COST`) нажата на всех 16 ходах таверны,
+ *    блок PLAY с `Target=` своим миньоном, после нажатия `EXHAUSTED=1`;
+ *  - **«не понимаю, почему Gem Rat выбран лучшей покупкой»** — ход 11,
+ *    золото 4/8 (четыре ушли на тринкет Baleful Incense `BG32_MagicItem_360`,
+ *    `COST=4`), борд из трёх нежити и дракона, витрина Gem Rat 4/4 (тир 3),
+ *    Harmless Bonehead 5/1 `BG28_300` («Deathrattle: Summon⏎two 1/1
+ *    Skeletons» — перенос строки прятал призыв от `battleTextWords`),
+ *    Deep-Sea Angler, Ominous Seer, Shiny Ring; по бою Bonehead 100%
+ *    против Gem Rat 97%, игрок купил Bonehead.
+ */
+export function part32Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part32', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция

@@ -1,0 +1,122 @@
+{
+  "$comment": [
+    "Партия 27–28.08.2026 (23:48–00:21) — двадцать четвёртая партия с оверлеем",
+    "(Король-лич TB_BaconShop_HERO_22, нежить, 1-е место) и шестая на билде",
+    "250339. Лог взят из каталога клиента Hearthstone_2026_08_27_22_51_02.",
+    "",
+    "Два пункта обратной связи по двум скриншотам, оба — состояния ПОСРЕДИ",
+    "хода, поэтому тест ловит моменты условиями на состояние.",
+    "",
+    "  1. «На 1 скриншоте мне не предлагает сыграть силу героя, хотя её точно",
+    "     стоит сыграть». Ход 1 (23:49), золото 0/3 после покупки Glim Guardian,",
+    "     совет «НИЧЕГО». Сила «Ритуал перерождения» TB_BaconShop_HP_024",
+    "     («Give a minion Reborn until next turn») активна (HAS_ACTIVATE_POWER)",
+    "     и без тега COST; игрок нажал её на всех 16 ходах таверны — первый раз",
+    "     в 23:49:36 на Glim Guardian. Бесплатные силы советовались только",
+    "     с текстом про обновление витрины (part13) и выстрел (part29); теперь",
+    "     сила, дарящая своему миньону ключевое слово, советуется и называет",
+    "     цель: без слова у кого ещё нет → носитель хрипа (сработает дважды) →",
+    "     хрип, сам дарящий перерождение (цепочка) → по атаке.",
+    "  2. «Не знаю, почему рекомендуется именно эта карта, не понимаю, почему",
+    "     выбрана как лучшая». Ход 11 (23:55), золото 4/8 — четыре ушли",
+    "     на тринкет Baleful Incense (23:54:55). Gem Rat 4/4 (тир 3) стоил 10.0",
+    "     (тир 6 + статы 4, текст про Gem Day без цены), Harmless Bonehead 5/1",
+    "     — 9.5 (тир 2, статы 3, трое нежити 4.5) и НОЛЬ за хрип «Summon two",
+    "     1/1 Skeletons»: в снапшоте после «Summon» перенос строки, а шаблон",
+    "     battleTextWords ждал пробел. Теперь 12.0 против 10.0 — Bonehead",
+    "     первый, как по бою (100% против 97%) и как купил игрок.",
+    "",
+    "Цели силы по ходам (лог): 1, 3 — Glim Guardian; 5, 7 — Nerubian",
+    "Deathswarmer; 9 — Friendly Geist; 11 — золотой Deathswarmer 6/8;",
+    "13–23 — Mummifier (шесть нажатий); 25–31 — Deathly Striker. Правило",
+    "на ходу 11 называет Friendly Geist (хрип, атака 10) — расхождение",
+    "записано открытым вопросом; на ходах 13+ — Mummifier, как игрок.",
+    "",
+    "Пометки: «скриншот из чата» — сверено по картинке в чате;",
+    "«лог» — прочитано из Power.log."
+  ],
+  "player": {
+    "name": "AngryMem#2886",
+    "playerId": 8,
+    "hero": "TB_BaconShop_HERO_22",
+    "heroName": "Король-лич",
+    "verifiedBy": "лог"
+  },
+  "buildNumber": 250339,
+  "finalPlace": 1,
+  "checkpoints": [
+    {
+      "turn": 1,
+      "tavernTurn": 1,
+      "time": "23:49",
+      "moment": "посреди хода, после покупки Glim Guardian, до нажатия силы",
+      "phase": "tavern",
+      "techLevel": 1,
+      "gold": 0,
+      "goldMax": 3,
+      "hp": "30+14",
+      "board": ["Glim Guardian 1/4"],
+      "shop": ["Mini-Myrmidon 1/4", "Tusked Camper 2/3"],
+      "shopSpells": ["Tavern Dish Banana за 1 (BG28_897)"],
+      "heroPower": { "cardId": "TB_BaconShop_HP_024", "cost": null, "active": true, "used": false },
+      "tavernUpgradeCost": 5,
+      "overlay": {
+        "list": ["НИЧЕГО"],
+        "position": "чужих бордов ещё не видели — считать не против кого"
+      },
+      "verifiedBy": "скриншот из чата"
+    },
+    {
+      "turn": 1,
+      "tavernTurn": 1,
+      "time": "23:49:36",
+      "moment": "нажатие силы на Glim Guardian (BLOCK_START PLAY, Target=Бликостраж id=307), затем EXHAUSTED=1 на силе",
+      "verifiedBy": "лог"
+    },
+    {
+      "turn": 11,
+      "tavernTurn": 6,
+      "time": "23:55",
+      "moment": "посреди хода, после тринкета за 4, до покупки Bonehead и нажатия силы",
+      "phase": "tavern",
+      "techLevel": 3,
+      "gold": 4,
+      "goldMax": 8,
+      "hp": "30+6",
+      "board": [
+        "Friendly Geist 10/3",
+        "Glim Guardian 3/7",
+        "Scarlet Skull 6/1 (перерождение)",
+        "Nerubian Deathswarmer 6/8 (зол)"
+      ],
+      "shop": ["Gem Rat 4/4", "Harmless Bonehead 5/1", "Deep-Sea Angler 2/3", "Ominous Seer 2/1"],
+      "shopSpells": ["Shiny Ring за 2 (BG28_168)"],
+      "trinket": { "cardId": "BG32_MagicItem_360", "name": "Baleful Incense", "cost": 4, "time": "23:54:55" },
+      "tavernUpgradeCost": 7,
+      "overlay": {
+        "list": [
+          "КУПИТЬ Gem Rat 4/4 за 3",
+          "КУПИТЬ Harmless Bonehead 5/1 за 3",
+          "КУПИТЬ Deep-Sea Angler 2/3 за 3",
+          "ПО БОЮ ЛУЧШЕ Harmless Bonehead: Harmless Bonehead 100% > Gem Rat 97% > Deep-Sea Angler 94% (в среднем по полю из 5 бордов, давность 1–9 ходов)"
+        ],
+        "position": "менять нечего (89% побед, в среднем по полю из 5 бордов, давность 1–9 ходов, 3160 мс)"
+      },
+      "verifiedBy": "скриншот из чата"
+    },
+    {
+      "turn": 11,
+      "tavernTurn": 6,
+      "time": "23:55:17",
+      "moment": "покупка Harmless Bonehead (DragBuy, RESOURCES_USED 4 → 7), розыгрыш, в 23:55:26 сила на золотого Deathswarmer",
+      "verifiedBy": "лог"
+    },
+    {
+      "turn": 13,
+      "tavernTurn": 7,
+      "time": "23:57:01",
+      "moment": "первое из шести нажатий силы на Mummifier BG28_309",
+      "verifiedBy": "лог"
+    }
+  ]
+}
