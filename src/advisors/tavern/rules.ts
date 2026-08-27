@@ -472,6 +472,27 @@ export interface TavernRules {
    * всплывает к концу хода, когда крупные траты сделаны.
    */
   readonly heroPowerSpellWords: readonly string[];
+  /**
+   * Текст миньона, ВОЗВРАЩАЮЩЕГО здоровье героя, — «After your hero takes
+   * damage, rewind it».
+   *
+   * Нужен там, где цена платится здоровьем (тег `BACON_COSTS_HEALTH_TO_BUY`):
+   * курса «здоровье → золото» у нас нет, и совет по такой покупке живёт
+   * только тогда, когда курс не нужен — здоровье возвращается само.
+   * В пуле таких карт четыре: Soul Rewinder (тир 2), Timewarped Rewinder
+   * (тир 3), Ashen Corruptor и Timewarped Archimonde (тир 5).
+   */
+  readonly healthRewindWords: readonly string[];
+  /**
+   * Текст силы героя, ВЫСТРЕЛИВАЮЩЕЙ миньоном витрины, — «Remove a minion
+   * in the Tavern» («Lock and Load» Тавиша, part29).
+   *
+   * В пуле такая сила ОДНА: по снапшоту слова «remove a minion» среди 2147
+   * карт типа HERO_POWER встречаются только у `BG22_HERO_000p_Alt`.
+   * Правило от этого не перестаёт быть общим — оно читает текст, а не
+   * идентификатор, — но и обещать, что покроет что-то ещё, не станет.
+   */
+  readonly heroPowerShotWords: readonly string[];
   readonly heroPowerSpellValue: number;
 
   /**
@@ -1005,6 +1026,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   freeHeroPowerValue: 2,
 
   heroPowerSpellWords: ['(?:get|add)[^.]*tavern spell'],
+  // Перенос строки в снапшоте ходит посреди предложения — пробел пишется
+  // как `\s+`, иначе шаблон молча не совпадает (урок part16).
+  healthRewindWords: ['after your hero takes damage,\\s*rewind it'],
+  heroPowerShotWords: ['remove a minion[^.]*tavern'],
   heroPowerSpellValue: 6,
 
   untargetedSpellWords: [

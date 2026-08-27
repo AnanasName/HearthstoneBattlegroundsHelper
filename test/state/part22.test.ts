@@ -294,11 +294,14 @@ describe('part22: рука как позиция, сила героя, удво�
     expect(turn7.techLevel).toBe(2);
     const plan = spendPlan(turn7, { cards });
     expect(plan.steps.some((s) => s.recommendation.spellCardId === 'BG28_512')).toBe(false);
-    // Витрину план всё же держит — но ради ДРУГОГО и по другой планке:
-    // River Skipper платит продажей, и цепочка «купить-разыграть-продать»
-    // стоит дешевле покупки (part25). Заклинание тут ни при чём.
-    const freeze = plan.steps.find((s) => s.recommendation.action === 'freeze');
-    expect(freeze?.recommendation.minion?.cardId).toBe('BG33_140');
+    // 27.08 (part29): витрину план не держит здесь ВООБЩЕ — ни ради
+    // заклинания, ни ради продажного генератора (River Skipper, `BG33_140`,
+    // держал её с part25). Ход 7 — четвёртый ход таверны, на следующем
+    // будет семь золота: две покупки и без предложения, и с ним, — лишнего
+    // тела нет, и «два тела вместо одного» тут неправда. Это ровно тот
+    // совет, про который игрок в этой же партии сказал «не вижу
+    // практического эффекта», и снят он счётом, а не порогом.
+    expect(plan.steps.some((s) => s.recommendation.action === 'freeze')).toBe(false);
   });
 
   /**

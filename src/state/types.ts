@@ -138,6 +138,24 @@ export interface HandSpell {
   readonly scriptData: readonly (number | null)[];
   /** `LITERALLY_UNPLAYABLE` — замок, как у карт-миньонов. */
   readonly unplayable: boolean;
+  /**
+   * Цена платится ЗДОРОВЬЕМ, а не золотом — тег `BACON_COSTS_HEALTH_TO_BUY`.
+   *
+   * Тег, а не текст: в пуле есть карта, у которой цена в здоровье своя
+   * («Hasty Excavation»: «Gain 1 Gold. This costs Health to buy instead
+   * of Gold»), и есть с полдюжины источников, которые делают чужую покупку
+   * платой за здоровье, — Malchezaar и Bazaar Dealer на борде, наклейки
+   * «Bazaar»/«Pilgrimp», тринкеты «The Eye of Sargeras» и «Demonic
+   * Tapestry». Считать это по текстам значило бы моделировать то, что игра
+   * уже посчитала: она ставит тег на саму карту витрины, и в логе
+   * покупка выходит строкой `META_DATA - Meta=SPEND_HEALTH` (part29,
+   * 01:14:09).
+   *
+   * Цена при этом лежит в том же теге `COST`, и `cost` его и несёт:
+   * различает их только этот флаг. Без него заклинание за 3 «здоровья»
+   * при нулевом золоте считалось не по карману и было невидимо целиком.
+   */
+  readonly costsHealth: boolean;
 }
 
 /**

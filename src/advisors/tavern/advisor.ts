@@ -1570,11 +1570,56 @@ export function playRules(
       value = replacing;
     }
 
+    // КОПИЯ, КОТОРОЙ МЫ УЖЕ ВЛАДЕЕМ, розыгрышем копией быть не начинает.
+    //
+    // `copiesOwned` считает борд И РУКУ, и это не наше допущение, а факт,
+    // который игра сообщает сама: тег `BACON_PAIR_CANDIDATE` она ставит
+    // на карту витрины и тогда, когда единственная наша копия лежит
+    // в РУКЕ (проверено разбором — семь таких случаев на part22 и part29,
+    // и ни одного «пара без копии»). Значит ставка на тройку от розыгрыша
+    // не выигрывает ничего: число копий до и после него одно и то же,
+    // а слот на борде тратится навсегда.
+    //
+    // Пока бонус входил в очки розыгрыша, он входил в них ДВАЖДЫ — как
+    // ценность владения и как ценность выкладывания, — и советник называл
+    // «вторая копия» ПРИЧИНОЙ выставить карту. На part29 (ход 19) это
+    // и вышло наружу: второй Бранн 2/4 при борде из 18/16, 24/23 и 25/34
+    // стоял верхней строкой с 16.0 очков, из которых три — за копию.
+    // Игрок: «непонятно, зачем ставить Бранна, ведь на следующий ход мне
+    // придётся его продавать, если я не найду 3 копию».
+    const playValue = value.total - value.copies;
+
+    // Ставка на тройку, занимающая ПОСЛЕДНИЙ свободный слот, разменивается
+    // на ОДИН бой.
+    //
+    // Пока слот свободен, он достаётся следующей покупке даром. Занятый
+    // ставкой, он ту же покупку встречает продажей — и продана будет
+    // именно ставка: копия под тройку берётся не телом, тело у неё
+    // и ни при чём (второй Бранн — 2/4 при борде из 18/16 и 25/34).
+    // Значит розыгрыш меняет ставку на тройку на лишнее тело в ОДНОМ бою,
+    // и советуется он, только когда это тело в бою стоит дороже ставки:
+    // `combatValue` против `copiesBonus`, обе величины — наши же веса.
+    //
+    // При равенстве ставка остаётся в руке. Это не осторожность ради
+    // осторожности: розыгрыш необратим (слот назад не выкупить), а рука
+    // не стоит ничего, и число копий в ней игра считает наравне с бордом.
+    //
+    // Тройки это не касается — её собирают немедленно, и слот тут не цена.
+    const fillsLastSlot = state.board.length + 1 >= rules.boardSize;
+    if (
+      value.tripleBet &&
+      !value.completesTriple &&
+      fillsLastSlot &&
+      combatValue(minion, state, deps, rules) <= value.copies
+    ) {
+      return [];
+    }
+
     const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
     const notes: string[] = [];
     if (doomed) notes.push('умрёт при розыгрыше в этот ход — но хрип/перерождение сработают');
     if (value.completesTriple) notes.push('собирает тройку');
-    else if (value.tripleBet) notes.push('вторая копия');
+    else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
     if (minion.golden) notes.push('золотой');
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
     if (value.textTribeMates > 0) {
@@ -1617,7 +1662,7 @@ export function playRules(
       {
         action: 'play' as const,
         minion,
-        score: value.total,
+        score: playValue,
         cost: 0,
         requiresSlot: full && host === null,
         sellFirst: full && host === null ? (victim?.minion ?? null) : null,
@@ -1625,7 +1670,7 @@ export function playRules(
         spellBranches: modal?.branches,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
-          `ценность ${value.total.toFixed(1)}` +
+          `ценность ${playValue.toFixed(1)}` +
           (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
       },
     ];
@@ -2398,12 +2443,53 @@ export function freezeRule(
     return tavernTurnOf(state.turn) + 1;
   };
 
+  /**
+   * Даст ли предложение дешевле покупки ЛИШНЕЕ ТЕЛО — то самое, которое
+   * ветка обещает словами «два тела вместо одного».
+   *
+   * Ветка держит витрину ради того, что предложение стоит меньше трёх
+   * и потому занимает золото, которое иначе сгорит. Но сгорает оно
+   * не всегда: на пяти золотых обычная покупка одна и две монеты пропадают
+   * (лассо за 2 плюс покупка за 3 — уже два тела), а на ШЕСТИ покупок
+   * ровно две, и лассо за 2 плюс покупка за 3 дают те же два тела,
+   * только одно из них случайное. Считать это выгодой значит платить
+   * свежей витриной за худшее из двух одинаковых.
+   *
+   * Ровно на это указал игрок (part29, ход 5 — «5 золота скорее всего
+   * последнее выгодное значение для его заморозки, дальше я уже смогу
+   * покупать два существа за 6 золота и существо + улучшение таверны
+   * за 7»), и тем же счётом закрывается ход 7 той же партии: заморозка
+   * Patient Scout 1/1 обещала цепочку за чистых 2 при семи золотых, где
+   * покупок и без неё две.
+   *
+   * Арифметика, а не порог по тиру: тел без предложения
+   * `⌊золото / 3⌋`, с предложением `1 + ⌊(золото − цена) / 3⌋`, и совет
+   * живёт, только если второе больше первого. На восьми золотых, например,
+   * оно снова больше (2 → 3), и ветка честно возвращается.
+   *
+   * Золото берётся ТОГО хода, который называет сам совет
+   * (`turnAffordingBoth`): на первом ходу таверны заморозка обещает
+   * не следующий ход, а третий — там впервые хватит и на предложение,
+   * и на покупку (part17, ход 1).
+   */
+  const addsExtraBody = (spent: number): boolean => {
+    const gold = Math.min(2 + turnAffordingBoth(spent), 10);
+    const without = Math.floor(gold / rules.minionCost);
+    const withOffer = 1 + Math.floor((gold - spent) / rules.minionCost);
+    return withOffer > without;
+  };
+
   const spellKeeper =
     state.board.length >= rules.boardSize
       ? undefined
       : state.shopSpells
           .flatMap((spell) => {
             if (spell.unplayable || spell.cost <= state.gold) return [];
+            // Цена в ЗДОРОВЬЕ этой веткой не судится: вся ветка про то,
+            // что предложение занимает золото, которое иначе сгорит, —
+            // а здоровьем золото не тратится вовсе. Такое заклинание
+            // покупается сразу, если по карману здоровьем (part29).
+            if (spell.costsHealth) return [];
             // Витрину держат ради заклинания только тогда, когда оно ДЕШЕВЛЕ
             // покупки, — в этом весь смысл ветки (part17, ход 1: тело за два
             // золота там, где покупка стоит три; заморозка ставит на ход,
@@ -2435,6 +2521,9 @@ export function freezeRule(
             const stealsFromShop = rules.givesMinionFromShopWords.some((w) =>
               new RegExp(w, 'i').test(spellText),
             );
+
+            // Ветка обещает ЛИШНЕЕ тело, и обещание проверяется счётом.
+            if (!addsExtraBody(spell.cost)) return [];
 
             const purchases = purchasesAfter(spell.cost);
             const tiered = namedTierPool(spellText, state, deps, rules);
@@ -2475,6 +2564,9 @@ export function freezeRule(
             if (v.copies > 0) return [];
             const spun = sellSpinValue(v.minion, state, deps, rules, false);
             if (spun === null) return [];
+            // То же обещание и та же проверка, что у заклинания: цепочка
+            // стоит витрины, только если её чистая цена даёт лишнее тело.
+            if (!addsExtraBody(spun.net)) return [];
             // Покупок сверх самой цепочки: её чистая цена уже вычтена.
             const bar = spellThresholdOf(purchasesAfter(spun.net));
             return spun.score > bar ? [{ minion: v.minion, spun, score: spun.score - bar }] : [];
@@ -2960,6 +3052,112 @@ export function freeHeroPowerRule(
       `${info?.name ?? hero.heroPowerCardId} бесплатна и обновляет витрину — ` +
       'нажать, когда нынешняя витрина отработана',
   };
+}
+
+/**
+ * Правило силы героя, ВЫСТРЕЛИВАЮЩЕЙ миньоном витрины.
+ *
+ * Фактура — part29 (Scoutmaster Tavish, «Lock and Load» `BG22_HERO_000p_Alt`:
+ * «Remove a minion in the Tavern. When you have space next combat, fire it
+ * at a random enemy minion»). Сила БЕСПЛАТНА, активна (`HAS_ACTIVATE_POWER`
+ * без тега `COST`) и жмётся каждый ход; игрок нажал её 13 раз за партию
+ * и написал: «мне не рекомендует, на кого лучше применить силу героя
+ * (стоит 0, даёт много вэлью на первых ходах)».
+ *
+ * Что делает лог (01:09:37): блок `PLAY` на сущности силы с `Target=`
+ * миньоном витрины, копия цели уходит в `SETASIDE` под нашим контроллером
+ * (`TAG_SCRIPT_DATA_ENT_1` силы), счётчик заряда `TAG_SCRIPT_DATA_NUM_1`
+ * 0 → 1, а сам миньон витрины — в `REMOVEDFROMGAME`. В начале боя заряд
+ * тратится обратно в ноль, копия выходит на пустой слот и меняется ударом
+ * с чужим миньоном (01:10:40: Клыкастый походник получает 4 урона
+ * и уходит).
+ *
+ * Отсюда три следствия, и все три — арифметика, а не мнение:
+ *
+ *  1. **Цель судится БОЕМ, а не покупкой.** Выстреленный миньон живёт один
+ *     размен и не остаётся ни на борде, ни в композиции: тир, племя, копии
+ *     и экономика к нему не относятся вовсе. Считается ровно то, что
+ *     миньон приносит в драку, — статы, ключевые слова и боевой эффект
+ *     текста (`combatValue`), теми же весами, что и везде.
+ *  2. **Стрелять надо тем, чего мы не купим.** Карта уходит из витрины
+ *     насовсем, и выстрел в лучшую покупку — это выстрел себе в ход.
+ *     Отбрасываются `affordable` лучших по обычной ценности, где
+ *     `affordable` ограничено и золотом, и свободными слотами борда:
+ *     купить больше, чем есть места, нельзя. Так игрок и играл — на ходах
+ *     1, 3 и 5 стрелял ровно тем, что оставалось после покупки.
+ *  3. **Без свободного слота выстрела не будет** — это сказано в самом
+ *     тексте силы («when you have space next combat»), и тратить на него
+ *     карту витрины впустую незачем.
+ *
+ * Совет бесплатный, поэтому в плане он не спорит с покупками за золото:
+ * он лишь называет цель. Порядок в списке решают очки цели.
+ */
+export function heroPowerShotRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if ((hero.heroPowerCost ?? 0) > 0) return null;
+  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (state.board.length >= rules.boardSize) return null;
+  if (state.shop.length === 0) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  if (!rules.heroPowerShotWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  // Купить можно не больше, чем позволяют и золото, и место на борде.
+  const affordable = Math.min(
+    Math.floor(state.gold / rules.minionCost),
+    rules.boardSize - state.board.length,
+  );
+  const leftovers = state.shop
+    .map((m) => ({ minion: m, value: minionValue(m, state, deps, rules).total }))
+    .sort((a, b) => b.value - a.value)
+    .slice(affordable);
+  if (leftovers.length === 0) return null;
+
+  const best = leftovers
+    .map((v) => ({ minion: v.minion, shot: combatValue(v.minion, state, deps, rules) }))
+    .sort((a, b) => b.shot - a.shot)[0];
+  if (best === undefined || best.shot <= 0) return null;
+
+  const name = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
+  return {
+    action: 'heroPower',
+    minion: best.minion,
+    score: best.shot,
+    cost: 0,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} бесплатна — выстрелить ` +
+      `${name} ${String(best.minion.attack ?? '?')}/${String(best.minion.health ?? '?')} ` +
+      `(в бою он стоит ${best.shot.toFixed(1)}); ` +
+      'из витрины он уходит насовсем, поэтому стреляем тем, что не покупаем',
+  };
+}
+
+/**
+ * Чего миньон стоит в ОДНОМ бою — без тира, племени, копий и экономики.
+ *
+ * Обычная `minionValue` отвечает на вопрос «стоит ли его купить», и больше
+ * половины её очков — про будущее: тир, соплеменники, тройка, обещание
+ * продажи. У выстреленного миньона будущего нет, он живёт один размен.
+ * Поэтому берутся ровно три слагаемых той же разбивки — статы, ключевые
+ * слова и боевой эффект текста, — и никаких своих весов не заводится.
+ */
+function combatValue(
+  minion: Minion,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): number {
+  const v = minionValue(minion, state, deps, rules);
+  return v.stats + v.keywords + v.battle;
 }
 
 /**
@@ -4201,6 +4399,32 @@ export function spellRules(
 }
 
 /**
+ * Вернётся ли здоровье, которым платят за покупку.
+ *
+ * «After your hero takes damage, rewind it» — текст четырёх карт пула
+ * (Soul Rewinder тира 2, Ashen Corruptor тира 5, Timewarped Rewinder тира 3,
+ * Timewarped Archimonde тира 5), и лог подтверждает, что триггер срабатывает
+ * именно на трату здоровья, а не только на урон боя: part29, 01:14:09 —
+ * блок покупки, `META_DATA - Meta=SPEND_HEALTH Data=3`, броня героя 14 → 11,
+ * следом BLOCK_START TRIGGER на `BG26_174` и броня обратно 14.
+ *
+ * Возвращает ли перемотчик здоровье БЕСКОНЕЧНОЕ число раз, текст не говорит
+ * и ограничения не называет; в part29 он отработал на обеих покупках
+ * и на уроне боёв, вырастая с 4/1 до 25/34. Считаем по тексту: пока такой
+ * миньон на борде, цена в здоровье равна нулю.
+ */
+function healthPriceIsFree(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): boolean {
+  return state.board.some((m) => {
+    const text = deps.cards.info(m.cardId)?.text ?? '';
+    return text !== '' && rules.healthRewindWords.some((w) => new RegExp(w, 'i').test(text));
+  });
+}
+
+/**
  * Правила покупки заклинаний из витрины.
  *
  * У заклинания витрины, в отличие от миньона, цена в логе есть — тег COST
@@ -4215,7 +4439,36 @@ export function shopSpellRules(
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): Recommendation[] {
   return state.shopSpells.flatMap((spell) => {
-    if (spell.unplayable || spell.cost > state.gold) return [];
+    if (spell.unplayable) return [];
+
+    // Цена бывает НЕ в золоте: тег `BACON_COSTS_HEALTH_TO_BUY` на карте
+    // витрины значит, что игра спишет `COST` со здоровья героя, а не
+    // с монет (part29, ход 9: Hasty Excavation «Gain 1 Gold» за 3
+    // здоровья при нулевом золоте). Прежде такое заклинание сравнивалось
+    // с золотом и было невидимо целиком — вдвойне: и «не по карману»,
+    // и «даёт 1 золото, а стоит 3» с отрицательной чистой прибылью.
+    //
+    // Здоровье в очки мы не переводим и переводить не станем: курса
+    // «здоровье → золото» у нас нет, и выдумать его значило бы вписать
+    // в правила мнение. Поэтому ветка живёт ровно там, где курс НЕ НУЖЕН,
+    // — когда здоровье возвращается само. «After your hero takes damage,
+    // rewind it» — читаемый текст четырёх карт пула, и лог подтверждает,
+    // что покупка за здоровье этот триггер запускает: part29, 01:14:09 —
+    // `META_DATA - Meta=SPEND_HEALTH Data=3`, броня 14 → 11, следом
+    // триггер Soul Rewinder и броня обратно 14. Ровно на это игрок
+    // и указал: «купить карту за здоровье, которая будет для меня
+    // бесплатна с учётом существа, который отменяет урон по мне».
+    //
+    // Без такого миньона совет молчит — честнее выдуманного курса.
+    if (spell.costsHealth && !healthPriceIsFree(state, deps, rules)) return [];
+    const goldCost = spell.costsHealth ? 0 : spell.cost;
+    if (goldCost > state.gold) return [];
+    // Цена словами: «за 2» — золото, «за 3 здоровья» — здоровье. Число
+    // одно и то же (тег `COST`), различает их только флаг, и совет обязан
+    // говорить, чем платит игрок.
+    const price = spell.costsHealth
+      ? `${String(spell.cost)} здоровья (их вернёт «перемотка»)`
+      : String(spell.cost);
     const info = deps.cards.info(spell.cardId);
     const name = info?.name ?? spell.cardId;
 
@@ -4231,7 +4484,7 @@ export function shopSpellRules(
       const perRefresh = state.rerollCost;
       const count = Number(refresh);
       if (perRefresh === null || !Number.isFinite(count)) return [];
-      const netGold = count * perRefresh - spell.cost;
+      const netGold = count * perRefresh - goldCost;
       if (netGold <= 0) return [];
       return [
         {
@@ -4239,11 +4492,11 @@ export function shopSpellRules(
           minion: null,
           spellCardId: spell.cardId,
           score: netGold * rules.goldPointValue,
-          cost: spell.cost,
+          cost: goldCost,
           requiresSlot: false,
           sellFirst: null,
           reason:
-            `${name} за ${String(spell.cost)} — ${String(count)} обновлений по ` +
+            `${name} за ${price} — ${String(count)} обновлений по ` +
             `${String(perRefresh)}, чистыми ${String(netGold)} золота`,
         },
       ];
@@ -4253,7 +4506,7 @@ export function shopSpellRules(
     if (effect === null) return [];
 
     if (effect.gold > 0) {
-      const net = effect.gold - spell.cost;
+      const net = effect.gold - goldCost;
       if (net < 0) return [];
       const score = net > 0 ? net * rules.goldPointValue : 0.5;
       return [
@@ -4262,14 +4515,14 @@ export function shopSpellRules(
           minion: null,
           spellCardId: spell.cardId,
           score,
-          cost: spell.cost,
+          cost: goldCost,
           grantsGold: effect.gold,
           requiresSlot: false,
           sellFirst: null,
           reason:
             net > 0
-              ? `${name} за ${String(spell.cost)} даёт ${String(effect.gold)} золота — чистая прибыль`
-              : `${name} за ${String(spell.cost)} — золото про запас, потратится в нужный ход`,
+              ? `${name} за ${price} даёт ${String(effect.gold)} золота — чистая прибыль`
+              : `${name} за ${price} — золото про запас, потратится в нужный ход`,
         },
       ];
     }
@@ -4286,7 +4539,7 @@ export function shopSpellRules(
     // сама — в конце партии предел поднимать уже некуда.
     if (effect.maxGold > 0) {
       const turns = remainingTurns(state, rules);
-      const netGold = effect.maxGold * turns - spell.cost;
+      const netGold = effect.maxGold * turns - goldCost;
       if (netGold <= 0) return [];
       return [
         {
@@ -4294,11 +4547,11 @@ export function shopSpellRules(
           minion: null,
           spellCardId: spell.cardId,
           score: netGold * rules.goldPointValue,
-          cost: spell.cost,
+          cost: goldCost,
           requiresSlot: false,
           sellFirst: null,
           reason:
-            `${name} за ${String(spell.cost)} — предел золота +${String(effect.maxGold)}, ` +
+            `${name} за ${price} — предел золота +${String(effect.maxGold)}, ` +
             `по золотому ещё ${turns.toFixed(1)} ходов таверны, чистыми ${netGold.toFixed(1)}`,
         },
       ];
@@ -4313,11 +4566,11 @@ export function shopSpellRules(
         state,
         deps,
         rules,
-        spell.cost,
+        goldCost,
         true,
         tiered ?? undefined,
       );
-      const cheaper = rules.minionCost - spell.cost;
+      const cheaper = rules.minionCost - goldCost;
       // Модальное «даёт миньона» (The Road Less Traveled, Boundless
       // Potential) спросит игрока сразу после покупки — ветви называются
       // и здесь, а не только у усилений.
@@ -4329,11 +4582,11 @@ export function shopSpellRules(
           spellCardId: spell.cardId,
           spellBranches: branch.branches,
           score,
-          cost: spell.cost,
+          cost: goldCost,
           requiresSlot: false,
           sellFirst: null,
           reason:
-            `${name} за ${String(spell.cost)} даёт миньона — ` +
+            `${name} за ${price} даёт миньона — ` +
             minionSourceNote(tiered, average) +
             (cheaper < 0
               ? `, и это на ${String(-cheaper)} золота ДОРОЖЕ покупки`
@@ -4364,11 +4617,11 @@ export function shopSpellRules(
         targetMinion: aimed.target,
         spellBranches: branch.branches,
         score,
-        cost: spell.cost,
+        cost: goldCost,
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} за ${String(spell.cost)} — ${effect.transforms ? 'замена' : 'усиление'}` +
+          `${name} за ${price} — ${effect.transforms ? 'замена' : 'усиление'}` +
           (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
           (effect.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
@@ -5067,6 +5320,7 @@ export function adviseTavern(
     heroPowerRule(state, deps, rules),
     freeHeroPowerRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),
+    heroPowerShotRule(state, deps, rules),
     ...activationRules(state, deps, rules),
     darkGiftRule(state, deps, rules),
     spinRule(state, deps, rules, buys),

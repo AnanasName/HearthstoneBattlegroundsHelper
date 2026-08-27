@@ -66,7 +66,7 @@ describe('сборка инстансов имитации', () => {
     const state = tavern(3, {
       shop: board([101, 102, 103]),
       shopSpells: [
-        { entityId: 900, cardId: 'SPELL_1', cost: 1, scriptData: [], unplayable: false },
+        { entityId: 900, cardId: 'SPELL_1', cost: 1, scriptData: [], unplayable: false, costsHealth: false },
       ],
     });
     const game = gameOf('a.json', 2, [{ turn: 3, state }], [

@@ -906,6 +906,7 @@ export function createReducer(players: Players): Reducer {
         cost: e.tags.get('COST') ?? 0,
         scriptData: [1, 2, 3, 4].map((i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null),
         unplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
+        costsHealth: flag(e, 'BACON_COSTS_HEALTH_TO_BUY'),
       }));
   };
 

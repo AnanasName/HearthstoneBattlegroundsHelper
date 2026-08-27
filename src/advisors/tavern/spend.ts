@@ -256,6 +256,11 @@ export function applyRecommendation(
       return {
         state: paid({
           hero: hero === null ? null : { ...hero, heroPowerUsedThisTurn: true },
+          // Сила с ЦЕЛЬЮ в витрине забирает карту насовсем («Lock and Load»
+          // Тавиша, part29: миньон уходит в REMOVEDFROMGAME). Без этого
+          // следующий шаг плана мог бы предложить купить то, чем мы только
+          // что выстрелили.
+          shop: rec.minion === null ? state.shop : withoutEntity(state.shop, rec.minion.entityId),
         }),
         opaque: true,
         terminal: false,

@@ -9,6 +9,7 @@ import {
   copiesOwned,
   darkGiftRule,
   freeHeroPowerRule,
+  heroPowerShotRule,
   freezeRule,
   heroPowerPlayStats,
   heroPowerRule,
@@ -1301,17 +1302,33 @@ describe('правило заморозки', () => {
       { id: 'FILLER', name: 'Наполнитель', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
     ]);
     const lassoDeps = { cards: lassoCards };
-    const lasso = { entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false };
+    const lasso = { entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false, costsHealth: false };
     const shop = [
       minion(10, { cardId: 'BODY', techLevel: 2, attack: 4, health: 4 }),
       minion(11, { cardId: 'BODY', techLevel: 2, attack: 3, health: 5 }),
     ];
 
-    const broke = state({ gold: 0, shop, shopSpells: [lasso] });
+    // Ход 3 — это ВТОРОЙ ход таверны: на следующем будет пять золота,
+    // и там лассо за 2 плюс покупка за 3 дают два тела вместо одного
+    // и двух сгоревших. Номер хода тут не декорация: до правки part29
+    // состояние бралось с умолчания `turn: 5`, где следующий ход даёт
+    // ШЕСТЬ золота и тел выходит поровну, — то есть тест назывался
+    // «part17, ход 1», а проверял ход, на котором совета быть не должно.
+    const broke = state({ turn: 3, gold: 0, shop, shopSpells: [lasso] });
     const freeze = freezeRule(broke, lassoDeps);
     expect(freeze?.action).toBe('freeze');
     expect(freeze?.spellCardId).toBe('LASSO');
     expect(freeze?.minion).toBeNull();
+
+    // На ходу 5 (третий ход таверны) следующий ход даёт шесть золота:
+    // две покупки и без лассо, и с ним — лишнего тела нет, витрины это
+    // не стоит (part29, ход 5 — «5 золота скорее всего последнее выгодное
+    // значение для его заморозки»).
+    expect(freezeRule({ ...broke, turn: 5 }, lassoDeps)).toBeNull();
+    // А на ходу 9 (пятый ход таверны, восемь золота следующим) лишнее
+    // тело снова появляется: две покупки без лассо против лассо и двух
+    // покупок с ним. Порога по тиру у ветки нет — есть арифметика.
+    expect(freezeRule({ ...broke, turn: 9 }, lassoDeps)?.action).toBe('freeze');
 
     // По карману — покупать, а не морозить.
     expect(freezeRule({ ...broke, gold: 2 }, lassoDeps)).toBeNull();
@@ -1435,7 +1452,7 @@ describe('покупка заклинаний витрины (part11)', () => {
     cardId: string,
     cost: number,
     scriptData: (number | null)[] = [null, null, null, null],
-  ) => ({ entityId: 800, cardId, cost, scriptData, unplayable: false });
+  ) => ({ entityId: 800, cardId, cost, scriptData, unplayable: false, costsHealth: false });
 
   it('бафф по карману советуется с целью', () => {
     const s = state({
@@ -1484,7 +1501,7 @@ describe('покупка заклинаний витрины (part11)', () => {
         minion(10, { cardId: 'BODY', techLevel: 2, attack: 4, health: 4 }),
         minion(11, { cardId: 'BODY', techLevel: 2, attack: 3, health: 5 }),
       ],
-      shopSpells: [{ entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false }],
+      shopSpells: [{ entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false, costsHealth: false }],
     });
     const rec = shopSpellRules(s, { cards: lassoCards })[0];
     expect(rec?.action).toBe('buy');
@@ -1618,7 +1635,7 @@ describe('заклинания руки', () => {
     cardId,
     cost: 0,
     scriptData: [null, null],
-    unplayable: false,
+    unplayable: false, costsHealth: false,
     ...patch,
   });
 
@@ -1880,7 +1897,7 @@ describe('заклинания руки', () => {
   it('заблокированное и не по карману заклинание не советуется', () => {
     const locked = state({
       board: [minion(1, { cardId: 'MINION_X' })],
-      handSpells: [handSpell('BUFF', { scriptData: [4, 2], unplayable: true })],
+      handSpells: [handSpell('BUFF', { scriptData: [4, 2], unplayable: true, costsHealth: false })],
     });
     expect(spellRules(locked, spellDeps)).toHaveLength(0);
 
@@ -1907,9 +1924,12 @@ describe('правило розыгрыша из руки', () => {
     const alone = state({ hand: [shopMinion(9, 'MURLOC_1')] });
     expect(playRules(alone, deps)[0]?.reason).not.toContain('копия');
 
-    // А настоящая пара в руке — считается.
+    // А настоящая пара в руке — считается. Причина при этом говорит,
+    // что ставка живёт В РУКЕ: розыгрыш числа копий не меняет (игра
+    // считает копии руки наравне с бордом — тег `BACON_PAIR_CANDIDATE`),
+    // и бонус за копию в очки розыгрыша не входит (part29, ход 19).
     const pair = state({ hand: [shopMinion(9, 'MURLOC_1'), shopMinion(10, 'MURLOC_1')] });
-    expect(playRules(pair, deps)[0]?.reason).toContain('вторая копия');
+    expect(playRules(pair, deps)[0]?.reason).toContain('ставка на тройку живёт и в руке');
   });
 
   it('на полном борде — только через продажу кого-то слабее', () => {
@@ -2712,7 +2732,7 @@ describe('заклинание-жертва: «Destroy a friendly …»', () => 
     { id: 'UND_BIG', name: 'Крупная нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 3 },
     { id: 'UND_SMALL', name: 'Мелкая нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 1 },
   ]);
-  const butcher = { entityId: 50, cardId: 'BUTCHER', cost: 2, scriptData: [6, 2], unplayable: false };
+  const butcher = { entityId: 50, cardId: 'BUTCHER', cost: 2, scriptData: [6, 2], unplayable: false, costsHealth: false };
 
   it('целится в наименьшего своего подходящего племени (part13, ход 21)', () => {
     const s = state({
@@ -2782,6 +2802,76 @@ describe('бесплатная сила героя', () => {
     expect(
       freeHeroPowerRule(state({ hero: chromie({ heroPowerCardId: 'DMG_P' }) }), chromieDeps),
     ).toBeNull();
+  });
+});
+
+describe('сила героя, ВЫСТРЕЛИВАЮЩАЯ миньоном витрины (part29, Тавиш)', () => {
+  const tavishCards = createCardIndex([
+    {
+      id: 'LOCK',
+      name: 'На изготовку!',
+      text: '[x]Remove a minion in the\nTavern. When you have\nspace next combat, fire it at\na random enemy minion.',
+    },
+    { id: 'BIG', name: 'Крупный', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    { id: 'SMALL', name: 'Мелкий', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
+    { id: 'FILLER', name: 'Свой', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
+  ]);
+  const tavish = (patch: Partial<Hero> = {}): Hero => ({
+    ...hero(30),
+    heroPowerCardId: 'LOCK',
+    heroPowerEntityId: 181,
+    heroPowerCost: null,
+    heroPowerHasActivate: true,
+    ...patch,
+  });
+  const tavishDeps = { cards: tavishCards };
+  const shop = [
+    minion(10, { cardId: 'BIG', techLevel: 3, attack: 6, health: 6 }),
+    minion(11, { cardId: 'SMALL', techLevel: 1, attack: 2, health: 2 }),
+  ];
+
+  it('при нулевом золоте стреляем лучшим телом витрины', () => {
+    const s = state({ hero: tavish(), gold: 0, shop });
+    const rec = heroPowerShotRule(s, tavishDeps);
+    expect(rec?.action).toBe('heroPower');
+    expect(rec?.cost).toBe(0);
+    expect(rec?.minion?.cardId).toBe('BIG');
+  });
+
+  it('на деньги стреляем тем, чего НЕ купим: лучшая покупка не цель', () => {
+    // Три золота — одна покупка, и она достанется крупному телу; сила
+    // забирает карту из витрины насовсем, поэтому целью остаётся мелкий.
+    const s = state({ hero: tavish(), gold: 3, shop });
+    expect(heroPowerShotRule(s, tavishDeps)?.minion?.cardId).toBe('SMALL');
+  });
+
+  it('свободных слотов нет — молчим: выстрела не будет', () => {
+    const s = state({
+      hero: tavish(),
+      gold: 0,
+      shop,
+      board: Array.from({ length: 7 }, (_, i) => minion(20 + i, { cardId: 'FILLER' })),
+    });
+    expect(heroPowerShotRule(s, tavishDeps)).toBeNull();
+  });
+
+  it('покупок больше, чем слотов, не бывает — цель находится и на богатом ходу', () => {
+    // Десять золота — это три покупки, но свободный слот один: витрина
+    // из двух карт целиком «по карману» лишь на бумаге.
+    const s = state({
+      hero: tavish(),
+      gold: 10,
+      shop,
+      // Борд из ЧУЖИХ карт: копии витрины подняли бы мелкого в ценности
+      // и перевернули бы порядок, который тест и проверяет.
+      board: Array.from({ length: 6 }, (_, i) => minion(30 + i, { cardId: 'FILLER' })),
+    });
+    expect(heroPowerShotRule(s, tavishDeps)?.minion?.cardId).toBe('SMALL');
+  });
+
+  it('другая бесплатная сила выстрелом не считается', () => {
+    const s = state({ hero: tavish({ heroPowerCardId: 'SMALL' }), gold: 0, shop });
+    expect(heroPowerShotRule(s, tavishDeps)).toBeNull();
   });
 });
 
@@ -3067,7 +3157,7 @@ describe('заклинание-замена: «Destroy … to get …»', () => 
   });
 
   it('советуется на наименьшую нежить, а без нежити молчит', () => {
-    const spell = { entityId: 50, cardId: 'JAILER_T', cost: 0, scriptData: [], unplayable: false };
+    const spell = { entityId: 50, cardId: 'JAILER_T', cost: 0, scriptData: [], unplayable: false, costsHealth: false };
     const s = state({
       gold: 0,
       board: [
@@ -3278,7 +3368,7 @@ describe('кэш ожидания по пулу тиров', () => {
       cardId: 'BUFF',
       cost: 0,
       scriptData: [1, 1],
-      unplayable: false,
+      unplayable: false, costsHealth: false,
     };
 
     const withSpell = giftState(board, { handSpells: [spell] });
@@ -3335,7 +3425,7 @@ describe('дневной заряд магнита-хранителя', () => {
     cardId: 'CRAFTERt',
     cost: 0,
     scriptData: [] as readonly (number | null)[],
-    unplayable: false,
+    unplayable: false, costsHealth: false,
   });
 
   it('одно заклинание руки — одна выгода', () => {
@@ -3381,7 +3471,7 @@ describe('дневной заряд магнита-хранителя', () => {
       cardId: 'BUFF',
       cost: 0,
       scriptData: [] as readonly (number | null)[],
-      unplayable: false,
+      unplayable: false, costsHealth: false,
     });
 
     const one = minionValue(grower, state({ board: [], handSpells: [buff(50)] }), g).spellMagnet;
