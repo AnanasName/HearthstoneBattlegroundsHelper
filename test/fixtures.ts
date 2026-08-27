@@ -492,6 +492,24 @@ export function part32Game(): string {
 }
 
 /**
+ * part33 — двадцать пятая партия с оверлеем (28.08.2026, 01:08–01:29,
+ * Ал'акир `TB_BaconShop_HERO_76`, элементали, 5-е место), седьмая
+ * на билде 250339. Вопрос игрока один: «учитывал ли ты при советах силу
+ * героя» — «Назойливые мухи» `TB_BaconShop_HP_086` («Start of Combat:
+ * Give your left-most minion Windfury, Divine Shield, and Taunt»), ПАССИВНАЯ:
+ * `START_OF_COMBAT=1`, без `HAS_ACTIVATE_POWER` и без `COST`, ни одного
+ * блока PLAY за партию; срабатывает блоком TRIGGER в начале каждого боя
+ * (11 боёв) на миньоне с `zonePos=1` — энчант `TB_BaconShop_HERO_76_Buddy_e`.
+ * Скриншот — ход 9 (01:13:56, сразу после подъёма на тир 4 за все семь
+ * золотых): борд Molten Rock 3/4, Crackling Cyclone 2/1, Ominous Seer 2/1,
+ * Buzzing Vermin 1/1; оверлей «НИЧЕГО» и «расстановка: менять нечего
+ * (55% побед, в среднем по полю из 4 бордов)».
+ */
+export function part33Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part33', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция

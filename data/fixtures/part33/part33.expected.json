@@ -1,0 +1,94 @@
+{
+  "$comment": [
+    "Партия 28.08.2026 (01:08–01:29) — двадцать пятая партия с оверлеем",
+    "(Ал'акир TB_BaconShop_HERO_76, элементали, 5-е место) и седьмая на билде",
+    "250339. Лог взят из каталога клиента Hearthstone_2026_08_28_01_07_50.",
+    "",
+    "Вопрос игрока один, по одному скриншоту: «учитывал ли ты при советах силу",
+    "героя». Сила «Назойливые мухи» TB_BaconShop_HP_086 — «Start of Combat: Give",
+    "your left-most minion Windfury, Divine Shield, and Taunt», ПАССИВНАЯ:",
+    "на сущности START_OF_COMBAT=1, BACON_HERO_POWER_ACTIVATED=1, HIDE_COST=1,",
+    "тегов HAS_ACTIVATE_POWER и COST нет, за партию ни одного блока PLAY.",
+    "Срабатывает блоком TRIGGER на силе в начале каждого боя (11 боёв):",
+    "META_DATA Meta=TARGET с миньоном zonePos=1, на нём WINDFURY/TAUNT/",
+    "DIVINE_SHIELD=1 и энчант TB_BaconShop_HERO_76_Buddy_e (CREATOR=сила);",
+    "к следующей таверне слов на миньоне нет.",
+    "",
+    "Ответ разбора: в БОЮ сила учитывалась — маппер передаёт heroPowers",
+    "симулятору, а тот реализует Swatting Insects (pre-combat, первый миньон",
+    "борда). На состоянии хода 9 против поля из четырёх бордов «как стоит»",
+    "даёт 100/100/21/0 = 55% побед — число со скриншота; без силы против",
+    "Fleeing Fugitive 7/10 было бы 0% (50% по полю). В ТАВЕРНЕ сила",
+    "не учитывалась: ценность покупки читает текст силы только на племя,",
+    "продажу, статы за розыгрыш и активное «give a minion <слово>» —",
+    "у всех кандидатов партии слагаемое «герой» равно нулю.",
+    "",
+    "Цели силы по боям (лог): ходы 2–10 — Molten Rock BGS_127 (крайний левый",
+    "все пять боёв); 12–20 — Wildfire Elemental BGS_126; 22 — Living Prison",
+    "BG36_180.",
+    "",
+    "Пометки: «скриншот из чата» — сверено по картинке в чате;",
+    "«лог» — прочитано из Power.log."
+  ],
+  "player": {
+    "name": "AngryMem#2886",
+    "playerId": 6,
+    "hero": "TB_BaconShop_HERO_76",
+    "heroName": "Ал'акир",
+    "verifiedBy": "лог"
+  },
+  "buildNumber": 250339,
+  "finalPlace": 5,
+  "heroPower": {
+    "cardId": "TB_BaconShop_HP_086",
+    "name": "Назойливые мухи",
+    "passive": true,
+    "tags": ["START_OF_COMBAT=1", "BACON_HERO_POWER_ACTIVATED=1", "HIDE_COST=1"],
+    "presses": 0,
+    "combatTriggers": 11,
+    "verifiedBy": "лог"
+  },
+  "checkpoints": [
+    {
+      "turn": 9,
+      "tavernTurn": 5,
+      "time": "01:13:56",
+      "moment": "посреди хода, сразу после подъёма на тир 4 за все семь золотых",
+      "phase": "tavern",
+      "techLevel": 4,
+      "gold": 0,
+      "goldMax": 7,
+      "hp": "30+6",
+      "board": [
+        "Molten Rock 3/4",
+        "Crackling Cyclone 2/1 (щит, вихрь)",
+        "Ominous Seer 2/1",
+        "Buzzing Vermin 1/1 (провокация)"
+      ],
+      "shop": ["Accord-o-Tron 3/3", "Ominous Seer 2/1", "Oozeling Gladiator 2/2", "Cord Puller 1/1 (щит)"],
+      "shopSpells": ["Enchanted Lasso за 2 (BG28_512)"],
+      "heroPower": { "cardId": "TB_BaconShop_HP_086", "cost": null, "active": false, "used": false },
+      "overlay": {
+        "list": [
+          "НИЧЕГО",
+          "следующим ходом — выбор тринкета; предложение подбирается под борд, своих 2+: ELEMENTAL ×2"
+        ],
+        "position": "менять нечего (55% побед, в среднем по полю из 4 бордов, давность 1–7 ходов, 2524 мс)"
+      },
+      "verifiedBy": "скриншот из чата"
+    },
+    {
+      "turn": 9,
+      "tavernTurn": 5,
+      "time": "01:13:14–01:14:42",
+      "moment": "точка решения: тир 3, золото 7/7, та же витрина; подъём за 7 в 01:13:56 — единственная трата хода",
+      "verifiedBy": "лог"
+    },
+    {
+      "turn": 10,
+      "time": "01:14:43",
+      "moment": "начало боя: TRIGGER силы, Info[0] = Molten Rock zonePos=1, WINDFURY/TAUNT/DIVINE_SHIELD=1; бой проигран (4 против 4)",
+      "verifiedBy": "лог"
+    }
+  ]
+}
