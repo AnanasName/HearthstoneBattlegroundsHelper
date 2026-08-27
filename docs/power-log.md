@@ -876,6 +876,40 @@ BLOCK_START BlockType=PLAY Entity=[… cardId=BG28_966 player=2] … Target=0
 энчанта. Совет по такому заклинанию не имеет права называть цель
 на нашем борде.
 
+## Сила героя на СВОЕГО миньона, EXHAUSTED на силе, тринкет за золото (part32)
+
+**Сила с целью на своём борде.** «Ритуал перерождения» Короля-лича
+`TB_BaconShop_HP_024` («Give a minion Reborn until next turn») создаётся
+вместе с героем: `CARDTYPE=HERO_POWER`, `HAS_ACTIVATE_POWER=1`, тега `COST`
+нет вовсе (бесплатна — тот же признак, что у Хроми part13 и Тавиша part29).
+Нажатие — блок `PLAY` на сущности силы с `Target=` СВОИМ миньоном
+(`player=8`, зона `PLAY`), на цели появляется энчант `TB_BaconShop_HP_024e2`
+(«Reborn until next turn»); 16 нажатий за партию — 16 блоков:
+
+```
+23:49:36 BLOCK_START BlockType=PLAY Entity=[entityName=Ритуал перерождения id=121 … cardId=TB_BaconShop_HP_024 player=8]
+         … Target=[entityName=Бликостраж id=307 zone=PLAY zonePos=1 cardId=BG29_888 player=8] SubOption=-1
+```
+
+**`EXHAUSTED` на силе — впервые.** До part32 запись гласила, что тег
+`EXHAUSTED` на силах в фикстурах не встречается ни разу. Здесь он есть:
+`EXHAUSTED=1` на силе сразу после блока PLAY (23:49:36) и `EXHAUSTED=0`
+в начале следующего хода таверны (23:49:51). «Нажато в этом ходу»
+по-прежнему считается блоком PLAY — так работает на всех силах, включая
+те, где тега нет, — а тег записан как подтверждение, не как источник.
+
+**Тринкет стоит ЗОЛОТА, и цена — тег `COST` на его сущности.** Предложение
+хода 11 (23:54:17): два варианта в `SETASIDE` с `BACON_TRINKET=1`
+и живой ценой при создании — `COST=4` (Baleful Incense `BG32_MagicItem_360`,
+рядом `TAG_LAST_KNOWN_COST_IN_HAND=4`) и `COST=2` (Transcribing Typewriter
+`BG35_MagicItem_931`). Выбор — `DebugPrintEntitiesChosen` (23:54:54),
+следом трата БЕЗ блока PLAY: верхнеуровневый `TAG_CHANGE … tag=RESOURCES_USED
+value=4` (23:54:55), `BACON_FIRST_TRINKET_DATABASE_ID=120137` на герое,
+`NUM_RESOURCES_SPENT_THIS_GAME` растёт на те же четыре. Золото состояние
+читает верно (`RESOURCES − RESOURCES_USED`), а совет по выбору тринкета
+цены не знает — на скриншоте хода 11 у игрока 4/8 при витрине точки
+решения, которая видела 8.
+
 ## Заклинания в руке и плейсхолдеры текстов
 
 Заклинания приходят обычными сущностями с `CARDTYPE=SPELL`. Факты part10:
