@@ -2088,6 +2088,90 @@ function rerollFreezeGoal(
 }
 
 /**
+ * Есть ли у золота применение, кроме обновления витрины.
+ *
+ * Перечислены все действия, которые тратят ЗОЛОТО: покупка миньона
+ * (по живой цене со скидкой), заклинание витрины (кроме цены в здоровье —
+ * она золота не трогает), подъём таверны, тёмный дар, платная сила героя.
+ * Розыгрыши из руки и заморозка золота не тратят и в список не входят.
+ */
+function goldHasOtherUse(state: GameState, rules: TavernRules): boolean {
+  const gold = state.gold;
+  if (state.shop.some((m) => buyCostOf(m, rules) <= gold)) return true;
+  if (state.shopSpells.some((s) => !s.unplayable && !s.costsHealth && s.cost <= gold)) {
+    return true;
+  }
+  const upgrade = state.tavernUpgradeCost;
+  if (upgrade !== null && upgrade <= gold) return true;
+  const dark = state.darkGiftCost;
+  if (dark !== null && dark <= gold) return true;
+  const hero = state.hero;
+  if (
+    hero !== null &&
+    hero.heroPowerCost !== null &&
+    hero.heroPowerCost > 0 &&
+    hero.heroPowerCost <= gold &&
+    !hero.heroPowerUsedThisTurn &&
+    !hero.heroPowerUnplayable
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Обновление как СТОК сгорающего золота (part30, ход 19).
+ *
+ * Золото 1/10, борд полон, в витрине ничего дешевле трёх: золотой сгорит
+ * концом хода, а совет говорил «НИЧЕГО». Игрок: «я могу на крайний случай
+ * потратить золото на обновление — это позволит активировать эффекты моих
+ * карт, а это золото я потеряю в любом случае». На его борде трату считали
+ * ДВОЕ: Dual-Wield Corsair («Whenever you spend 5 Gold…») и Enterprising
+ * Escapee («After you spend {2} Gold…») — и последний золотой он потратил
+ * на обновление сам.
+ *
+ * Границы. Сгорание — не мнение, а перебор всех трат (`goldHasOtherUse`);
+ * без триггера трат или обновления на борде совет по-прежнему молчит —
+ * это граница part27 («цель обязана быть названа»), и обновление ради
+ * пустого взгляда ею и остаётся. Бесплатное обновление стоком не является:
+ * оно не тратит золота, и сгорание его не касается. Замороженная витрина
+ * и живой совет заморозки выключают ветку — обновление уничтожило бы то,
+ * что решено держать.
+ */
+function burningGoldSink(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  cost: number,
+): Recommendation | null {
+  if (cost <= 0 || state.gold < cost) return null;
+  if (goldHasOtherUse(state, rules)) return null;
+  if (state.shop.some((m) => m.frozen)) return null;
+
+  const feeders = state.board.filter((m) => {
+    const text = deps.cards.info(m.cardId)?.text ?? '';
+    return rules.goldSinkTriggerWords.some((w) => new RegExp(w, 'i').test(text));
+  });
+  if (feeders.length === 0) return null;
+  if (freezeRule(state, deps, rules) !== null) return null;
+
+  const names = feeders
+    .map((m) => deps.cards.info(m.cardId)?.name ?? m.cardId)
+    .filter((name, i, all) => all.indexOf(name) === i);
+  return {
+    action: 'reroll',
+    minion: null,
+    score: rules.goldSinkRerollValue,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    reason:
+      `золото ${String(state.gold)} сгорит — тратить больше не на что, ` +
+      `а обновление за ${String(cost)} кормит триггеры трат: ${names.join(', ')}`,
+  };
+}
+
+/**
  * Правило обновления витрины.
  *
  * Советуется, когда покупать нечего: лучший кандидат ниже порога. Отдельно
@@ -2101,6 +2185,12 @@ export function rerollRule(
 ): Recommendation | null {
   const cost = rerollCostOf(state, rules);
   if (state.gold < cost) return null;
+
+  // Сгорающее золото — сток в триггеры борда: проверяется ДО всех прочих
+  // условий, потому что они судят обновление как ТРАТУ («полезно ли платить»),
+  // а сгорающему золоту цена — ноль (part30, ход 19).
+  const sink = burningGoldSink(state, deps, rules, cost);
+  if (sink !== null) return sink;
   // Обновление ради взгляда — потеря золота: найденное должно быть на что
   // купить (part18, ход 7).
   if (!paidRerollIsUseful(state, rules)) return null;
@@ -2716,21 +2806,44 @@ function givesMinionValue(
   // ПУЛ ТИРА. Пул передаётся тиром, а не материализованным списком: ожидание
   // по нему считает `averagePoolValue`, у которого есть кэш по борду, — иначе
   // сотня `minionValue` пересчитывалась бы на каждый вызов правила.
-  pool: readonly Minion[] | { readonly tier: number } = state.shop,
+  // Третий источник — пул НАЗВАННОГО ПЛЕМЕНИ (part30, «Discover a Mech»):
+  // тиры от первого до своего, фильтр по расе, а `discover` меняет само
+  // ожидание — Discover это ВЫБОР, и берётся лучший из трёх, а не средний.
+  pool: readonly Minion[] | TierPoolSource | { readonly tier: number } = state.shop,
 ): { readonly score: number; readonly average: number; readonly discounted: boolean } {
   const fallback = rules.value.perTechLevel * state.techLevel;
   const average =
     'tier' in pool
       ? (averagePoolValue([pool.tier], state, deps, rules) ?? fallback)
-      : pool.length > 0
-        ? pool.reduce((sum, m) => sum + minionValue(m, state, deps, rules).total, 0) / pool.length
-        : fallback;
+      : 'tiers' in pool
+        ? ((pool.discover
+            ? discoverPoolValue(pool.tiers, state, deps, rules, pool.race)
+            : averagePoolValue(pool.tiers, state, deps, rules, pool.race)) ?? fallback)
+        : pool.length > 0
+          ? pool.reduce((sum, m) => sum + minionValue(m, state, deps, rules).total, 0) / pool.length
+          : fallback;
 
   // Скидка засчитывается не всегда (см. выше), наценка — всегда: лишнее
   // золото уходит независимо от того, на что хватило бы остатка.
   const delta = (rules.minionCost - cost) * rules.goldPointValue;
   const discounted = delta <= 0 || !spendNow || state.gold - cost >= rules.minionCost;
   return { score: average + (discounted ? delta : 0), average, discounted };
+}
+
+/**
+ * Пул миньонов названного племени — источник для `givesMinionValue`.
+ *
+ * `discover` различает два обещания текста, и различие это арифметика,
+ * а не вес: «Get a random Quilboar» приносит СЛУЧАЙНУЮ карту пула
+ * (ожидание — среднее), а «Discover a Mech» даёт ВЫБОР из трёх —
+ * ожидание лучшего из трёх случайных (part30, ход 1: средний мех
+ * первого тира стоит 6.25, а выбор из Lullabot 5.0 и Cord Puller 7.5
+ * почти всегда отдаёт Cord Puller — его игрок и взял).
+ */
+interface TierPoolSource {
+  readonly tiers: readonly number[];
+  readonly race: string;
+  readonly discover: boolean;
 }
 
 /** Первая захваченная группа первого совпавшего шаблона — или `null`. */
@@ -2947,6 +3060,77 @@ const POOL_VALUE_CACHE = new WeakMap<
   WeakMap<CardIndex, WeakMap<object, Map<string, number>>>
 >();
 
+/**
+ * Ожидание ЛУЧШЕГО из трёх случайных карт пула — то, что на деле обещает
+ * «Discover»: три карты предложены, берётся одна.
+ *
+ * Это не надбавка-мнение, а другая случайная величина на той же шкале:
+ * средним меряется «Get a random X», а у выбора из трёх ожидание считается
+ * по порядковой статистике — P(максимум = i-я по возрастанию) =
+ * C(i−1, 2) / C(n, 3) при выборе трёх без повторов. Пул меньше трёх карт
+ * отдаёт лучшую: снапшот не несёт числа копий (записанное допущение
+ * `averagePoolValue`), и предложение из двух карт почти наверняка содержит
+ * обе. У тёмного дара надбавки за выбор по-прежнему нет (`bonus: 0`,
+ * part24) — там пул искажён самим даром, и оценка нижняя сознательно.
+ *
+ * Кэш и его ключ — те же, что у `averagePoolValue`, с собственным
+ * префиксом: зависимости ответа ровно те же.
+ */
+function discoverPoolValue(
+  tiers: readonly number[],
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  race: string | null = null,
+): number | null {
+  const key =
+    `best3|${tiers.join(',')}|${race ?? ''}` +
+    `|${state.hand.map((m) => `${m.cardId}${m.golden ? '_G' : ''}`).join(',')}` +
+    `|${state.handSpells.map((s) => `${s.cardId}:${s.scriptData.join('.')}`).join(',')}` +
+    `|${state.hero?.heroPowerCardId ?? ''}`;
+
+  let byCards = POOL_VALUE_CACHE.get(rules);
+  if (byCards === undefined) {
+    byCards = new WeakMap();
+    POOL_VALUE_CACHE.set(rules, byCards);
+  }
+  let byBoard = byCards.get(deps.cards);
+  if (byBoard === undefined) {
+    byBoard = new WeakMap();
+    byCards.set(deps.cards, byBoard);
+  }
+  let byKey = byBoard.get(state.board);
+  if (byKey === undefined) {
+    byKey = new Map();
+    byBoard.set(state.board, byKey);
+  }
+  const cached = byKey.get(key);
+  if (cached !== undefined) return cached;
+
+  const whole = tiers.flatMap((t) => tierPool(t, deps));
+  const pool =
+    race === null
+      ? whole
+      : whole.filter((m) => deps.cards.info(m.cardId)?.races.includes(race) ?? false);
+  if (pool.length === 0) return null;
+
+  const values = pool
+    .map((m) => minionValue(m, state, deps, rules).total)
+    .sort((a, b) => a - b);
+  const n = values.length;
+  let value: number;
+  if (n < 3) {
+    value = values[n - 1] ?? 0;
+  } else {
+    // C(n, 3) знаменателем, C(i, 2) — способы добрать двух снизу к максимуму.
+    const total = (n * (n - 1) * (n - 2)) / 6;
+    value =
+      values.reduce((sum, v, i) => sum + (v * (i * (i - 1))) / 2, 0) / total;
+  }
+  byKey.set(key, value);
+  return value;
+}
+
 /** Тиры, из которых витрина набирает карты: от первого до своего. */
 function shopTiers(techLevel: number): number[] {
   return Array.from({ length: Math.max(1, techLevel) }, (_, i) => i + 1);
@@ -2967,17 +3151,25 @@ export function heroPowerRule(
 
   const info = deps.cards.info(hero.heroPowerCardId);
   const text = info?.text ?? '';
-  if (!rules.givesMinionWords.some((w) => new RegExp(w, 'i').test(text))) return null;
 
-  const tiered = namedTierPool(text, state, deps, rules);
-  const { score, average, discounted } = givesMinionValue(
-    state,
-    deps,
-    rules,
-    cost,
-    true,
-    tiered ?? undefined,
-  );
+  // Миньона обещает и ПЛЕМЯ без слова «minion»: «Discover a Mech. Swaps
+  // type each turn» у Крысиного короля (part30) — тот же случай, что
+  // «Discover a Naga» в выборе сил (part26), только здесь сила НАЖИМАЕТСЯ
+  // и у неё есть живая цена. Разбор общий — `tribeMinionRace`.
+  const race = tribeMinionRace(text, rules);
+  if (race === null && !rules.givesMinionWords.some((w) => new RegExp(w, 'i').test(text))) {
+    return null;
+  }
+
+  const source =
+    race !== null
+      ? {
+          tiers: shopTiers(state.techLevel),
+          race,
+          discover: /\bdiscover\b/i.test(text),
+        }
+      : (namedTierPool(text, state, deps, rules) ?? undefined);
+  const { score, average, discounted } = givesMinionValue(state, deps, rules, cost, true, source);
 
   return {
     action: 'heroPower',
@@ -2988,7 +3180,7 @@ export function heroPowerRule(
     sellFirst: null,
     reason:
       `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} даёт миньона — ` +
-      `${minionSourceNote(tiered, average)}` +
+      `${minionSourceNote(source ?? null, average)}` +
       (discounted && cost < rules.minionCost
         ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки`
         : ''),
@@ -3003,12 +3195,19 @@ export function heroPowerRule(
  * тире разница между ними и есть весь вопрос (part23, ход 11).
  */
 function minionSourceNote(
-  tiered: { readonly tier: number } | null,
+  tiered: { readonly tier: number } | TierPoolSource | null,
   average: number,
 ): string {
-  return tiered === null
-    ? `как средний из витрины (${average.toFixed(1)})`
-    : `как средний миньон тира ${String(tiered.tier)} (${average.toFixed(1)})`;
+  if (tiered === null) return `как средний из витрины (${average.toFixed(1)})`;
+  if ('tiers' in tiered) {
+    const top = tiered.tiers[tiered.tiers.length - 1] ?? 1;
+    const range = top <= 1 ? 'тира 1' : `тиров 1–${String(top)}`;
+    // Discover — выбор, и обещание другое: «лучший из трёх», а не средний.
+    return tiered.discover
+      ? `как лучший из трёх ${tiered.race} ${range} (${average.toFixed(1)})`
+      : `как случайный ${tiered.race} ${range} (${average.toFixed(1)})`;
+  }
+  return `как средний миньон тира ${String(tiered.tier)} (${average.toFixed(1)})`;
 }
 
 /**
@@ -3347,6 +3546,26 @@ export function activationRules(
 export interface SpellEffect {
   /** Золото, которое даст розыгрыш: «Gain 1 Gold» у монетки таверны. */
   readonly gold: number;
+  /**
+   * Золото, которое придёт НЕ в этот ход: «Gain 2 Gold next turn»
+   * (Careful Investment, part30), «Gain 4 Gold in two turns» (ветвь Grace
+   * Farsail).
+   *
+   * Отдельно от `gold` по той же причине, что `maxGold`: это разные
+   * величины. `gold` доезжает до следующего шага плана как живое
+   * (`grantsGold`), а отложенное золото в этот ход потратить нельзя —
+   * смешение делало дар за 3 «по карману» при двух золотых (скриншот
+   * игрока: «предлагает сделать ход, на который у меня нет денег»).
+   */
+  readonly goldNextTurn: number;
+  /**
+   * Статы ложатся на МИНЬОНОВ ВИТРИНЫ, а не на наш борд: «Give minions
+   * in the Tavern +{0}/+{1}» (Them Apples, part30). Лог: блок PLAY
+   * с `Target=0`, энчанты — на сущностях `player=10`. Цель у такого
+   * заклинания не называется, а статы доезжают до нас только через
+   * покупку усиленного миньона.
+   */
+  readonly buffsShop: boolean;
   /** Сумма статов усиления: «+{0} Attack», «+X/+Y». */
   readonly stats: number;
   /**
@@ -3486,7 +3705,11 @@ function branchScore(effect: SpellEffect, rules: TavernRules): number {
     effect.stats * rules.value.perStatPoint +
     (effect.divineShield ? rules.value.divineShield : 0) +
     (effect.grantsTaunt ? rules.value.taunt : 0) +
-    effect.gold * rules.goldPointValue +
+    // Отложенное золото ветви считается тем же курсом: для СРАВНЕНИЯ
+    // ветвей между собой ход задержки почти ничего не меняет (Grace
+    // Farsail: «Gain 2 Gold next turn; or Gain 4 Gold in two turns»),
+    // а нулём оно делало бы ветвь невидимой.
+    (effect.gold + effect.goldNextTurn) * rules.goldPointValue +
     (effect.givesMinion ? rules.minionCost * rules.goldPointValue : 0)
   );
 }
@@ -3950,7 +4173,18 @@ function computeSpellEffect(
     if (modal !== null) return modal;
   }
 
-  const gold = /gain (\d+) gold/i.exec(text);
+  // Кровавые самоцветы не оцениваются (граница part28), и молчать надо
+  // ЗДЕСЬ, а не полагаться на нули: у Gem Day (part30) ветвей-карт
+  // в снапшоте нет, и текст родителя складывал обе ветви в «+2 статов»
+  // разового баффа — тихо неверное число вместо честного «не берёмся».
+  // Проверка стоит ПОСЛЕ разбора ветвей: модальному миньону с одной
+  // самоцветной ветвью вторая обязана остаться видимой.
+  if (rules.bloodGemWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  // «Gain 2 Gold next turn» / «Gain 4 Gold in two turns» — золото
+  // ОТЛОЖЕННОЕ, и складывать его с живым нельзя (part30, ход 9).
+  const gold = /gain\s+(\d+)\s+gold(\s+next\s+turn|\s+in\s+two\s+turns)?/i.exec(text);
+  const deferredGold = gold?.[2] !== undefined;
 
   // Числа усиления: литерал или плейсхолдер-индекс в теги сущности.
   // Заодно считается, сколько из них выветрится: пометка временности
@@ -3990,10 +4224,15 @@ function computeSpellEffect(
 
   const grantsTaunt = /\btaunt\b/i.test(text);
 
+  // Статы ложатся на витрину, а не на наш борд, — Them Apples (part30).
+  const buffsShop = rules.buffsShopWords.some((w) => new RegExp(w, 'i').test(text));
+
   // «Цель не выбирается» имеет смысл только у усилений: у замены выбор
-  // жертвы и так наш, у золота цели нет вовсе.
+  // жертвы и так наш, у золота цели нет вовсе. Витринный бафф раздаёт
+  // игра — цели у него нет по построению.
   const untargeted =
-    destroy === null && rules.untargetedSpellWords.some((w) => new RegExp(w, 'i').test(text));
+    buffsShop ||
+    (destroy === null && rules.untargetedSpellWords.some((w) => new RegExp(w, 'i').test(text)));
 
   // «Даёт миньона» — та же таблица шаблонов, что у силы героя: факт записан
   // в тексте, а не в том, кто его произносит. Замена («…destroy … to get
@@ -4011,8 +4250,10 @@ function computeSpellEffect(
   if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt && !givesMinion && maxGold === 0) {
     return null;
   }
+  const goldAmount = gold?.[1] === undefined ? 0 : Number(gold[1]);
   return {
-    gold: gold?.[1] === undefined ? 0 : Number(gold[1]),
+    gold: deferredGold ? 0 : goldAmount,
+    goldNextTurn: deferredGold ? goldAmount : 0,
     stats,
     temporaryStats,
     divineShield: shield,
@@ -4022,6 +4263,7 @@ function computeSpellEffect(
     grantsTaunt,
     untargeted,
     givesMinion,
+    buffsShop,
     maxGold,
     branches: [],
     chosen: null,
@@ -4218,6 +4460,7 @@ export function buffTarget(
 ): Minion | null {
   const buff: SpellEffect = {
     gold: 0,
+    goldNextTurn: 0,
     stats: 4,
     temporaryStats: 0,
     divineShield: false,
@@ -4227,6 +4470,7 @@ export function buffTarget(
     grantsTaunt: false,
     untargeted: false,
     givesMinion: false,
+    buffsShop: false,
     maxGold: 0,
     branches: [],
     chosen: null,
@@ -4358,6 +4602,37 @@ export function spellRules(
 
       // Ничего не открывается — монетка честно копится.
       return [];
+    }
+
+    // Бафф ПО ВИТРИНЕ (Them Apples, part30): статы ложатся на миньонов
+    // магазина, и до нас доезжают только те, кого мы купим. Ценность —
+    // статы на число покупок, которые остаток золота ещё позволяет;
+    // при нуле золота заклинание честно молчит — усиленные миньоны
+    // уйдут с обновлением витрины, не побывав нашими. Цели нет
+    // по построению: игра раздаёт сама (в логе блок PLAY с Target=0).
+    if (effect.buffsShop) {
+      if (spell.cost > state.gold) return [];
+      const buys = Math.min(
+        state.shop.length,
+        Math.max(0, Math.floor((state.gold - spell.cost) / rules.minionCost)),
+      );
+      const score =
+        effect.stats * buys * rules.value.perStatPoint - spell.cost * rules.goldPointValue;
+      if (score <= 0) return [];
+      return [
+        {
+          action: 'play' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score,
+          cost: spell.cost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} — усиление витрины (+${String(effect.stats)} статов каждому), ` +
+            `до боя доедет купленными: покупок на это золото ${String(buys)}`,
+        },
+      ];
     }
 
     // Усиление или замена: бесплатная ценность перед боем.
@@ -4527,6 +4802,30 @@ export function shopSpellRules(
       ];
     }
 
+    // Золото СЛЕДУЮЩЕГО хода — «Gain 2 Gold next turn» (Careful
+    // Investment, part30). Покупка выгодна тем же курсом, но `grantsGold`
+    // здесь НЕ заполняется намеренно: это золото нельзя потратить в этот
+    // ход, а план доносил его до следующего шага как живое — и дар за 3
+    // становился «по карману» при двух золотых (скриншот игрока).
+    if (effect.goldNextTurn > 0) {
+      const net = effect.goldNextTurn - goldCost;
+      if (net <= 0) return [];
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score: net * rules.goldPointValue,
+          cost: goldCost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} за ${price} даёт ${String(effect.goldNextTurn)} золота ` +
+            `СЛЕДУЮЩИМ ходом — чистая прибыль, но покупок этого хода не открывает`,
+        },
+      ];
+    }
+
 
     // ПРЕДЕЛ золота — экономика, растянутая на всю оставшуюся партию:
     // «Increase your maximum Gold by 1» (Strike Oil за 2, тир 2). Прежде
@@ -4594,6 +4893,32 @@ export function shopSpellRules(
                 ? `, но на ${String(cheaper)} золота дешевле покупки`
                 : ', и это дешёвое тело, а не лучшее') +
             (branch.note === '' ? '' : `; ${branch.note}`),
+        },
+      ];
+    }
+
+    // Бафф ПО ВИТРИНЕ — как у той же карты в руке: статы доезжают только
+    // покупками, цель не называется (Them Apples, part30).
+    if (effect.buffsShop) {
+      const buys = Math.min(
+        state.shop.length,
+        Math.max(0, Math.floor((state.gold - goldCost) / rules.minionCost)),
+      );
+      const score =
+        effect.stats * buys * rules.value.perStatPoint - goldCost * rules.goldPointValue;
+      if (score <= 0) return [];
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score,
+          cost: goldCost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} за ${price} — усиление витрины (+${String(effect.stats)} статов ` +
+            `каждому), до боя доедет купленными: покупок на остаток ${String(buys)}`,
         },
       ];
     }

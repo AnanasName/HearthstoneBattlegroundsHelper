@@ -508,6 +508,54 @@ export interface TavernRules {
   readonly untargetedSpellWords: readonly string[];
 
   /**
+   * Признаки заклинания, бьющего ПО ВИТРИНЕ: «Give minions in the Tavern
+   * +{0}/+{1}» (Them Apples, part30).
+   *
+   * Статы такого заклинания ложатся не на наш борд, а на миньонов магазина
+   * — лог показывает это прямо: блок PLAY идёт с `Target=0`, а энчанты
+   * получают сущности `player=10`. Считать их «усилением перед боем»
+   * на своём борде было тихо неверно дважды: и цель называлась
+   * («→ на Gem Rat 4/4» на скриншоте игрока), и статы приписывались телам,
+   * которых заклинание не трогает. До нас статы доезжают только через
+   * ПОКУПКУ усиленного миньона — этим ветка и оценивается.
+   */
+  readonly buffsShopWords: readonly string[];
+
+  /**
+   * Признаки заклинания про КРОВАВЫЕ САМОЦВЕТЫ — «Your Blood Gems give
+   * an extra +1 Attack this game» (Gem Day, part30).
+   *
+   * Цены у самоцветов у нас нет — это записанная граница part28 («Blood
+   * Gems остались без цены»), — а разбор по общим шаблонам давал не
+   * молчание, а тихо неверное число: у Gem Day ветвей-карт в снапшоте нет,
+   * текст родителя складывал ОБЕ ветви (+2 статов), и вечная прибавка
+   * к будущим самоцветам советовалась как разовый бафф своему миньону.
+   * Молчание честнее выдуманного числа — тот же выбор, что у сил героя
+   * с триггером в тексте (part26).
+   */
+  readonly bloodGemWords: readonly string[];
+
+  /**
+   * Триггеры борда, которые кормит САМА ТРАТА золота или обновление
+   * витрины: «Whenever you spend 5 Gold…» (Dual-Wield Corsair), «After you
+   * spend {2} Gold…» (Enterprising Escapee), «After you Refresh…».
+   *
+   * Нужны стоку сгорающего золота (part30, ход 19): когда золото не на что
+   * потратить и оно сгорит концом хода, обновление за его счёт — не потеря,
+   * а прогресс этих счётчиков. Без такого триггера на борде обновление
+   * при сгорающем золоте по-прежнему молчит (граница part27: цель обязана
+   * быть названа).
+   */
+  readonly goldSinkTriggerWords: readonly string[];
+
+  /**
+   * Очки обновления-стока. Малые нарочно: это напоминание «золото всё
+   * равно сгорит», и оно всплывает, когда настоящих действий не осталось,
+   * — как у бесплатной силы-обновления (`freeHeroPowerValue`).
+   */
+  readonly goldSinkRerollValue: number;
+
+  /**
    * Признаки миньона-«движка»: его ценность — постоянный эффект из текста
    * (аура, триггер «After/Whenever/At the start…»), а не размен телом.
    *
@@ -1043,6 +1091,22 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     // «→ на Aureate Laureate». Одиночное «a friendly» остаётся целевым.
     '\\b(?:two|three|four|five|six|seven|\\d+) (?:friendly|of your)\\b',
   ],
+
+  // «Give minions in the Tavern +{0}/+{1}» — Them Apples, part30.
+  // Пробелы — `\s+`: тексты снапшота переносят строки посреди предложения.
+  buffsShopWords: ['minions?\\s+in\\s+the\\s+tavern'],
+
+  // «Your Blood Gems…» — Gem Day и родня, part30; переносы те же.
+  bloodGemWords: ['blood\\s+gems?'],
+
+  // «Whenever you spend 5 Gold…» (Dual-Wield Corsair), «After you spend
+  // {2} Gold…» (Enterprising Escapee), «After you Refresh…» — part30, ход 19.
+  goldSinkTriggerWords: [
+    '\\b(?:after|whenever)\\s+you\\s+(?:<b>)*spend\\b[^.]*\\bgold\\b',
+    '\\b(?:after|whenever)\\s+you\\s+(?:<b>)*refresh\\b',
+  ],
+
+  goldSinkRerollValue: 1,
 
   // Пробелы — `\s+`: тексты снапшота переносят строки посреди предложения
   // (урок part16), и голова триггера, разорванная переносом, иначе

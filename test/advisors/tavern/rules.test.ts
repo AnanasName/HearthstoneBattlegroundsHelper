@@ -1656,6 +1656,8 @@ describe('заклинания руки', () => {
       grantsTaunt: false,
       untargeted: false,
       givesMinion: false,
+      goldNextTurn: 0,
+      buffsShop: false,
       maxGold: 0,
       // Ветви — только у модального «Choose One» (part19); у обычного
       // заклинания их нет, и выбирать нечего.
@@ -1712,6 +1714,7 @@ describe('заклинания руки', () => {
     ]);
     expect(spellEffect('BUTCHER', [6, 2], idx)).toEqual({
       gold: 0,
+      goldNextTurn: 0,
       stats: 8,
       temporaryStats: 0,
       divineShield: false,
@@ -1721,6 +1724,7 @@ describe('заклинания руки', () => {
       grantsTaunt: false,
       untargeted: false,
       givesMinion: false,
+      buffsShop: false,
       maxGold: 0,
       branches: [],
       chosen: null,
