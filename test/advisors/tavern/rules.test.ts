@@ -1048,8 +1048,11 @@ describe('правило силы героя', () => {
 });
 
 describe('правило тёмного дара', () => {
+  // Зарядов больше, чем ходов впереди: цена придержанного заряда (part31)
+  // равна нулю, и здесь проверяется всё остальное — сама цена проверяется
+  // ниже, своим блоком.
   const giftable = (patch: Partial<GameState> = {}): GameState =>
-    state({ darkGiftCost: 3, board: [shopMinion(1, 'MURLOC_1')], ...patch });
+    state({ darkGiftCost: 3, darkGiftCharges: 12, board: [shopMinion(1, 'MURLOC_1')], ...patch });
 
   it('дар по карману советуется', () => {
     const rec = darkGiftRule(giftable(), deps);
@@ -3679,5 +3682,108 @@ describe('ставка на чужой бой: скины героев', () => {
     expect(advice[0]?.option.cardId).toBe('TB_BaconShop_HERO_33');
     expect(advice[0]?.reason).toContain('впереди по тиру');
     expect(advice[1]?.reason).toContain('тир 3');
+  });
+});
+
+/**
+ * Цена ПРИДЕРЖАННОГО заряда дара (part31): зарядов три, предложение растёт
+ * по ходам таверны до десятого, и заряд, нажатый на седьмом, — это тело
+ * тира 4 вместо тела тира 5–6 на десятом. Игрок все три заряда нажал
+ * на 10-м, 11-м и 12-м ходах таверны.
+ */
+describe('правило тёмного дара: цена придержанного заряда', () => {
+  // Борд из мурлоков: пул тира 4 — амальгама, пул тиров 5–6 — пятый мурлок
+  // с соплеменниками, то есть «позже» дороже «сейчас».
+  const board = [shopMinion(1, 'MURLOC_1'), shopMinion(2, 'MURLOC_2')];
+  const giftable = (patch: Partial<GameState> = {}): GameState =>
+    state({ darkGiftCost: 3, darkGiftCharges: 3, gold: 9, techLevel: 4, board, ...patch });
+  // Ход 13 — седьмой ход таверны: впереди 5.3 хода при трёх зарядах.
+  const midgame = giftable({ turn: 13 });
+
+  it('когда ходов впереди больше, чем зарядов, цена спешки вычитается из тела', () => {
+    const held = darkGiftRule(midgame, deps);
+    // Столько же зарядов, сколько ходов, — вычитать нечего: чистое тело.
+    const plain = darkGiftRule(giftable({ turn: 13, darkGiftCharges: 7 }), deps);
+    expect(held).not.toBeNull();
+    expect(plain).not.toBeNull();
+    expect(held?.score ?? 0).toBeLessThan(plain?.score ?? 0);
+    expect(held?.reason).toContain('заряд лучше придержать');
+    expect(held?.reason).toContain('зарядов 3');
+    expect(plain?.reason).toContain('придерживать незачем');
+  });
+
+  it('с десятого хода таверны предложение плоское — цена спешки ноль', () => {
+    // Ход 21 — одиннадцатый ход таверны, впереди 2.2 при трёх зарядах:
+    // вытесняемый ход за концом таблицы, тиры те же, что сейчас.
+    const late = darkGiftRule(giftable({ turn: 21, techLevel: 5 }), deps);
+    expect(late).not.toBeNull();
+    expect(late?.reason).toContain('сильнее предложение уже не станет');
+  });
+
+  it('без тега зарядов берётся число из правил, и совет тот же', () => {
+    const untagged = darkGiftRule(giftable({ turn: 13, darkGiftCharges: null }), deps);
+    expect(untagged?.score).toBeCloseTo(darkGiftRule(midgame, deps)?.score ?? -1, 6);
+  });
+
+  it('оставшихся зарядов меньше — вытесняемый ход позже, цена спешки меньше', () => {
+    const three = darkGiftRule(midgame, deps)?.score ?? 0;
+    const one = darkGiftRule(giftable({ turn: 13, darkGiftCharges: 1 }), deps)?.score ?? 0;
+    expect(one).toBeGreaterThanOrEqual(three);
+  });
+
+  it('когда цена спешки съедает всё тело, дар молчит', () => {
+    // Ход 7 — четвёртый ход таверны: тело тира 2–3 против тира 5–6 при
+    // 8.3 ходах впереди. На настоящем пуле part31 разница больше тела;
+    // здесь та же арифметика проверяется таблицей с дорогим хвостом.
+    const dear = darkGiftRule(giftable({ turn: 7, techLevel: 2 }), {
+      cards: createCardIndex([
+        ...STUB_CARDS,
+        { id: 'MURLOC_6', name: 'Шестой мурлок', type: 'Minion', techLevel: 6, races: ['MURLOC'], isBaconPool: true, attack: 40, health: 40 },
+      ]),
+    });
+    expect(dear).toBeNull();
+  });
+});
+
+/**
+ * Миньон, приходящий В РУКУ, на полном борде вычитает жертву (part31,
+ * ход 13): «Discover a Tier 1 minion» за 3 при семи своих — план
+ * начинался с ростка (7.1), хотя слабейший свой стоил 9.0.
+ */
+describe('заклинание витрины «даёт миньона» на полном борде', () => {
+  const sproutCards = createCardIndex([
+    ...STUB_CARDS,
+    { id: 'SPROUT', name: 'Новый росток', type: 'Battleground_spell', text: 'Discover a Tier 1 minion.' },
+  ]);
+  const sproutDeps = { cards: sproutCards };
+  const sprout = { entityId: 900, cardId: 'SPROUT', cost: 3, scriptData: [], unplayable: false, costsHealth: false };
+  const strong = Array.from({ length: 7 }, (_, i) =>
+    shopMinion(10 + i, 'MURLOC_5', { attack: 20, health: 20 }),
+  );
+
+  it('на полном борде из сильных тел молчит: место через продажу дороже тела', () => {
+    const full = state({ gold: 9, techLevel: 4, board: strong, shopSpells: [sprout] });
+    expect(shopSpellRules(full, sproutDeps).some((r) => r.spellCardId === 'SPROUT')).toBe(false);
+  });
+
+  it('на неполном борде — прежнее дешёвое тело', () => {
+    const room = state({ gold: 9, techLevel: 4, board: strong.slice(0, 6), shopSpells: [sprout] });
+    const rec = shopSpellRules(room, sproutDeps).find((r) => r.spellCardId === 'SPROUT');
+    expect(rec).not.toBeUndefined();
+    expect(rec?.reason).toContain('средний миньон тира 1');
+    expect(rec?.reason).not.toContain('борд полон');
+  });
+
+  it('на полном борде из слабых тел жертва вычитается и называется', () => {
+    const weak = Array.from({ length: 7 }, (_, i) => shopMinion(10 + i, 'NEUTRAL', { attack: 1, health: 1 }));
+    const full = state({ gold: 9, techLevel: 1, board: weak, shopSpells: [sprout] });
+    const withRoom = shopSpellRules({ ...full, board: weak.slice(0, 6) }, sproutDeps).find(
+      (r) => r.spellCardId === 'SPROUT',
+    );
+    const rec = shopSpellRules(full, sproutDeps).find((r) => r.spellCardId === 'SPROUT');
+    if (rec !== undefined) {
+      expect(rec.reason).toContain('борд полон — место через продажу');
+      expect(rec.score).toBeLessThan(withRoom?.score ?? 0);
+    }
   });
 });

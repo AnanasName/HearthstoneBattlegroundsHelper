@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { adviseTavern, freezeRule, shopSpellRules } from '../../src/advisors/tavern/advisor.js';
+import { adviseTavern, darkGiftRule, freezeRule, shopSpellRules } from '../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../src/advisors/tavern/rules.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
@@ -115,15 +115,22 @@ describe('part23: запертый остаток, названный тир и 
     expect(plan.steps[0]?.recommendation.minion?.cardId).toBe('BG27_002');
   });
 
-  it('пункт 1: сам ПОРЯДОК советов правкой не тронут — дар по-прежнему верхний', () => {
+  it('пункт 1: сам ПОРЯДОК советов правкой не тронут — прокрутка верхняя, дар молчит с part31', () => {
     expect(turn5).not.toBeNull();
     if (turn5 === null) return;
 
     // Развилка живёт только в плане: список советов — это ранжирование
     // отдельных действий, и запертый остаток к нему отношения не имеет.
+    // До part31 дар стоял здесь верхней строкой (8.0 против 7.5): третий
+    // ход таверны, тело тира 2. С part31 у заряда есть цена — три заряда
+    // на 9.3 хода впереди, и нажатый сейчас вытесняет тело тира 5–6
+    // десятого хода, — и на этом ходу дар молчит вовсе; верхней строкой
+    // стоит та самая прокрутка, которую игрок и сыграл.
     const advice = adviseTavern(turn5, { cards });
-    expect(advice?.recommendations[0]?.action).toBe('darkGift');
-    expect(advice?.recommendations[1]?.action).toBe('spin');
+    expect(advice?.recommendations[0]?.action).toBe('spin');
+    expect(advice?.recommendations.some((r) => r.action === 'darkGift')).toBe(false);
+    expect(turn5.darkGiftCost).toBe(3);
+    expect(darkGiftRule(turn5, { cards })).toBeNull();
   });
 
   /**
@@ -146,10 +153,18 @@ describe('part23: запертый остаток, названный тир и 
     // Прежде было 14.5 — как средняя карта витрины плюс скидка в золото.
     expect(trainee.score).toBeLessThan(11);
 
-    // И в списке советов заклинание уходит ниже обычных покупок таверны.
-    const advice = adviseTavern(turn11, { cards });
-    const rank = (advice?.recommendations ?? []).findIndex((r) => r.spellCardId === 'BG28_504');
-    expect(rank).toBeGreaterThan(2);
+    // И в списке советов заклинание уходит ниже покупок третьего тира
+    // (Annoy-o-Module 17.5, Cadaver Caretaker 13.0) — прежде оно стояло
+    // с ними вровень. (Прежний порог «ниже третьей строки» держался ещё
+    // и на тёмном даре в списке — с part31 у дара на шестом ходу таверны
+    // есть цена придержанного заряда, 13.0 → 7.4, и он ушёл под
+    // заклинание без единого сдвига в оценке самого заклинания.)
+    const recs = adviseTavern(turn11, { cards })?.recommendations ?? [];
+    const rank = recs.findIndex((r) => r.spellCardId === 'BG28_504');
+    expect(rank).toBeGreaterThan(1);
+    expect(recs[0]?.action).toBe('buy');
+    expect(recs[1]?.action).toBe('buy');
+    expect(recs.slice(0, rank).every((r) => r.score > trainee.score)).toBe(true);
   });
 
   /**

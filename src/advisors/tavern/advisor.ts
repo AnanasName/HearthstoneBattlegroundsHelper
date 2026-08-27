@@ -1350,6 +1350,38 @@ export function weakestOwn(
     .reduce((a, b) => (b.value < a.value ? b : a));
 }
 
+/**
+ * Во что обходится миньон, приходящий В РУКУ, когда борд ПОЛОН, — и как
+ * это назвать в причине совета.
+ *
+ * «Discover a Tier 1 minion» (A New Sprout за 3, part31 ход 13), «Discover
+ * a Mech» силой героя (part30), «Get a random Quilboar» ветвью (part28) —
+ * всё это карта в руке, а не тело на борде. На полном борде место ей
+ * освободит только продажа слабейшего, и считать такую карту полной
+ * ценностью значит обещать слот, которого нет: на скриншоте part31 план
+ * начинался с «купить A New Sprout за 3» (7.1 — средний миньон первого
+ * тира) при семи своих от 4/5 до 17/21, где слабейший стоил 9.0. Ветвь
+ * модального миньона вычитала жертву с part28; покупка заклинания и сила
+ * героя — нет, и это одно и то же число, посчитанное не про то.
+ *
+ * Вычет — ценность жертвы (`weakestOwn`, та же, что у покупок на полном
+ * борде); её имя идёт в причину. На неполном борде — `null`, вычета нет.
+ */
+function handMinionVictim(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { readonly value: number; readonly note: string } | null {
+  if (state.board.length < rules.boardSize) return null;
+  const victim = weakestOwn(state, deps, rules);
+  if (victim === null) return null;
+  const name = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
+  return {
+    value: victim.value,
+    note: `борд полон — место через продажу ${name} (${victim.value.toFixed(1)})`,
+  };
+}
+
 /** Правило покупки: по рекомендации на каждого миньона витрины, что по карману. */
 export function buyRules(
   state: GameState,
@@ -3170,11 +3202,15 @@ export function heroPowerRule(
         }
       : (namedTierPool(text, state, deps, rules) ?? undefined);
   const { score, average, discounted } = givesMinionValue(state, deps, rules, cost, true, source);
+  // Найденный миньон приходит в руку — на полном борде жертва вычитается,
+  // как у заклинания витрины (part31).
+  const victim = handMinionVictim(state, deps, rules);
+  if (victim !== null && score - victim.value <= rules.sellMargin) return null;
 
   return {
     action: 'heroPower',
     minion: null,
-    score,
+    score: score - (victim?.value ?? 0),
     cost,
     requiresSlot: false,
     sellFirst: null,
@@ -3183,7 +3219,8 @@ export function heroPowerRule(
       `${minionSourceNote(source ?? null, average)}` +
       (discounted && cost < rules.minionCost
         ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки`
-        : ''),
+        : '') +
+      (victim === null ? '' : `; ${victim.note}`),
   };
 }
 
@@ -3910,7 +3947,8 @@ function branchValue(
     }
   }
 
-  // МИНЬОН без племени — общей веткой «даёт миньона».
+  // МИНЬОН без племени — общей веткой «даёт миньона»; на полном борде
+  // жертва вычитается, как у племенной ветви выше (part31).
   if (effect !== null && effect.givesMinion) {
     const tiered = namedTierPool(text, state, deps, rules);
     const { score, average } = givesMinionValue(
@@ -3921,7 +3959,13 @@ function branchValue(
       false,
       tiered ?? undefined,
     );
-    return { score, note: `даёт миньона — ${minionSourceNote(tiered, average)}` };
+    const victim = handMinionVictim(state, deps, rules);
+    return {
+      score: score - (victim?.value ?? 0),
+      note:
+        `даёт миньона — ${minionSourceNote(tiered, average)}` +
+        (victim === null ? '' : `, ${victim.note}`),
+    };
   }
 
   // БЕСПЛАТНЫЕ ОБНОВЛЕНИЯ — по ЖИВОЙ цене кнопки, как у Leaf Through
@@ -4869,6 +4913,12 @@ export function shopSpellRules(
         true,
         tiered ?? undefined,
       );
+      // Миньон приходит В РУКУ: на полном борде место ему освободит только
+      // продажа, и жертва вычитается, как у покупки и у ветви part28
+      // (part31, ход 13: A New Sprout 7.1 при слабейшем своём 9.0 — молчит).
+      // Превосходство обязано перебивать `sellMargin`, как у покупок.
+      const victim = handMinionVictim(state, deps, rules);
+      if (victim !== null && score - victim.value <= rules.sellMargin) return [];
       const cheaper = rules.minionCost - goldCost;
       // Модальное «даёт миньона» (The Road Less Traveled, Boundless
       // Potential) спросит игрока сразу после покупки — ветви называются
@@ -4880,7 +4930,7 @@ export function shopSpellRules(
           minion: null,
           spellCardId: spell.cardId,
           spellBranches: branch.branches,
-          score,
+          score: score - (victim?.value ?? 0),
           cost: goldCost,
           requiresSlot: false,
           sellFirst: null,
@@ -4892,6 +4942,7 @@ export function shopSpellRules(
               : discounted && cheaper > 0
                 ? `, но на ${String(cheaper)} золота дешевле покупки`
                 : ', и это дешёвое тело, а не лучшее') +
+            (victim === null ? '' : `; ${victim.note}`) +
             (branch.note === '' ? '' : `; ${branch.note}`),
         },
       ];
@@ -4978,6 +5029,34 @@ export function shopSpellRules(
  * Оценка НИЖНЯЯ: сам дар и выбор из трёх сверху не считаются вовсе
  * (`rules.darkGift.bonus` = 0), потому что цены у них нет.
  *
+ * ## Цена ПРИДЕРЖАННОГО заряда (part31)
+ *
+ * Зарядов три на партию, а предложение растёт по ходам таверны до
+ * десятого — значит нажать заряд СЕЙЧАС значит не нажать его ПОЗЖЕ,
+ * когда он принесёт тело тиром выше. Пока правило мерило дар одним
+ * телом «сейчас», оно ставило его верхней строкой с первого же хода,
+ * где он по карману (part31: с хода 7 в плане, на ходу 13 — 14.4 против
+ * покупки 14.0), а игрок все три заряда нажал на 10-м, 11-м и 12-м ходах
+ * таверны (ходы 19, 21, 23) — и написал: «как только тёмный дар
+ * открывается, его почти сразу рекомендуют; он становится сильнее
+ * с каждым ходом».
+ *
+ * Считается это без нового веса. Ходов таверны впереди — замер
+ * (`remainingTurns`, таблица по датасету), зарядов — живой тег кнопки.
+ * Если ходов (с нынешним) не больше, чем зарядов, каждому заряду
+ * достаётся свой ход и придерживать нечего. Иначе лучшие ходы для
+ * зарядов — ПОСЛЕДНИЕ (предложение не убывает), и нажатие сейчас
+ * вытесняет самый ранний из них: ход `сейчас + (впереди + 1 − зарядов)`.
+ * Цена спешки — разница тел ЭТОГО хода и того: та же функция, тот же
+ * борд, тиры по той же таблице (дробный ход — линейно между соседними
+ * строками). После десятого хода таблица плоская, и цена сама падает
+ * в ноль: держать заряд дальше незачем — ровно там игрок и жал.
+ *
+ * Здоровье в горизонт не входит (записанная оговорка part28): в
+ * проигрываемой партии ходов впереди меньше, чем обещает таблица, и дар
+ * стоило бы жать раньше. Поэтому совет печатает и горизонт, и цену
+ * словами — чтобы игрок мог возразить числу, а не молчанию.
+ *
  * Совет не ворует золото у подъёма таверны, как и обновление витрины.
  */
 export function darkGiftRule(
@@ -5002,17 +5081,39 @@ export function darkGiftRule(
 
   // Тир предложения — по ходу ТАВЕРНЫ; после последней строки таблицы
   // предложение не растёт, поэтому берётся её хвост.
-  const table = rules.darkGift.tiersByTavernTurn;
-  const rows = Object.keys(table)
-    .map(Number)
-    .sort((a, b) => a - b);
   const tavernTurn = tavernTurnOf(state.turn);
-  const row = rows.findLast((r) => r <= tavernTurn) ?? rows[0];
-  const tiers = (row === undefined ? undefined : table[row]) ?? [state.techLevel];
+  const tiers = darkGiftTiersAt(tavernTurn, state, rules);
 
   const body = averagePoolValue(tiers, state, deps, rules);
   if (body === null) return null;
-  const score = body + rules.darkGift.bonus;
+
+  // Цена придержанного заряда — см. описание правила.
+  const ahead = remainingTurns(state, rules);
+  const charges = state.darkGiftCharges ?? rules.darkGift.charges;
+  const spare = ahead + 1 - charges;
+  let holdCost = 0;
+  let holdNote = `зарядов ${String(charges)}, впереди ещё ${ahead.toFixed(1)} ходов таверны — придерживать незачем`;
+  if (spare > 0) {
+    const displaced = tavernTurn + spare;
+    const lo = Math.floor(displaced);
+    const hi = Math.ceil(displaced);
+    const atLo = averagePoolValue(darkGiftTiersAt(lo, state, rules), state, deps, rules);
+    const atHi = averagePoolValue(darkGiftTiersAt(hi, state, rules), state, deps, rules);
+    const later =
+      atLo === null ? atHi : atHi === null ? atLo : atLo + (atHi - atLo) * (displaced - lo);
+    if (later !== null) {
+      holdCost = Math.max(0, later - body);
+      const laterTiers = darkGiftTiersAt(Math.round(displaced), state, rules);
+      holdNote =
+        holdCost > 0
+          ? `но заряд лучше придержать: зарядов ${String(charges)}, впереди ещё ` +
+            `${ahead.toFixed(1)} ходов таверны, а на ${String(Math.round(displaced))}-м ходу таверны ` +
+            `дар даёт тир ${laterTiers.join(' или ')} (${later.toFixed(1)}) — спешка стоит ${holdCost.toFixed(1)}`
+          : `впереди ещё ${ahead.toFixed(1)} ходов таверны, а сильнее предложение уже не станет — жать`;
+    }
+  }
+
+  const score = body + rules.darkGift.bonus - holdCost;
   if (score <= 0) return null;
 
   return {
@@ -5024,8 +5125,22 @@ export function darkGiftRule(
     sellFirst: null,
     reason:
       `тёмный дар за ${String(cost)} — раскопка из трёх миньонов с даром, ` +
-      `тир ${tiers.join(' или ')} (${body.toFixed(1)})`,
+      `тир ${tiers.join(' или ')} (${body.toFixed(1)}); ${holdNote}`,
   };
+}
+
+/**
+ * Тиры предложения дара на ходу таверны — строка таблицы игрока, не выше
+ * этого хода; до первой строки — первая, после последней — последняя
+ * (предложение не растёт). Без таблицы — свой тир таверны.
+ */
+function darkGiftTiersAt(tavernTurn: number, state: GameState, rules: TavernRules): readonly number[] {
+  const table = rules.darkGift.tiersByTavernTurn;
+  const rows = Object.keys(table)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const row = rows.findLast((r) => r <= tavernTurn) ?? rows[0];
+  return (row === undefined ? undefined : table[row]) ?? [state.techLevel];
 }
 
 /**

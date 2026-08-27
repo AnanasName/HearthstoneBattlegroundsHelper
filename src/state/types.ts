@@ -456,6 +456,16 @@ export interface GameState {
    * подъёма таверны; цена меняется, читать её надо из тега, не из таблицы.
    */
   readonly darkGiftCost: number | null;
+  /**
+   * Сколько зарядов дара осталось — тег `TAG_SCRIPT_DATA_NUM_2` кнопки:
+   * 3 при создании, по единице за нажатие (part11: 3 → 2 → 1 → 0; part31:
+   * кнопка создаётся с NUM_2=3 на первом ходу, нажатия на ходах 19, 21, 23).
+   *
+   * `null` — кнопки нет или тега на ней нет. Заряды нужны советнику
+   * не как «есть ли ещё», а как ЧИСЛО: три заряда на партию длиной
+   * в дюжину ходов таверны — это выбор, на каких ходах их жать (part31).
+   */
+  readonly darkGiftCharges: number | null;
   /** Нажат ли дар в этом ходу — блок `BlockType=PLAY` на кнопке. */
   readonly darkGiftUsedThisTurn: boolean;
   /**
@@ -571,6 +581,7 @@ export const EMPTY_STATE: GameState = {
   lastSeenBoardTurns: {},
   lobby: {},
   darkGiftCost: null,
+  darkGiftCharges: null,
   darkGiftUsedThisTurn: false,
   activatedEntityIds: [],
   trinketOffer: [],

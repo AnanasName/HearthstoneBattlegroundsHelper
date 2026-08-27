@@ -858,10 +858,14 @@ export function createReducer(players: Players): Reducer {
     return null;
   };
 
-  /** Кнопка тёмного дара, если она сейчас есть И заряды не исчерпаны. */
-  const darkGiftButton = (): number | null => {
+  /**
+   * Кнопка тёмного дара, если она сейчас есть И заряды не исчерпаны:
+   * цена нажатия и число оставшихся зарядов.
+   */
+  const darkGiftButton = (): { readonly cost: number | null; readonly charges: number | null } => {
+    const none = { cost: null, charges: null };
     const self = players.selfPlayerId;
-    if (self === null) return null;
+    if (self === null) return none;
 
     for (const e of entities.values()) {
       if (e.controller !== self || e.zone !== 'PLAY') continue;
@@ -870,11 +874,12 @@ export function createReducer(players: Players): Reducer {
       // по единице за нажатие (part11: 3 → 2 → 1 → 0). После нуля кнопка
       // остаётся в PLAY с ценой, и совет по ней был тихо неверным.
       const charges = e.tags.get('TAG_SCRIPT_DATA_NUM_2');
-      if (charges !== undefined && charges <= 0) return null;
+      if (charges !== undefined && charges <= 0) return none;
       const cost = e.tags.get('COST') ?? 0;
-      return cost > 0 ? cost : null;
+      if (cost <= 0) return none;
+      return { cost, charges: charges ?? null };
     }
-    return null;
+    return none;
   };
 
   /**
@@ -913,6 +918,7 @@ export function createReducer(players: Players): Reducer {
   const snapshot = (): GameState => {
     const self = players.selfPlayerId;
     const heroEntity = heroEntityId === null ? null : entities.get(heroEntityId);
+    const darkGift = darkGiftButton();
 
     // Энчанты группируются один раз на снимок: миньонов единицы, а энчантов
     // за партию больше тысячи, и перебор для каждого был бы квадратичным.
@@ -1024,7 +1030,8 @@ export function createReducer(players: Players): Reducer {
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
       lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
       lobby,
-      darkGiftCost: darkGiftButton(),
+      darkGiftCost: darkGift.cost,
+      darkGiftCharges: darkGift.charges,
       darkGiftUsedThisTurn,
       trinketOffer,
       openChoice:

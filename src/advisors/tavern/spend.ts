@@ -268,7 +268,15 @@ export function applyRecommendation(
     }
 
     case 'darkGift':
-      return { state: paid({ darkGiftUsedThisTurn: true }), opaque: true, terminal: false };
+      return {
+        state: paid({
+          darkGiftUsedThisTurn: true,
+          darkGiftCharges:
+            state.darkGiftCharges === null ? null : Math.max(0, state.darkGiftCharges - 1),
+        }),
+        opaque: true,
+        terminal: false,
+      };
 
     case 'spin':
       // Прокрутка — цепочка «купить-разыграть-продать»: миньон уходит
