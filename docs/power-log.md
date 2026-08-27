@@ -910,6 +910,48 @@ value=4` (23:54:55), `BACON_FIRST_TRINKET_DATABASE_ID=120137` на герое,
 цены не знает — на скриншоте хода 11 у игрока 4/8 при витрине точки
 решения, которая видела 8.
 
+## Пассивная сила героя: START_OF_COMBAT на сущности, TRIGGER в начале боя (part33)
+
+**Пассивность — тегами, а не отсутствием чего-то одного.** «Назойливые
+мухи» Ал'акира `TB_BaconShop_HP_086` («Start of Combat: Give your left-most
+minion Windfury, Divine Shield, and Taunt») создаётся вместе с героем
+(01:08:59) как `CARDTYPE=HERO_POWER` с тегами `START_OF_COMBAT=1`,
+`BACON_HERO_POWER_ACTIVATED=1`, `HIDE_COST=1`, `BACON_HEROPOWER_BASE_HERO_ID`;
+тегов `HAS_ACTIVATE_POWER` и `COST` нет. За партию на силе ни одного блока
+`PLAY` (у активных сил — по блоку на нажатие: part8, part13, part29, part32),
+и `heroPowerHasActivate` в состоянии честно `false`.
+
+**Срабатывание — блок `TRIGGER` на сущности силы в начале каждого боя**,
+11 боёв — 11 блоков (01:10:13 … 01:28:38). Внутри: `META_DATA Meta=TARGET`
+с `Info[0]` — свой миньон с `zonePos=1`, на нём `WINDFURY=1`, `TAUNT=1`,
+`DIVINE_SHIELD=1`, следом энчант `TB_BaconShop_HERO_76_Buddy_e`
+(`CARDTYPE=ENCHANTMENT`, `ATTACHED=<миньон>`, `CREATOR=<id силы>`,
+`CREATOR_DBID=64402`), зона `SETASIDE → PLAY`:
+
+```
+01:10:13 BLOCK_START BlockType=TRIGGER Entity=[entityName=Назойливые мухи id=137 … cardId=TB_BaconShop_HP_086 player=6] … Target=0 SubOption=-1
+             META_DATA - Meta=TARGET Data=0 InfoCount=1
+                 Info[0] = [entityName=Раскаленный валун id=307 zone=PLAY zonePos=1 cardId=BGS_127 player=6]
+             TAG_CHANGE Entity=[… id=307 … cardId=BGS_127 …] tag=WINDFURY value=1
+             TAG_CHANGE Entity=[… id=307 …] tag=TAUNT value=1
+             TAG_CHANGE Entity=[… id=307 …] tag=DIVINE_SHIELD value=1
+             FULL_ENTITY - Creating ID=669 CardID=   →  SHOW_ENTITY … CardID=TB_BaconShop_HERO_76_Buddy_e, ATTACHED=307, CREATOR=137
+```
+
+К следующей таверне слов на миньоне нет (ход 9 и ход 11: Molten Rock 3/4
+без признаков) — эффект живёт один бой. Цели по боям: ходы 2–10 Molten Rock
+`BGS_127`, 12–20 Wildfire Elemental `BGS_126`, 22 Living Prison `BG36_180`
+— всегда крайний левый, игрок ставил его туда сам.
+
+**Следствие для эпизодов боя.** `readBattleEpisodes` снимает свой борд
+в начале боя, ПОСЛЕ этого триггера, — в эпизоде хода 10 Molten Rock уже
+стоит с провокацией, щитом и вихрем (`demo:phase3` печатает «пщв»). Живой
+путь берёт борд из таверны, где слов ещё нет, и симулятор кладёт их сам;
+оффлайн-перебор расстановок по эпизоду на этом герое переставляет миньона
+С уже полученными словами, а симулятор дарит их ещё и новому крайнему
+левому — сверка расстановки по эпизодам part33 из-за этого мягче правды.
+Калибровку «как стоит» это не трогает: симулятор второй раз слова не даёт.
+
 ## Заклинания в руке и плейсхолдеры текстов
 
 Заклинания приходят обычными сущностями с `CARDTYPE=SPELL`. Факты part10:
