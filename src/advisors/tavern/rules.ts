@@ -493,6 +493,19 @@ export interface TavernRules {
    * идентификатор, — но и обещать, что покроет что-то ещё, не станет.
    */
   readonly heroPowerShotWords: readonly string[];
+  /**
+   * Текст силы героя, ДАЮЩЕЙ СВОЕМУ МИНЬОНУ КЛЮЧЕВОЕ СЛОВО, — «Give a minion
+   * Reborn until next turn» («Ритуал перерождения» Короля-лича, part32).
+   *
+   * Группа 1 шаблона — само слово; в правиле оно сводится к живому
+   * признаку миньона той же таблицей `BINARY_KEYWORDS`, что у магнитов.
+   * Разметка снапшота стоит посреди фразы («minion <b>Reborn</b>»),
+   * поэтому шаблон терпит тег перед словом. В пуле активных сил с таким
+   * текстом две: Reborn Rites (бесплатно) и Boon of Light («Give a minion
+   * Divine Shield» за 1); «Swatting Insects» — пассивный «Start of Combat»,
+   * и шаблон «give a minion» его не ловит намеренно: нажимать там нечего.
+   */
+  readonly heroPowerKeywordWords: readonly string[];
   readonly heroPowerSpellValue: number;
 
   /**
@@ -1015,7 +1028,11 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   sellValueWords: ['when you sell this'],
 
-  battleTextWords: ['rally:', '(?<!you |your )summons? '],
+  // Перенос строки в снапшоте ходит посреди предложения: «Deathrattle:
+  // Summon⏎two 1/1 Skeletons» (Harmless Bonehead, part32) с пробелом
+  // в шаблоне молча не совпадал, и хрип-призыв стоил ноль — пробел
+  // пишется как `\s` (урок part16). В пуле так читаются ещё пять карт.
+  battleTextWords: ['rally:', '(?<!you\\s|your\\s)summons?\\s'],
 
   // «Battlecry: Get two Slimy Shields…» (Oozeling, part16). Строго после
   // «Battlecry:» в том же предложении: триггеры и хрипы сюда не попадают.
@@ -1090,6 +1107,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // как `\s+`, иначе шаблон молча не совпадает (урок part16).
   healthRewindWords: ['after your hero takes damage,\\s*rewind it'],
   heroPowerShotWords: ['remove a minion[^.]*tavern'],
+  heroPowerKeywordWords: [
+    '\\bgive a (?:friendly )?minion\\s+(?:<b>)?(reborn|divine shield|taunt|windfury|poisonous|venomous|stealth)\\b',
+  ],
   heroPowerSpellValue: 6,
 
   untargetedSpellWords: [

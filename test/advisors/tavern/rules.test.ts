@@ -9,6 +9,7 @@ import {
   copiesOwned,
   darkGiftRule,
   freeHeroPowerRule,
+  heroPowerKeywordRule,
   heroPowerShotRule,
   freezeRule,
   heroPowerPlayStats,
@@ -34,6 +35,7 @@ import {
   trinketForecast,
 } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf } from '../../../src/advisors/tavern/rules.js';
+import { spendPlan } from '../../../src/advisors/tavern/spend.js';
 import { createBgStats } from '../../../src/data/bgStats.js';
 import { createCardIndex, loadCardIndex } from '../../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
@@ -2809,6 +2811,159 @@ describe('бесплатная сила героя', () => {
     expect(
       freeHeroPowerRule(state({ hero: chromie({ heroPowerCardId: 'DMG_P' }) }), chromieDeps),
     ).toBeNull();
+  });
+});
+
+describe('сила героя, дающая своему миньону ключевое слово (part32, Король-лич)', () => {
+  const lichCards = createCardIndex([
+    {
+      id: 'RITES',
+      name: 'Ритуал перерождения',
+      text: '[x]Give a minion <b>Reborn</b>\nuntil next turn.',
+    },
+    { id: 'BOON', name: 'Благословение света', text: 'Give a minion Divine Shield.' },
+    { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 2, races: ['UNDEAD'], isBaconPool: true },
+    {
+      id: 'RATTLER',
+      name: 'Черепушка',
+      type: 'Minion',
+      techLevel: 1,
+      races: ['UNDEAD'],
+      isBaconPool: true,
+      mechanics: ['DEATHRATTLE'],
+      text: '<b>Deathrattle:</b> Summon\ntwo 1/1 Skeletons.',
+    },
+    {
+      id: 'MUMMY',
+      name: 'Мумификатор',
+      type: 'Minion',
+      techLevel: 3,
+      races: ['UNDEAD'],
+      isBaconPool: true,
+      mechanics: ['DEATHRATTLE'],
+      text: '<b>Deathrattle:</b> Give a different friendly Undead <b>Reborn</b>.',
+    },
+  ]);
+  const lich = (patch: Partial<Hero> = {}): Hero => ({
+    ...hero(30),
+    heroPowerCardId: 'RITES',
+    heroPowerEntityId: 121,
+    heroPowerCost: null,
+    heroPowerHasActivate: true,
+    ...patch,
+  });
+  const lichDeps = { cards: lichCards };
+
+  it('бесплатная сила «даёт перерождение» советуется и называет цель (part32, ход 1)', () => {
+    // Скриншот: золото 0/3, на борде один Glim Guardian 1/4 — совет был «НИЧЕГО».
+    const s = state({ hero: lich(), gold: 0, board: [minion(1, { cardId: 'BODY', attack: 1, health: 4 })] });
+    const rec = heroPowerKeywordRule(s, lichDeps);
+    expect(rec?.action).toBe('heroPower');
+    expect(rec?.cost).toBe(0);
+    expect(rec?.targetMinion?.entityId).toBe(1);
+    expect(rec?.grantsKeyword).toBe('reborn');
+    // Перерождение стоит как у покупки: min(2, статы 2.5) = 2.
+    expect(rec?.score).toBe(2);
+    expect(rec?.reason).toContain('перерождение на Тело 1/4');
+  });
+
+  it('тому, у кого перерождения ещё нет; всем уже есть — молчание', () => {
+    const s = state({
+      hero: lich(),
+      board: [
+        minion(1, { cardId: 'BODY', attack: 9, health: 9, reborn: true }),
+        minion(2, { cardId: 'BODY', attack: 2, health: 2 }),
+      ],
+    });
+    expect(heroPowerKeywordRule(s, lichDeps)?.targetMinion?.entityId).toBe(2);
+    const all = state({ hero: lich(), board: [minion(1, { cardId: 'BODY', reborn: true })] });
+    expect(heroPowerKeywordRule(all, lichDeps)).toBeNull();
+  });
+
+  it('носитель хрипа впереди тела без хрипа — хрип сработает дважды', () => {
+    const s = state({
+      hero: lich(),
+      board: [
+        minion(1, { cardId: 'BODY', attack: 6, health: 8 }),
+        minion(2, { cardId: 'RATTLER', attack: 5, health: 1 }),
+      ],
+    });
+    const rec = heroPowerKeywordRule(s, lichDeps);
+    expect(rec?.targetMinion?.entityId).toBe(2);
+    expect(rec?.reason).toContain('хрип сработает дважды');
+  });
+
+  it('хрип, дарящий перерождение, — цепочка, пока есть кому его получить (ходы 13–23)', () => {
+    const s = state({
+      hero: lich(),
+      board: [
+        minion(1, { cardId: 'RATTLER', attack: 10, health: 3 }),
+        minion(2, { cardId: 'MUMMY', attack: 9, health: 2 }),
+        minion(3, { cardId: 'BODY', attack: 6, health: 8 }),
+      ],
+    });
+    const rec = heroPowerKeywordRule(s, lichDeps);
+    expect(rec?.targetMinion?.entityId).toBe(2);
+    expect(rec?.reason).toContain('цепочка');
+
+    // Получать некому — все остальные уже перерождённые: цепочки нет,
+    // Mummifier остаётся целью как единственный без перерождения, но
+    // обещание «цепочка» совет не даёт.
+    const spent = state({
+      hero: lich(),
+      board: [
+        minion(1, { cardId: 'RATTLER', attack: 10, health: 3, reborn: true }),
+        minion(2, { cardId: 'MUMMY', attack: 9, health: 2 }),
+        minion(3, { cardId: 'RATTLER', attack: 4, health: 8, reborn: true }),
+      ],
+    });
+    const late = heroPowerKeywordRule(spent, lichDeps);
+    expect(late?.targetMinion?.entityId).toBe(2);
+    expect(late?.reason).not.toContain('цепочка');
+  });
+
+  it('среди носителей хрипа решает атака: вторая жизнь — с одним здоровьем', () => {
+    const s = state({
+      hero: lich(),
+      board: [
+        minion(1, { cardId: 'RATTLER', attack: 6, health: 8 }),
+        minion(2, { cardId: 'RATTLER', attack: 10, health: 3 }),
+      ],
+    });
+    const rec = heroPowerKeywordRule(s, lichDeps);
+    expect(rec?.targetMinion?.entityId).toBe(2);
+    expect(rec?.reason).toContain('с полной атакой на одно здоровье');
+  });
+
+  it('нажатая, пассивная, запертая, пустой борд, чужой текст — молчание', () => {
+    const b = [minion(1, { cardId: 'BODY' })];
+    expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerUsedThisTurn: true }), board: b }), lichDeps)).toBeNull();
+    expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerHasActivate: false }), board: b }), lichDeps)).toBeNull();
+    expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerUnplayable: true }), board: b }), lichDeps)).toBeNull();
+    expect(heroPowerKeywordRule(state({ hero: lich(), board: [] }), lichDeps)).toBeNull();
+    expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerCardId: 'BODY' }), board: b }), lichDeps)).toBeNull();
+  });
+
+  it('платный щит за 1 по курсу золота молчит: щит не дороже трёх очков', () => {
+    // 3 − 1 × 3 = 0 — не порог, а честная цена на нашей шкале.
+    const s = state({ hero: lich({ heroPowerCardId: 'BOON', heroPowerCost: 1 }), gold: 5, board: [minion(1, { cardId: 'BODY', attack: 6, health: 6 })] });
+    expect(heroPowerKeywordRule(s, lichDeps)).toBeNull();
+    // Даром — щит на крупнейшего без щита.
+    const free = state({ hero: lich({ heroPowerCardId: 'BOON' }), board: [minion(1, { cardId: 'BODY', attack: 6, health: 6, divineShield: true }), minion(2, { cardId: 'BODY', attack: 2, health: 2 })] });
+    const rec = heroPowerKeywordRule(free, lichDeps);
+    expect(rec?.grantsKeyword).toBe('divineShield');
+    expect(rec?.targetMinion?.entityId).toBe(2);
+  });
+
+  it('план кладёт слово на цель и не рвётся: шаг прозрачен', () => {
+    const s = state({ hero: lich(), gold: 0, board: [minion(1, { cardId: 'BODY', attack: 1, health: 4 })] });
+    const plan = spendPlan(s, lichDeps);
+    const step = plan.steps.find((st) => st.recommendation.action === 'heroPower');
+    expect(step).not.toBeUndefined();
+    expect(step?.opaque).toBe(false);
+    expect(step?.stateAfter.board[0]?.reborn).toBe(true);
+    expect(step?.stateAfter.hero?.heroPowerUsedThisTurn).toBe(true);
+    expect(plan.truncated).toBe(false);
   });
 });
 

@@ -114,6 +114,13 @@ export interface Recommendation {
    */
   readonly spellBranches?: readonly SpellBranch[];
   /**
+   * Ключевое слово, которое действие ДАРИТ цели, — «Give a minion Reborn»
+   * силой героя (part32). Нужно плану: эффект известен целиком, и слово
+   * ложится на `targetMinion` гипотетического борда, а не прячется
+   * за «непрозрачным шагом».
+   */
+  readonly grantsKeyword?: BinaryKeywordField;
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется только у подъёма таверны, и только потому, что его `score`
@@ -662,18 +669,15 @@ export function minionValue(
   const mates = tribeMates(candidate, state.board, cards);
   const tribe = mates * w.perTribeMate;
 
-  // Щит, вихрь и перерождение усиливают САМО тело и не могут стоить дороже
-  // него: щит на 2/1 спасает полтора очка статов, а не три. Найдено сверкой
-  // с симулятором (part7, ход 3): Crackling Cyclone 2/1 со щитом и вихрем
-  // советовался против Molten Rock 3/3 при цене промаха 50 п.п. Провокация
-  // и яд телом не меряются: они меняют чужое поведение и чужие тела.
-  const attackPoints = (candidate.attack ?? 0) * w.perStatPoint;
-  const keywords =
-    (candidate.taunt ? w.taunt : 0) +
-    (candidate.divineShield ? Math.min(w.divineShield, stats) : 0) +
-    (candidate.poisonous || candidate.venomous ? w.poisonous : 0) +
-    (candidate.windfury ? Math.min(w.windfury, attackPoints) : 0) +
-    (candidate.reborn ? Math.min(w.reborn, stats) : 0);
+  // Веса и капы слов — в `keywordValue` (щит не дороже тела, part7).
+  // Яд и токсин — одно слово с одним весом, дважды не считаются.
+  const keywords = BINARY_KEYWORDS.filter(([, field]) => candidate[field])
+    .filter(([, field]) => field !== 'venomous' || !candidate.poisonous)
+    .reduce(
+      (sum, [, field]) =>
+        sum + keywordValue(field, candidate.attack ?? 0, candidate.health ?? 0, rules),
+      0,
+    );
 
   const owned = copiesOwned(candidate, state);
   // Сколько копий собирают золотого, решает сила героя, а не константа:
@@ -907,7 +911,95 @@ const BINARY_KEYWORDS = [
   ['STEALTH', 'stealth'],
 ] as const;
 
-type BinaryKeywordField = (typeof BINARY_KEYWORDS)[number][1];
+export type BinaryKeywordField = (typeof BINARY_KEYWORDS)[number][1];
+
+/** Тот же миньон, но со словом: гипотетический борд плана после дара силы. */
+export function withKeyword(m: Minion, field: BinaryKeywordField): Minion {
+  switch (field) {
+    case 'reborn':
+      return { ...m, reborn: true };
+    case 'divineShield':
+      return { ...m, divineShield: true };
+    case 'taunt':
+      return { ...m, taunt: true };
+    case 'windfury':
+      return { ...m, windfury: true };
+    case 'poisonous':
+      return { ...m, poisonous: true };
+    case 'venomous':
+      return { ...m, venomous: true };
+    case 'stealth':
+      return { ...m, stealth: true };
+  }
+}
+
+/** Слово текста → живой признак миньона; слова — как в текстах снапшота. */
+const KEYWORD_BY_WORD: Readonly<Partial<Record<string, BinaryKeywordField>>> = {
+  reborn: 'reborn',
+  'divine shield': 'divineShield',
+  taunt: 'taunt',
+  windfury: 'windfury',
+  poisonous: 'poisonous',
+  venomous: 'venomous',
+  stealth: 'stealth',
+};
+
+const KEYWORD_WORD: Readonly<Record<BinaryKeywordField, string>> = {
+  reborn: 'reborn',
+  divineShield: 'divine shield',
+  taunt: 'taunt',
+  windfury: 'windfury',
+  poisonous: 'poisonous',
+  venomous: 'venomous',
+  stealth: 'stealth',
+};
+
+const KEYWORD_NAME_RU: Readonly<Record<BinaryKeywordField, string>> = {
+  reborn: 'перерождение',
+  divineShield: 'божественный щит',
+  taunt: 'провокация',
+  windfury: 'неистовство ветра',
+  poisonous: 'яд',
+  venomous: 'токсичность',
+  stealth: 'маскировка',
+};
+
+/**
+ * Чего стоит ключевое слово на теле — те же веса и те же капы, что
+ * у покупки. Щит, вихрь и перерождение усиливают САМО тело и не могут
+ * стоить дороже него: щит на 2/1 спасает полтора очка статов, а не три
+ * (сверка с симулятором, part7, ход 3: Crackling Cyclone 2/1 со щитом
+ * и вихрем против Molten Rock 3/3 при цене промаха 50 п.п.). Провокация
+ * и яд телом не меряются: они меняют чужое поведение и чужие тела.
+ *
+ * Одна функция на два вопроса — «чего стоит купить миньона со словом»
+ * (`minionValue`) и «чего стоит подарить слово своему» (сила героя,
+ * part32): вторая копия формулы разъехалась бы молча.
+ */
+function keywordValue(
+  field: BinaryKeywordField,
+  attack: number,
+  health: number,
+  rules: TavernRules,
+): number {
+  const w = rules.value;
+  const stats = (attack + health) * w.perStatPoint;
+  switch (field) {
+    case 'taunt':
+      return w.taunt;
+    case 'divineShield':
+      return Math.min(w.divineShield, stats);
+    case 'poisonous':
+    case 'venomous':
+      return w.poisonous;
+    case 'windfury':
+      return Math.min(w.windfury, attack * w.perStatPoint);
+    case 'reborn':
+      return Math.min(w.reborn, stats);
+    case 'stealth':
+      return 0;
+  }
+}
 
 const BINARY_KEYWORD_FLAGS: readonly (readonly [string, (m: Minion) => boolean])[] =
   BINARY_KEYWORDS.map(([mech, field]) => [mech, (m: Minion): boolean => m[field]]);
@@ -3288,6 +3380,174 @@ export function freeHeroPowerRule(
       `${info?.name ?? hero.heroPowerCardId} бесплатна и обновляет витрину — ` +
       'нажать, когда нынешняя витрина отработана',
   };
+}
+
+/**
+ * Правило силы героя, ДАЮЩЕЙ СВОЕМУ МИНЬОНУ КЛЮЧЕВОЕ СЛОВО.
+ *
+ * Фактура — part32 (Король-лич, «Ритуал перерождения» `TB_BaconShop_HP_024`:
+ * «Give a minion Reborn until next turn»). Сила бесплатна и активна
+ * (`HAS_ACTIVATE_POWER` без тега `COST`), игрок нажал её на каждом из
+ * шестнадцати ходов таверны и по первому скриншоту написал: «не предлагает
+ * сыграть силу героя, хотя её точно стоит сыграть». Советник молчал всю
+ * партию: бесплатные силы советовались только с текстом про обновление
+ * витрины (part13) и выстрел по витрине (part29), а «даёт своему миньону
+ * слово» не читал никто — на первом ходу при золоте 0/3 совет был «НИЧЕГО».
+ *
+ * Лог (23:49:36): блок `PLAY` на сущности силы с `Target=` своим миньоном,
+ * энчант `TB_BaconShop_HP_024e2` («Reborn until next turn») на цели;
+ * после нажатия на силе `EXHAUSTED=1` — первый случай этого тега на силе
+ * во всех фикстурах — и `EXHAUSTED=0` в начале следующего хода. «Нажато»
+ * по-прежнему считается блоком, как у всех сил.
+ *
+ * Слово — группа шаблона `heroPowerKeywordWords`, сведённая к живому
+ * признаку миньона той же таблицей `BINARY_KEYWORDS`, что у магнитов.
+ * Цена — живой тег (у Boon of Light `COST=1`), очки — ценность слова
+ * на цели теми же весами и капами, что у покупки (`keywordValue`), минус
+ * цена по курсу золота. У бесплатной силы очки малые (перерождение — до 2):
+ * это напоминание, которое всплывает, когда покупки сделаны, — как у силы-
+ * обновления; платный щит за 1 по этому курсу молчит (3 − 3 = 0), и это
+ * не порог, а честная цена на нашей шкале.
+ *
+ * Кому — арифметика самого слова, а не мнение:
+ *
+ *  1. **Тому, у кого его ещё нет** — второй раз слово не дарится (part13,
+ *     дар магнита на уже перерождённого).
+ *  2. **Перерождение — ВТОРАЯ СМЕРТЬ, и хрип срабатывает дважды**, поэтому
+ *     носитель хрипа впереди тела без него. Хрип, который САМ дарит
+ *     перерождение («Deathrattle: Give a different friendly Undead Reborn»,
+ *     Mummifier), — цепочка: одно нажатие оборачивается тремя
+ *     перерождениями, пока на борде есть кому его получить. Игрок так
+ *     и играл: шесть нажатий подряд на Mummifier (ходы 13–23).
+ *  3. **Возвращается с ОДНИМ здоровьем и полной атакой** — среди равных
+ *     выбирается атака, а не сумма статов: здоровье вторая жизнь
+ *     не наследует.
+ *  4. Прочие слова — крупнейшее тело, как у баффа; провокация обходит
+ *     движков (part15).
+ *
+ * Что НЕ решено и записано, а не спрятано: на ходу 11 игрок дал
+ * перерождение золотому Deathswarmer 6/8 (без хрипа), правило называет
+ * Friendly Geist 10/3 с хрипом; с хода 25 он выбирал Deathly Striker
+ * (хрип-призыв из руки) при Mummifier рядом — чей выбор лучше, решил бы
+ * только бой, и досчёт цели симулятором отложен (docs/tavern.md).
+ */
+export function heroPowerKeywordRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  const cost = hero.heroPowerCost ?? 0;
+  if (cost > state.gold) return null;
+  if (state.board.length === 0) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  const field = grantedKeyword(text, rules);
+  if (field === null) return null;
+
+  const chosen = keywordTarget(field, state, deps, rules);
+  if (chosen === null) return null;
+  const { target, notes } = chosen;
+
+  const gift = keywordValue(field, target.attack ?? 0, target.health ?? 0, rules);
+  const score = gift - cost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  const name = deps.cards.info(target.cardId)?.name ?? target.cardId;
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    targetMinion: target,
+    grantsKeyword: field,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} ${cost > 0 ? `за ${String(cost)}` : 'бесплатна'} — ` +
+      `${KEYWORD_NAME_RU[field]} на ${name} ` +
+      `${String(target.attack ?? '?')}/${String(target.health ?? '?')} (${gift.toFixed(1)})` +
+      (notes.length > 0 ? `: ${notes.join('; ')}` : ''),
+  };
+}
+
+/** Какое слово дарит сила — по тексту; `null`, если никакого. */
+function grantedKeyword(text: string, rules: TavernRules): BinaryKeywordField | null {
+  for (const word of rules.heroPowerKeywordWords) {
+    const found = new RegExp(word, 'i').exec(text)?.[1]?.toLowerCase();
+    if (found === undefined) continue;
+    return KEYWORD_BY_WORD[found] ?? null;
+  }
+  return null;
+}
+
+/** Дарит ли хрип миньона то же слово — «Deathrattle: Give … Reborn». */
+function deathrattleGrants(m: Minion, field: BinaryKeywordField, cards: CardIndex): boolean {
+  const text = cards.info(m.cardId)?.text ?? '';
+  return new RegExp(`deathrattle:[^.]*\\b${KEYWORD_WORD[field]}\\b`, 'i').test(text);
+}
+
+/**
+ * Кому подарить слово — см. `heroPowerKeywordRule`. `null` — некому:
+ * слово уже у всех.
+ */
+function keywordTarget(
+  field: BinaryKeywordField,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { readonly target: Minion; readonly notes: string[] } | null {
+  const cards = deps.cards;
+  const eligible = state.board.filter((m) => !m[field]);
+  if (eligible.length === 0) return null;
+
+  const notes: string[] = [];
+  const sum = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+  const largest = (list: readonly Minion[]): Minion =>
+    list.reduce((a, b) => (sum(b) > sum(a) ? b : a));
+  let pool: readonly Minion[] = eligible;
+
+  if (field === 'reborn') {
+    const rattlers = pool.filter(
+      (m) => cards.info(m.cardId)?.mechanics.includes('DEATHRATTLE') ?? false,
+    );
+    if (rattlers.length > 0) {
+      pool = rattlers;
+      notes.push('хрип сработает дважды');
+    }
+    const chains = pool.filter(
+      (m) =>
+        deathrattleGrants(m, field, cards) &&
+        state.board.some((o) => o.entityId !== m.entityId && !o[field]),
+    );
+    if (chains.length > 0) {
+      pool = chains;
+      notes.push('его хрип сам дарит перерождение — цепочка');
+    }
+    const target = pool.reduce((a, b) =>
+      (b.attack ?? 0) > (a.attack ?? 0) ||
+      ((b.attack ?? 0) === (a.attack ?? 0) && sum(b) > sum(a))
+        ? b
+        : a,
+    );
+    notes.push('вернётся с полной атакой на одно здоровье');
+    if (eligible.length < state.board.length) notes.push('у остальных оно уже есть');
+    return { target, notes };
+  }
+
+  if (field === 'taunt') {
+    const bodies = pool.filter((m) => !isEffectEngine(m, cards, rules));
+    if (bodies.length > 0 && bodies.length < pool.length) {
+      pool = bodies;
+      notes.push('провокация зовёт удары, миньоны-эффекты не подставляются');
+    }
+  }
+  if (eligible.length < state.board.length) notes.push('у остальных оно уже есть');
+  return { target: largest(pool), notes };
 }
 
 /**
@@ -5759,6 +6019,7 @@ export function adviseTavern(
     levelUpRule(state, rules, buys, copiesForTriple(state, deps.cards, rules)),
     heroPowerRule(state, deps, rules),
     freeHeroPowerRule(state, deps, rules),
+    heroPowerKeywordRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),
     ...activationRules(state, deps, rules),

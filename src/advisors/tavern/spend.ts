@@ -1,5 +1,10 @@
 import type { GameState, Minion } from '../../state/types.js';
-import { adviseTavern, type Recommendation, type TavernAdvisorDeps } from './advisor.js';
+import {
+  adviseTavern,
+  withKeyword,
+  type Recommendation,
+  type TavernAdvisorDeps,
+} from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 
 /**
@@ -253,6 +258,11 @@ export function applyRecommendation(
 
     case 'heroPower': {
       const hero = state.hero;
+      // Сила, ДАРЯЩАЯ своему миньону слово («Give a minion Reborn», part32):
+      // эффект известен целиком — слово ложится на цель, и шаг прозрачен.
+      const gift = rec.targetMinion;
+      const keyword = rec.grantsKeyword;
+      const grants = gift != null && keyword !== undefined;
       return {
         state: paid({
           hero: hero === null ? null : { ...hero, heroPowerUsedThisTurn: true },
@@ -261,8 +271,11 @@ export function applyRecommendation(
           // следующий шаг плана мог бы предложить купить то, чем мы только
           // что выстрелили.
           shop: rec.minion === null ? state.shop : withoutEntity(state.shop, rec.minion.entityId),
+          board: grants
+            ? state.board.map((m) => (m.entityId === gift.entityId ? withKeyword(m, keyword) : m))
+            : state.board,
         }),
-        opaque: true,
+        opaque: !grants,
         terminal: false,
       };
     }

@@ -74,6 +74,7 @@ describe('покрытие сил героя правилами советник
     if (matches(id, R.heroPowerSpellWords)) on.push('spell');
     if (matches(id, R.tripleCopiesWords)) on.push('triple');
     if (matches(id, R.heroPowerPlayStatsWords)) on.push('play');
+    if (matches(id, R.heroPowerKeywordWords)) on.push('keyword');
     return on;
   };
 
@@ -95,11 +96,15 @@ describe('покрытие сил героя правилами советник
     // по фактуре одной партии, а не по догадке о классе.
     expect(count('triple')).toBe(1);
     expect(count('play')).toBe(1);
+    // «Give a minion Reborn/Divine Shield» — Reborn Rites (part32) и Boon
+    // of Light; пассивный «Start of Combat: Give your left-most minion…»
+    // (Swatting Insects) шаблон не ловит намеренно: нажимать там нечего.
+    expect(count('keyword')).toBe(2);
   });
 
-  it('из 174 сил пула советник не берёт ничего у 124', () => {
+  it('из 174 сил пула советник не берёт ничего у 122', () => {
     const mute = pool.filter((id) => channelsOf(id).length === 0);
-    expect(mute).toHaveLength(124);
+    expect(mute).toHaveLength(122);
 
     // Число большое, и прятать его незачем: сила героя определяет стиль
     // партии, а мы читаем меньше трети пула. Что из этого стоит вносить —
@@ -127,6 +132,7 @@ describe('покрытие сил героя правилами советник
     expect(channelsOf('BG34_HERO_002p')).toEqual(['triple']);
     expect(channelsOf('TB_BaconShop_HP_042')).toEqual(['play']);
     expect(channelsOf('TB_BaconShop_HP_056')).toEqual(['tribe', 'sell']);
+    expect(channelsOf('TB_BaconShop_HP_024')).toEqual(['keyword']);
 
     // А это — сила самой частой партии датасета (три раза), и она
     // показывает, почему счёт по тексту ВЕРХНИЙ: «Discover a minion with
