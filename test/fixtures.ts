@@ -386,6 +386,38 @@ export function part28Game(): string {
 }
 
 /**
+ * Партия 29 — двадцать первая с оверлеем (27.08.2026, 01:07–01:31,
+ * Scoutmaster Tavish `BG22_HERO_000_SKIN_A`, 3-е место), третья на билде
+ * 250339. Пять пунктов обратной связи по пяти скриншотам.
+ *
+ * Фактура:
+ *
+ *  - **бесплатная сила героя с ЦЕЛЬЮ В ВИТРИНЕ** — «Lock and Load»
+ *    `BG22_HERO_000p_Alt` («Remove a minion in the Tavern. When you have
+ *    space next combat, fire it at a random enemy minion»): активная
+ *    (`HAS_ACTIVATE_POWER`), без тега `COST`, нажата 13 раз за партию.
+ *    Применение — блок `PLAY` на сущности силы с `Target=` миньоном
+ *    витрины; копия цели уходит в `SETASIDE` под наш контроллер
+ *    (`TAG_SCRIPT_DATA_ENT_1`), заряд `TAG_SCRIPT_DATA_NUM_1` 0 → 1,
+ *    сам миньон — в `REMOVEDFROMGAME`, а в начале боя заряд тратится
+ *    обратно в ноль;
+ *  - **цена В ЗДОРОВЬЕ** — тег `BACON_COSTS_HEALTH_TO_BUY=1` на карте
+ *    витрины (Hasty Excavation `BG28_571`, «Gain 1 Gold. This costs Health
+ *    to buy instead of Gold», `COST=3`). Покупка в логе: `META_DATA -
+ *    Meta=SPEND_HEALTH Data=3`, броня героя 14 → 11 и тут же обратно 14
+ *    триггером Soul Rewinder `BG26_174` («After your hero takes damage,
+ *    rewind it and give this +1 Health») — то есть здоровье вернулось;
+ *  - **тройка считает копии В РУКЕ** — тег `BACON_PAIR_CANDIDATE` игра
+ *    ставит на карту витрины и тогда, когда единственная наша копия лежит
+ *    в руке (part29 ход 23 `BG31_330`, part22 — шесть таких случаев);
+ *  - **заморозка ради предложения дешевле покупки** на ходах 5 и 7:
+ *    шесть и семь золота следующего хода, где лишнего тела уже не выходит.
+ */
+export function part29Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part29', 'game.log'), 'utf8');
+}
+
+/**
  * Та же фикстура байтами, без разбора в строку.
  *
  * Нужна живому режиму: он читает файл порциями произвольной границы, и порция
