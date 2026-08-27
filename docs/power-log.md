@@ -724,6 +724,114 @@ D 21:16:17 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=�
 by N» — не «плюс монета в этот ход» и не «быстрее упрёшься в потолок»,
 а по монете каждый оставшийся ход до конца партии.
 
+## Сила героя с ЦЕЛЬЮ в витрине: Target у блока PLAY (part29)
+
+Силы героя применяются блоком `BlockType=PLAY` на своей сущности — это
+записано выше. У **целевой** силы у того же блока заполнено поле `Target=`,
+и целью бывает миньон ВИТРИНЫ (`player=11`). Фактура — «Lock and Load»
+Тавиша `BG22_HERO_000p_Alt` («Remove a minion in the Tavern. When you have
+space next combat, fire it at a random enemy minion»), 13 нажатий за партию:
+
+```
+01:09:37 BLOCK_START BlockType=PLAY Entity=[… id=181 cardId=BG22_HERO_000p_Alt player=3]
+         Target=[entityName=Подозрительный надзиратель id=451 … cardId=BG36_345 player=11] SubOption=-1
+    TAG_CHANGE Entity=[… id=181 …] tag=CARD_TARGET value=451
+    BLOCK_START BlockType=POWER …
+        FULL_ENTITY - Creating ID=491 CardID=BG36_345      ← копия цели
+            tag=CONTROLLER value=3      tag=ZONE value=SETASIDE
+            tag=ATK value=3             tag=HEALTH value=3
+        TAG_CHANGE Entity=491 tag=COPIED_FROM_ENTITY_ID value=451
+        TAG_CHANGE Entity=[… id=181 …] tag=TAG_SCRIPT_DATA_ENT_1 value=491
+        TAG_CHANGE Entity=[… id=181 …] tag=TAG_SCRIPT_DATA_NUM_1 value=1   ← заряд
+        HIDE_ENTITY - Entity=[… id=451 …] tag=ZONE value=SETASIDE
+        SHOW_ENTITY - Updating Entity=[… id=451 …] …
+            tag=ZONE value=REMOVEDFROMGAME                 ← из витрины насовсем
+```
+
+Что отсюда читается:
+
+- **цель — поле `Target=` блока PLAY**, тем же способом, каким читаются
+  цели заклинаний;
+- **заряд — `TAG_SCRIPT_DATA_NUM_1` на сущности силы**, а сама заряженная
+  копия — `TAG_SCRIPT_DATA_ENT_1`. В начале следующего боя заряд тратится
+  обратно в ноль (`NUM_1` 1 → 0), и копия выходит на пустой слот: на
+  01:10:40 выстреленный Клыкастый походник 2/4 получает 4 урона от чужого
+  Иглошкура и уходит в `SETASIDE`. Пар «1 → 0» за партию тринадцать —
+  по одной на ход;
+- **карта витрины уходит `REMOVEDFROMGAME`**, то есть нажатие силы стоит
+  одной карты магазина. Витрину это не дозаполняет.
+
+Слов «remove a minion» среди 2147 карт типа `HERO_POWER` в снапшоте
+не встречается больше нигде: сила такая в пуле одна.
+
+## Цена в ЗДОРОВЬЕ: BACON_COSTS_HEALTH_TO_BUY и META_DATA SPEND_HEALTH
+
+Цена карты витрины лежит в теге `COST` — но платится она не всегда
+золотом. Признак — **тег `BACON_COSTS_HEALTH_TO_BUY=1` на самой карте**,
+он приходит вместе с остальными в `FULL_ENTITY`:
+
+```
+01:11:43 FULL_ENTITY - Creating ID=1709 CardID=BG28_571
+             tag=CARDTYPE value=BATTLEGROUND_SPELL
+             tag=COST value=3
+             tag=BACON_COSTS_HEALTH_TO_BUY value=1
+```
+
+Покупка выглядит так (Hasty Excavation `BG28_571`, «Gain 1 Gold. This costs
+Health to buy instead of Gold»):
+
+```
+01:14:09 BLOCK_START BlockType=PLAY … cardId=TB_BaconShop_DragBuy_Spell
+         Target=[entityName=Торопливые раскопки id=2364 … cardId=BG28_571 player=11]
+    TAG_CHANGE … Главный разведчик Тавиш … tag=PREDAMAGE value=3
+    META_DATA - Meta=SPEND_HEALTH Data=0
+    BLOCK_START BlockType=TRIGGER Entity=[… id=2355 cardId=BG26_174 …]   ← Soul Rewinder
+    META_DATA - Meta=DAMAGE Data=3
+    TAG_CHANGE … Тавиш … tag=ARMOR value=11         ← было 14
+    META_DATA - Meta=SPEND_HEALTH Data=3
+    BLOCK_START BlockType=TRIGGER Entity=[… cardId=BG26_174 …]
+        TAG_CHANGE … Тавиш … tag=ARMOR value=14     ← вернулось
+        TAG_CHANGE … BG26_174 … tag=HEALTH value=2  ← «and give this +1 Health»
+```
+
+То есть трата здоровья — это настоящий урон герою (`PREDAMAGE` → `DAMAGE`
+→ `ARMOR`), и триггер «After your hero takes damage, rewind it» на неё
+срабатывает. Обратный ход подтверждён числом: броня 14 → 11 → 14.
+
+Тег ставит игра, и ставит его не только на карты, у которых цена
+в здоровье своя. В пуле есть источники, делающие платой за здоровье ЧУЖУЮ
+покупку: Malchezaar `BG26_524` и Bazaar Dealer `BG28_905` на борде,
+наклейки `BG32_MagicItem_821`/`822`, тринкеты `BG30_MagicItem_701`
+и `BG35_MagicItem_152`, боевой клич `BG32_893`. Поэтому читать надо тег,
+а не текст.
+
+По фикстурам тег встречается в part22, part23, part24, part25, part27
+и part29 — и всюду только на `BG28_571`.
+
+**Ловушка:** тег переставляется вместе с остальными на переходе хода
+(«… value=0», следом «… value=1» — 01:13:30), и снимок, взятый между
+двумя строками, прочитает `false`. Это общее свойство потока тегов,
+а не особенность этого.
+
+## Пара под тройку считается и по РУКЕ: BACON_PAIR_CANDIDATE
+
+Игра сама помечает карту витрины, которая соберёт нам пару или тройку, —
+тег `BACON_PAIR_CANDIDATE=1` на миньоне витрины. Важно, ЧТО она при этом
+считает: копии **на борде и в руке**, а не только на борде.
+
+Проверено прогоном по двум фикстурам (снимок на каждой строке, меняющей
+зоны и теги пары):
+
+| партия | пара помечена, копия только в РУКЕ | только на борде | копии не найдено |
+|---|---|---|---|
+| part29 | 1 (ход 23, `BG31_330`) | 5 | 0 |
+| part22 | 6 (`BG32_330`, `BGS_004`, `BG36_764`, `BG26_137`, `BGS_020`, `BG35_142`) | 4 | 0 |
+
+Ни одного случая «пара без копии» — то есть тег не шумит, а копии руки
+он действительно считает. Отсюда следствие для советника: держать вторую
+копию в руке ничем не хуже, чем на борде, а слот на борде она тратит
+навсегда.
+
 ## Заклинания в руке и плейсхолдеры текстов
 
 Заклинания приходят обычными сущностями с `CARDTYPE=SPELL`. Факты part10:
