@@ -1,0 +1,144 @@
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { EXPORT_FORMAT, type ExportManifest } from '../../src/collector/export.js';
+import { writeTar } from '../../src/collector/tar.js';
+import { aliasOf, importArchive, sessionStamp, splitGames } from '../../src/dataset/import.js';
+import { type DatasetRecord } from '../../src/dataset/recorder.js';
+import { part7Game } from '../fixtures.js';
+
+/**
+ * Приём архива исполнителя на настоящей партии (part7, билд 248348,
+ * 7-е место): партия принимается записью с пометкой исполнителя, повторный
+ * архив даёт дубль, обрыв лога — отказ с причиной, сырой архив
+ * раскладывается в contrib/.
+ */
+
+const SESSION = 'Hearthstone_2026_08_13_20_19_19';
+
+describe('импорт архива логов', () => {
+  let dir: string;
+  let text: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'hsbg-import-'));
+    text = part7Game();
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function makeArchive(name: string, log: string, overlay: boolean | null): Promise<string> {
+    const meta = {
+      session: SESSION,
+      sourceBytes: Buffer.byteLength(log),
+      complete: true,
+      overlay,
+      appVersion: '0.1.0',
+      archivedAt: '2026-08-28T12:00:00.000Z',
+    };
+    const manifest: ExportManifest = {
+      format: EXPORT_FORMAT,
+      appVersion: '0.1.0',
+      exportedAt: '2026-08-28T12:00:00.000Z',
+      sessions: [{ ...meta, file: `${SESSION}.Power.log.gz`, gzBytes: 0 }],
+    };
+    const path = join(dir, name);
+    await writeTar(path, [
+      { name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest)) },
+      { name: `${SESSION}.Power.log.gz`, data: gzipSync(Buffer.from(log, 'utf8')) },
+      { name: `${SESSION}.meta.json`, data: Buffer.from(JSON.stringify(meta)) },
+    ]);
+    return path;
+  }
+
+  it('нарезает сессию на партии по CREATE_GAME канала-источника', () => {
+    const log = [
+      'D 20:19:00.0000000 GameState.DebugPrintGame() - прогрев',
+      'D 20:19:19.3857739 GameState.DebugPrintPower() - CREATE_GAME',
+      'D 20:19:19.3857739 GameState.DebugPrintPower() -     GameEntity EntityID=1',
+      // Дубль из канала PowerTaskList партию НЕ начинает.
+      'D 20:19:19.4000000 PowerTaskList.DebugPrintPower() - CREATE_GAME',
+      'D 20:45:00.0000000 GameState.DebugPrintPower() - CREATE_GAME',
+      'D 20:45:00.0000000 GameState.DebugPrintPower() -     GameEntity EntityID=1',
+    ].join('\r\n');
+    const games = splitGames(log);
+    expect(games).toHaveLength(2);
+    expect(games[0]?.split('\n')).toHaveLength(3);
+    expect(games[1]?.split('\n')).toHaveLength(2);
+  });
+
+  it('псевдоним из BattleTag и штамп из имени сессии', () => {
+    expect(aliasOf('AngryMem#2886')).toBe('AngryMem-2886');
+    expect(aliasOf('Игрок#1')).toBe('Игрок-1');
+    expect(aliasOf('#')).toBe('unknown');
+    expect(sessionStamp(SESSION)).toBe('2026-08-13T20-19-19');
+  });
+
+  it('партия принимается записью исполнителя, повторный архив — дубль', async () => {
+    const datasetDir = join(dir, 'dataset');
+    const contribDir = join(dir, 'contrib');
+    const tar = await makeArchive('hsbg-logs_2026-08-28_12-00.tar', text, true);
+
+    const report = importArchive(tar, {
+      datasetDir,
+      contribDir,
+      alias: null,
+      rating: 8500,
+      now: () => new Date('2026-08-28T13:00:00Z'),
+    });
+
+    expect(report.accepted).toHaveLength(1);
+    expect(report.skipped).toEqual([]);
+    const game = report.accepted[0];
+    expect(game).toMatchObject({ session: SESSION, index: 1, finalPlace: 7, buildNumber: 248348, partial: false, overlay: true });
+    expect(game?.checkpoints).toBeGreaterThan(5);
+    // Псевдоним взят из лога — BattleTag игрока part7.
+    expect(report.alias).toMatch(/^[\p{L}\p{N}_]+-\d+$/u);
+    expect(game?.fileName).toBe(`c-${report.alias}_2026-08-13T20-19-19_g1_b248348_p7.json`);
+
+    const record = JSON.parse(readFileSync(join(datasetDir, game?.fileName ?? ''), 'utf8')) as DatasetRecord;
+    expect(record.contributor).toBe(report.alias);
+    expect(record.contributorRating).toBe(8500);
+    expect(record.overlay).toBe(true);
+    expect(record.actions?.length).toBeGreaterThan(0);
+
+    // Сырой архив разложен как пришёл.
+    expect(report.rawDir).toBe(join(contribDir, report.alias, 'hsbg-logs_2026-08-28_12-00'));
+    expect(readdirSync(report.rawDir).sort()).toEqual([
+      `${SESSION}.Power.log.gz`,
+      `${SESSION}.meta.json`,
+      'manifest.json',
+    ]);
+
+    // Тот же архив второй раз — та же партия, дубль по отпечатку.
+    const again = importArchive(tar, { datasetDir, contribDir, alias: 'кто-то', rating: null });
+    expect(again.accepted).toEqual([]);
+    expect(again.skipped.map((s) => s.reason)).toEqual(['дубль']);
+    expect(readdirSync(datasetDir)).toHaveLength(1);
+  }, 120_000);
+
+  it('обрыв лога до конца партии — отказ с причиной, без записи', async () => {
+    const datasetDir = join(dir, 'dataset-cut');
+    const cut = text.slice(0, Math.floor(text.length * 0.5));
+    const tar = await makeArchive('hsbg-logs_cut.tar', cut, null);
+
+    const report = importArchive(tar, { datasetDir, contribDir: join(dir, 'contrib-cut'), alias: 'tester', rating: null });
+    expect(report.accepted).toEqual([]);
+    expect(report.skipped).toHaveLength(1);
+    expect(report.skipped[0]?.reason).toBe('обрыв');
+    expect(report.alias).toBe('tester');
+  }, 120_000);
+
+  it('чужой файл не принимается за архив', async () => {
+    const path = join(dir, 'other.tar');
+    await writeTar(path, [{ name: 'readme.txt', data: Buffer.from('x') }]);
+    expect(() => importArchive(path, { datasetDir: join(dir, 'x'), contribDir: join(dir, 'y') })).toThrow(/manifest/);
+    writeFileSync(path, '');
+  });
+});

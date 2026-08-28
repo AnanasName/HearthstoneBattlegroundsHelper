@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { DATASET_DIR } from '../app/paths.js';
 import type { GameState, PlayerAction } from '../state/types.js';
 
 /**
@@ -40,6 +41,20 @@ export interface DatasetRecord {
    * из фикстур, а живой путь получает из `GameState.actions` сам.
    */
   readonly actions?: readonly PlayerAction[];
+  /**
+   * Чья партия, если не своя: псевдоним исполнителя, под которым архив
+   * принят командой `dataset:import`. У собственных записей поля нет —
+   * отсутствие и значит «своя», как у `actions` до 19.08.
+   */
+  readonly contributor?: string;
+  /** Рейтинг исполнителя СО СЛОВ: в Power.log рейтинга нет (проверено part33). */
+  readonly contributorRating?: number;
+  /**
+   * Шёл ли при этой партии оверлей с советами. Партия, сыгранная
+   * по подсказкам, — не «как играют люди», а «как играют с советником»
+   * (второй контур петли, docs/ml.md); без флага их не различить.
+   */
+  readonly overlay?: boolean;
 }
 
 /**
@@ -183,5 +198,8 @@ export class DatasetRecorder {
   }
 }
 
-/** Каталог датасета по умолчанию — рядом с фикстурами, но вне git. */
-export const DATASET_DIR = 'data/dataset';
+/**
+ * Каталог датасета по умолчанию: из репозитория — `data/dataset` рядом
+ * с фикстурами, вне git; из сборки — в профиле пользователя (`app/paths.ts`).
+ */
+export { DATASET_DIR };
