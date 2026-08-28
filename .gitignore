@@ -38,3 +38,13 @@ scratch-*.mjs
 analyze-prof*.mjs
 bench-prof*/
 *.cpuprofile
+
+# Сборщик логов и приём архивов от исполнителей. В разработке оба каталога
+# живут в data/ (src/app/paths.ts), в сборке — в профиле пользователя.
+# Архивы Power.log по сессиям — сырьё, которое присылают исполнители;
+# contrib/ — их архивы как пришли, кандидаты в фикстуры.
+data/games/
+data/contrib/
+
+# Инсталлятор: вывод electron-builder.
+release/
