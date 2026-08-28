@@ -15,7 +15,9 @@ import type { BgsBattleOptions } from '@firestone-hs/simulate-bgs-battle/dist/bg
 import { CardsData } from '@firestone-hs/simulate-bgs-battle/dist/cards/cards-data.js';
 import type { SimulationResult } from '@firestone-hs/simulate-bgs-battle/dist/simulation-result.js';
 
-export const CARDS_PATH = 'data/cards/cards_enUS.json';
+import { CARDS_PATH } from '../../app/paths.js';
+
+export { CARDS_PATH };
 
 /**
  * Опции, которые стоит задавать всегда, — умолчания пакета для нас плохи.

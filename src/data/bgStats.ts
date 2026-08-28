@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { BG_STATS_DIR } from '../app/paths.js';
 
 /**
  * Статистика Battlegrounds: средние места героев и тринкетов.
@@ -13,9 +16,10 @@ import { readFileSync } from 'node:fs';
  * партий — шум, а не знание.
  */
 
-export const BG_STATS_DIR = 'data/bgstats';
-export const HERO_STATS_PATH = `${BG_STATS_DIR}/hero-stats.json`;
-export const TRINKET_STATS_PATH = `${BG_STATS_DIR}/trinket-stats.json`;
+/** Каталог снапшота решает `app/paths.ts`: из репозитория или из сборки. */
+export { BG_STATS_DIR };
+export const HERO_STATS_PATH = join(BG_STATS_DIR, 'hero-stats.json');
+export const TRINKET_STATS_PATH = join(BG_STATS_DIR, 'trinket-stats.json');
 
 /** Ниже этого числа партий среднее место не показывается вовсе. */
 export const MIN_DATA_POINTS = 500;

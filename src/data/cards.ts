@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 
+import { CARDS_PATH } from '../app/paths.js';
+
 /**
  * Справочник карт: cardId → племя, тир, статы.
  *
@@ -186,7 +188,8 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
   };
 }
 
-export const CARDS_PATH = 'data/cards/cards_enUS.json';
+/** Путь к снапшоту решает `app/paths.ts`: из репозитория или из сборки. */
+export { CARDS_PATH };
 
 export function loadCardIndex(path: string = CARDS_PATH): CardIndex {
   const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
