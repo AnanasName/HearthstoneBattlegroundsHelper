@@ -36,6 +36,7 @@
     "dataset:backfill": "tsx src/dataset/backfill.ts",
     "dataset:import": "tsx src/dataset/importCli.ts",
     "ml:eval": "tsx src/ml/report.ts",
+    "ml:eval3": "tsx src/ml/report.ts --features=relative",
     "ml:imitation": "tsx src/ml/imitationReport.ts",
     "ml:track": "tsx src/ml/track.ts",
     "measure:cardstats": "tsx src/advisors/tavern/measureCardStats.ts",

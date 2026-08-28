@@ -5,11 +5,13 @@ import {
   bucketIndexOf,
   evaluateLogo,
   lateDeltas,
+  pairedDeltas,
   signFlipBand,
   summarizeBuckets,
   summarizeEvals,
   toMlGame,
   verdictOf,
+  verdictOfRelative,
   type CheckpointEval,
   type GameEval,
   type MlGame,
@@ -90,6 +92,45 @@ describe('оценка LOGO', () => {
     expect(ml.tavernTurns).toEqual([3]);
     expect(ml.currentPlaces).toEqual([6]);
     expect(ml.rows[0]?.[1]).toBe(2);
+
+    // Набор признаков — параметр, а ход таверны читается из состояния,
+    // не из первого признака: у относительного набора первый — место.
+    const relative = toMlGame(game, (s) => [s.finalPlace ?? 0, 42]);
+    expect(relative.rows).toEqual([[6, 42]]);
+    expect(relative.tavernTurns).toEqual([3]);
+  });
+
+  it('парные разности против второй модели считаются по имени партии', () => {
+    const evalOf = (name: string, maeModel: number, maeCurrent: number): GameEval => ({
+      name,
+      finalPlace: 1,
+      maeModel,
+      maeCurrent,
+      maeMean: 0,
+      checkpoints: [],
+    });
+    const d2 = pairedDeltas(
+      [evalOf('a', 1.0, 3.0), evalOf('b', 2.0, 3.0)],
+      [evalOf('b', 2.5, 0), evalOf('a', 1.2, 0)],
+    );
+    expect(d2[0]).toBeCloseTo(0.2, 12);
+    expect(d2[1]).toBeCloseTo(0.5, 12);
+  });
+
+  it('вердикт замера 3 — условия замера 1 плюс сигнал сверх сжатия', () => {
+    const band = { p05: -0.3, p95: 0.2 };
+    const band2 = { p05: -0.1, p95: 0.08 };
+    // Всё взято: и против таблицы, и против сжатого места.
+    expect(verdictOfRelative(0.4, band, 0.1, 1.0, 1.5, 0.12, band2, 0.09)).toBe('ПРИНЯТЬ');
+    // Против таблицы взято, а сверх сжатия — только шум: не доказано.
+    expect(verdictOfRelative(0.4, band, 0.1, 1.0, 1.5, 0.05, band2, 0.09)).toBe('НЕ ДОКАЗАНО');
+    expect(verdictOfRelative(0.4, band, 0.1, 1.0, 1.5, 0.085, band2, 0.09)).toBe('НЕ ДОКАЗАНО');
+    // Относительные признаки ХУЖЕ сжатия — отвергнуть, даже при выигрыше у таблицы.
+    expect(verdictOfRelative(0.4, band, 0.1, 1.0, 1.5, -0.15, band2, 0.09)).toBe('ОТВЕРГНУТЬ');
+    // Таблица знает не меньше — отвергнуть, как в замере 1.
+    expect(verdictOfRelative(-0.5, band, 0.1, 1.5, 1.4, 0.0, band2, 0.09)).toBe('ОТВЕРГНУТЬ');
+    // Минус внутри обеих полос — не доказано.
+    expect(verdictOfRelative(-0.1, band, 0.1, 1.5, 1.4, -0.05, band2, 0.09)).toBe('НЕ ДОКАЗАНО');
   });
 
   it('полоса sign-flip детерминирована зерном и накрывает ноль', () => {

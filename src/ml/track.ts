@@ -97,7 +97,7 @@ function shift(now: number, before: number | undefined, asPoints: boolean): stri
 function main(): void {
   const data = loadDataset();
   const cards = loadCardIndex();
-  const games = data.games.map(toMlGame);
+  const games = data.games.map((g) => toMlGame(g));
   const points = games.reduce((n, g) => n + g.rows.length, 0);
 
   // Состав по билдам печатается ВСЕГДА и первым. В день выхода патча

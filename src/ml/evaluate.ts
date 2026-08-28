@@ -1,4 +1,6 @@
+import { tavernTurnOf } from '../advisors/tavern/rules.js';
 import { mean, percentile } from '../advisors/tavern/statAnalysis.js';
+import type { GameState } from '../state/types.js';
 import { extractFeatures, MISSING_PLACE } from './features.js';
 import { clampPlace, fitRidge, predictRidge } from './ridge.js';
 import type { DatasetGame } from './dataset.js';
@@ -29,15 +31,24 @@ export interface MlGame {
   readonly currentPlaces: readonly (number | null)[];
 }
 
-export function toMlGame(game: DatasetGame): MlGame {
+/**
+ * Партия в числах. Набор признаков — параметр: замер 1 считает семь
+ * «своих» (`extractFeatures`), замер 3 — относительные
+ * (`extractRelativeFeatures`). Ход таверны читается из состояния,
+ * а не из первого признака: у относительного набора первый признак —
+ * место, и корзины ходов с полосой D̄_late обязаны считаться одинаково
+ * для любого набора.
+ */
+export function toMlGame(
+  game: DatasetGame,
+  extract: (state: GameState) => readonly number[] = extractFeatures,
+): MlGame {
   const states = game.record.checkpoints.map((cp) => cp.state);
-  const rows = states.map(extractFeatures);
   return {
     name: game.fileName,
     finalPlace: game.finalPlace,
-    rows,
-    // Признак №1 — уже ход таверны; вторая правда о шкале ходов не нужна.
-    tavernTurns: rows.map((row) => row[0] ?? 0),
+    rows: states.map(extract),
+    tavernTurns: states.map((s) => tavernTurnOf(s.turn)),
     currentPlaces: states.map((s) => s.finalPlace),
   };
 }
@@ -83,7 +94,8 @@ export function bucketIndexOf(tavernTurn: number): number {
   return idx === -1 ? TURN_BUCKETS.length - 1 : idx;
 }
 
-type Transform = (row: readonly number[]) => readonly number[];
+/** Ход таверны идёт рядом со строкой: корзина точки — не её признак. */
+type Transform = (row: readonly number[], tavernTurn: number) => readonly number[];
 
 interface ZStats {
   readonly means: readonly number[];
@@ -110,16 +122,19 @@ function zStatsOf(rows: readonly (readonly number[])[], width: number): ZStats {
   return { means, sds };
 }
 
-/** Признак №1 — ход таверны: корзина точки читается из сырой строки. */
-function buildBucketTransform(trainRows: readonly (readonly number[])[]): Transform {
+/** Корзина точки — по её ходу таверны, переданному рядом со строкой. */
+function buildBucketTransform(
+  trainRows: readonly (readonly number[])[],
+  trainTurns: readonly number[],
+): Transform {
   const width = trainRows[0]?.length ?? 0;
   const byBucket = new Map<number, (readonly number[])[]>();
-  for (const row of trainRows) {
-    const bucket = bucketIndexOf(row[0] ?? 0);
+  trainRows.forEach((row, i) => {
+    const bucket = bucketIndexOf(trainTurns[i] ?? 0);
     const list = byBucket.get(bucket);
     if (list === undefined) byBucket.set(bucket, [row]);
     else list.push(row);
-  }
+  });
 
   const stats = new Map<number, ZStats>();
   for (const [bucket, rows] of byBucket) stats.set(bucket, zStatsOf(rows, width));
@@ -128,8 +143,8 @@ function buildBucketTransform(trainRows: readonly (readonly number[])[]): Transf
   // на z-скорах (docs/ml.md, «Вторичное»).
   const global = zStatsOf(trainRows, width);
 
-  return (row) => {
-    const s = stats.get(bucketIndexOf(row[0] ?? 0)) ?? global;
+  return (row, tavernTurn) => {
+    const s = stats.get(bucketIndexOf(tavernTurn)) ?? global;
     return row.map((v, j) => (v - (s.means[j] ?? 0)) / (s.sds[j] ?? 1));
   };
 }
@@ -147,16 +162,19 @@ export function evaluateLogo(
     const train = games.filter((g) => g !== game);
     const transform: Transform =
       normalization === 'byBucket'
-        ? buildBucketTransform(train.flatMap((g) => g.rows))
+        ? buildBucketTransform(
+            train.flatMap((g) => g.rows),
+            train.flatMap((g) => g.tavernTurns),
+          )
         : (row): readonly number[] => row;
 
     const trainRows: (readonly number[])[] = [];
     const trainYs: number[] = [];
     for (const g of train) {
-      for (const row of g.rows) {
-        trainRows.push(transform(row));
+      g.rows.forEach((row, i) => {
+        trainRows.push(transform(row, g.tavernTurns[i] ?? 0));
         trainYs.push(g.finalPlace);
-      }
+      });
     }
     const model = fitRidge(trainRows, trainYs, lambda);
     // B0 — по партиям, не по точкам: у длинных партий точек больше,
@@ -164,7 +182,9 @@ export function evaluateLogo(
     const meanPlace = mean(train.map((g) => g.finalPlace));
 
     const checkpoints = game.rows.map((row, i): CheckpointEval => {
-      const predicted = clampPlace(predictRidge(model, transform(row)));
+      const predicted = clampPlace(
+        predictRidge(model, transform(row, game.tavernTurns[i] ?? 0)),
+      );
       return {
         tavernTurn: game.tavernTurns[i] ?? 0,
         actual: game.finalPlace,
@@ -288,6 +308,44 @@ export function verdictOf(
     return 'ПРИНЯТЬ';
   }
   if (dMean < band.p05) return 'ОТВЕРГНУТЬ';
+  return 'НЕ ДОКАЗАНО';
+}
+
+/**
+ * Парные разности против ВТОРОЙ модели той же процедуры — для B2 (сжатое
+ * место): `D₂_g = MAE_g(B2) − MAE_g(модель)`, по партиям, по имени.
+ * Партия, которой у второй модели нет, берёт её B1 — этого не бывает
+ * при одном списке партий, но молчать об этом тип не должен.
+ */
+export function pairedDeltas(evals: readonly GameEval[], other: readonly GameEval[]): number[] {
+  const byName = new Map(other.map((e) => [e.name, e.maeModel]));
+  return evals.map((e) => (byName.get(e.name) ?? e.maeCurrent) - e.maeModel);
+}
+
+/**
+ * Вердикт замера 3 — дословно по предрегистрации docs/ml.md. Условия
+ * замера 1 против таблицы (продуктовый порог, полоса, МРЭ, константа)
+ * остаются все, и к ним — сигнал СВЕРХ сжатия: D̄₂ выше 95-го перцентиля
+ * своей полосы и своей МРЭ. Порога в местах у D̄₂ нет намеренно:
+ * продуктовый порог уже стоит у D̄, а D̄₂ отвечает на вопрос «признаки
+ * или сжатие», у которого шкала — только шум. ОТВЕРГНУТЬ — и когда
+ * таблица знает не меньше (D̄ ниже полосы), и когда относительные признаки
+ * ХУЖЕ сжатия (D̄₂ ниже своей полосы): модель с ними проигрывает модели
+ * без них.
+ */
+export function verdictOfRelative(
+  dMean: number,
+  band: SignFlipBand,
+  mde: number,
+  maeModel: number,
+  maeMean: number,
+  d2Mean: number,
+  band2: SignFlipBand,
+  mde2: number,
+): Verdict {
+  const base = verdictOf(dMean, band, mde, maeModel, maeMean);
+  if (base === 'ПРИНЯТЬ' && d2Mean > band2.p95 && d2Mean > mde2) return 'ПРИНЯТЬ';
+  if (dMean < band.p05 || d2Mean < band2.p05) return 'ОТВЕРГНУТЬ';
   return 'НЕ ДОКАЗАНО';
 }
 

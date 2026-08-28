@@ -1,15 +1,24 @@
 import { createRng, mean, shuffleInPlace, summarize } from '../advisors/tavern/statAnalysis.js';
-import { FEATURE_NAMES } from './features.js';
+import type { GameState } from '../state/types.js';
+import { extractFeatures, FEATURE_NAMES } from './features.js';
+import {
+  extractRelativeFeatures,
+  lobbyKnownInState,
+  RELATIVE_FEATURE_NAMES,
+  RELATIVE_PLACE_INDEX,
+} from './relativeFeatures.js';
 import { fitRidge } from './ridge.js';
 import {
   evaluateLogo,
   lateDeltas,
+  pairedDeltas,
   RIDGE_LAMBDA,
   signFlipBand,
   summarizeBuckets,
   summarizeEvals,
   toMlGame,
   verdictOf,
+  verdictOfRelative,
   type MlGame,
 } from './evaluate.js';
 import { loadDataset } from './dataset.js';
@@ -17,28 +26,83 @@ import { loadDataset } from './dataset.js';
 /**
  * Отчёт фазы 6: предсказание финального места против таблицы лидеров.
  *
- *   npm run ml:eval
+ *   npm run ml:eval     — замер 1: семь «своих» признаков
+ *   npm run ml:eval3    — замер 3: относительные признаки (против стола)
  *
- * Процедура и критерий приёмки предрегистрированы в docs/ml.md ДО первого
- * прогона; этот скрипт только считает и называет вердикт по записанным
- * условиям. Решает ОСНОВНАЯ ветка (λ=1, глобальная стандартизация,
- * LOGO по партиям); всё остальное — печать для сведения.
+ * Процедура и критерий приёмки каждого замера предрегистрированы
+ * в docs/ml.md ДО первого прогона; этот скрипт только считает и называет
+ * вердикт по записанным условиям. Решает ОСНОВНАЯ ветка (λ=1, глобальная
+ * стандартизация, LOGO по партиям); всё остальное — печать для сведения.
+ * Набор признаков — параметр (`--features=relative`), процедура одна:
+ * замер 3 отличается от замера 1 признаками, зёрнами, исключением партий
+ * без таблицы лобби и вторым условием приёмки — сигналом сверх сжатия B2.
  */
 
-/** Зёрна — предрегистрированы: полоса sign-flip и отрицательный контроль. */
-const BAND_SEED = 20260818;
-const CONTROL_SEED = 20260819;
+interface FeatureSet {
+  readonly key: 'own' | 'relative';
+  readonly title: string;
+  readonly names: readonly string[];
+  readonly extract: (state: GameState) => readonly number[];
+  /** Индекс признака «текущее место» — единственного признака бейзлайна B2. */
+  readonly placeIndex: number;
+  /** Зёрна — предрегистрированы: полоса sign-flip и отрицательный контроль. */
+  readonly bandSeed: number;
+  readonly controlSeed: number;
+  /** Зерно полосы D̄₂ — только у замера с условием «сигнал сверх сжатия». */
+  readonly band2Seed: number | null;
+  /** Партии без таблицы лобби хотя бы в одной точке исключаются целиком. */
+  readonly requiresLobby: boolean;
+}
+
+const OWN_FEATURES: FeatureSet = {
+  key: 'own',
+  title: 'замер 1 — семь «своих» признаков',
+  names: FEATURE_NAMES,
+  extract: extractFeatures,
+  placeIndex: 3,
+  bandSeed: 20260818,
+  controlSeed: 20260819,
+  band2Seed: null,
+  requiresLobby: false,
+};
+
+const RELATIVE_FEATURES: FeatureSet = {
+  key: 'relative',
+  title: 'замер 3 — относительные признаки против стола',
+  names: RELATIVE_FEATURE_NAMES,
+  extract: extractRelativeFeatures,
+  placeIndex: RELATIVE_PLACE_INDEX,
+  bandSeed: 20260829,
+  controlSeed: 20260830,
+  band2Seed: 20260831,
+  requiresLobby: true,
+};
+
+/** Вторичная ветка замера 3: семь «своих» плюс четыре относительных (место — один раз). */
+const COMBINED_NAMES: readonly string[] = [...FEATURE_NAMES, ...RELATIVE_FEATURE_NAMES.slice(1)];
+const extractCombined = (state: GameState): readonly number[] => [
+  ...extractFeatures(state),
+  ...extractRelativeFeatures(state).slice(1),
+];
+
 const BAND_ITERATIONS = 10_000;
 /** Ранний режим: D̄_late считается по точкам с хода таверны ≥ 5. */
 const LATE_FROM_TAVERN_TURN = 5;
 /** Контроль: модель на перемешанных местах лучше B0 больше этого — утечка. */
 const CONTROL_LEAK_THRESHOLD = 0.1;
-/** Индекс признака «текущее место» — единственный признак бейзлайна B2. */
-const PLACE_FEATURE_INDEX = 3;
 
 const fmt = (x: number): string => x.toFixed(3);
 
-function main(): void {
+function featureSetFromArgs(argv: readonly string[]): FeatureSet {
+  const arg = argv.find((a) => a.startsWith('--features='));
+  if (arg === undefined) return OWN_FEATURES;
+  const key = arg.slice('--features='.length);
+  if (key === 'relative') return RELATIVE_FEATURES;
+  if (key === 'own') return OWN_FEATURES;
+  throw new Error(`неизвестный набор признаков: ${key} (own | relative)`);
+}
+
+function main(featureSet: FeatureSet): void {
   const data = loadDataset();
 
   console.log(`билд: ${String(data.build ?? 'неизвестен')}`);
@@ -48,7 +112,17 @@ function main(): void {
   for (const f of data.droppedOtherBuild) console.log(`чужой билд, отброшено: ${f}`);
   for (const f of data.droppedUnusable) console.log(`без места или точек, отброшено: ${f}`);
 
-  const games = data.games.map(toMlGame);
+  let usable = data.games;
+  if (featureSet.requiresLobby) {
+    // Относительные признаки на пустой таблице — не пропуск, а ложь;
+    // партия без таблицы хотя бы в одной точке выпадает целиком.
+    usable = data.games.filter((g) => g.record.checkpoints.every((cp) => lobbyKnownInState(cp.state)));
+    for (const g of data.games) {
+      if (!usable.includes(g)) console.log(`без таблицы лобби, исключено: ${g.fileName}`);
+    }
+  }
+
+  const games = usable.map((g) => toMlGame(g, featureSet.extract));
   const points = games.reduce((n, g) => n + g.rows.length, 0);
   const placeCounts = new Map<number, number>();
   for (const g of games) placeCounts.set(g.finalPlace, (placeCounts.get(g.finalPlace) ?? 0) + 1);
@@ -70,7 +144,7 @@ function main(): void {
   // не на чем, и она обязана выйти не лучше B0 своего прогона.
   const shuffledPlaces = shuffleInPlace(
     games.map((g) => g.finalPlace),
-    createRng(CONTROL_SEED),
+    createRng(featureSet.controlSeed),
   );
   const shuffledGames: MlGame[] = games.map((g, i) => ({
     ...g,
@@ -95,11 +169,13 @@ function main(): void {
   const evals = evaluateLogo(games, RIDGE_LAMBDA, 'global');
   const summary = summarizeEvals(evals);
   const deltaStats = summarize(summary.deltas);
-  const band = signFlipBand(summary.deltas, BAND_ITERATIONS, createRng(BAND_SEED));
+  const band = signFlipBand(summary.deltas, BAND_ITERATIONS, createRng(featureSet.bandSeed));
   const mde = 1.645 * deltaStats.se;
 
   console.log('');
-  console.log(`— основная ветка: LOGO, λ=${String(RIDGE_LAMBDA)}, глобальная стандартизация —`);
+  console.log(
+    `— основная ветка: ${featureSet.title}; LOGO, λ=${String(RIDGE_LAMBDA)}, глобальная стандартизация —`,
+  );
   console.log(
     `MAE по партиям:  модель ${fmt(summary.maeModel)}  | таблица (B1) ${fmt(summary.maeCurrent)}  | среднее место (B0) ${fmt(summary.maeMean)}`,
   );
@@ -119,20 +195,39 @@ function main(): void {
       `(SE ${fmt(lateStats.se)}, партий ${String(lateStats.n)}, выпало ${String(late.skippedGames)})`,
   );
 
-  // Предобъявленное чтение B2: сжатое место против полной модели.
+  // B2 — сжатое место: та же процедура на единственном признаке таблицы.
   const placeOnly: MlGame[] = games.map((g) => ({
     ...g,
-    rows: g.rows.map((row) => [row[PLACE_FEATURE_INDEX] ?? 0]),
+    rows: g.rows.map((row) => [row[featureSet.placeIndex] ?? 0]),
   }));
   const b2Evals = evaluateLogo(placeOnly, RIDGE_LAMBDA, 'global');
-  const b2ByName = new Map(b2Evals.map((e) => [e.name, e.maeModel]));
-  const d2 = evals.map((e) => (b2ByName.get(e.name) ?? e.maeCurrent) - e.maeModel);
+  const d2 = pairedDeltas(evals, b2Evals);
+  const d2Stats = summarize(d2);
   console.log(
     `B2 (сжатое место, только признак таблицы): MAE ${fmt(mean(b2Evals.map((e) => e.maeModel)))}, ` +
-      `D̄₂ = MAE(B2) − MAE(модель) = ${fmt(mean(d2))}`,
+      `D̄₂ = MAE(B2) − MAE(модель) = ${fmt(d2Stats.mean)}`,
   );
 
-  const verdict = verdictOf(deltaStats.mean, band, mde, summary.maeModel, summary.maeMean);
+  let verdict = verdictOf(deltaStats.mean, band, mde, summary.maeModel, summary.maeMean);
+  if (featureSet.band2Seed !== null) {
+    // Замер 3: сигнал СВЕРХ сжатия — своя полоса и своя МРЭ у D̄₂.
+    const band2 = signFlipBand(d2, BAND_ITERATIONS, createRng(featureSet.band2Seed));
+    const mde2 = 1.645 * d2Stats.se;
+    console.log(
+      `  D̄₂: SE ${fmt(d2Stats.se)}, МРЭ₂ ${fmt(mde2)}, полоса sign-flip 5-й ${fmt(band2.p05)} … 95-й ${fmt(band2.p95)}, ` +
+        `партий с |D₂|>0.05: ${String(d2Stats.moved)} из ${String(d2Stats.n)}`,
+    );
+    verdict = verdictOfRelative(
+      deltaStats.mean,
+      band,
+      mde,
+      summary.maeModel,
+      summary.maeMean,
+      d2Stats.mean,
+      band2,
+      mde2,
+    );
+  }
   console.log(`вердикт по предрегистрированному критерию: ${verdict}`);
 
   console.log('');
@@ -159,6 +254,17 @@ function main(): void {
   console.log(
     `нормировка внутри корзин: MAE модели ${fmt(byBucket.maeModel)}, D̄ ${fmt(mean(byBucket.deltas))}`,
   );
+  if (featureSet.key === 'relative') {
+    // Семь «своих» плюс относительные: показывает, добавляют ли абсолютные
+    // признаки что-нибудь к относительным, — печать, не решение.
+    const combined = usable.map((g) => toMlGame(g, extractCombined));
+    const combinedEvals = evaluateLogo(combined, RIDGE_LAMBDA, 'global');
+    const cs = summarizeEvals(combinedEvals);
+    console.log(
+      `семь «своих» + относительные (${String(COMBINED_NAMES.length)} признаков): ` +
+        `MAE модели ${fmt(cs.maeModel)}, D̄ ${fmt(mean(cs.deltas))}, D̄₂ ${fmt(mean(pairedDeltas(combinedEvals, b2Evals)))}`,
+    );
+  }
 
   const full = fitRidge(
     games.flatMap((g) => g.rows),
@@ -167,10 +273,10 @@ function main(): void {
   );
   console.log('');
   console.log('веса модели на всех партиях (стандартизованные признаки):');
-  FEATURE_NAMES.forEach((name, i) => {
+  featureSet.names.forEach((name, i) => {
     console.log(`  ${name}: ${fmt(full.weights[i] ?? 0)}`);
   });
   console.log(`  интерсепт: ${fmt(full.intercept)}`);
 }
 
-main();
+main(featureSetFromArgs(process.argv.slice(2)));

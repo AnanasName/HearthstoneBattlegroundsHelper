@@ -5,6 +5,7 @@ import { readTavernTurns } from '../advisors/tavern/turns.js';
 import { CURRENT_BUILD_PARTS, fixtureLogPath } from '../data/fixtureGames.js';
 import { reduceLog } from '../state/reducer.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from './recorder.js';
+import { lobbyKnown, refreshRecord } from './refresh.js';
 
 /**
  * Разовый досбор датасета из фикстур: партии, сыгранные ДО включения
@@ -24,6 +25,11 @@ import { DATASET_DIR, gameSignature, type DatasetRecord } from './recorder.js';
  * попадала в датасет дважды — так в нём и оказались part17–part21 —
  * а обучению это даёт партию с удвоенным весом. Отпечаток партии считает
  * `gameSignature`.
+ *
+ * Досбор — ещё и способ дотянуть лежащие записи до текущей схемы состояния
+ * из самого лога, а не из умолчаний: запись без таблицы лобби (до part26)
+ * пересобирается целиком, запись без журнала действий (до 19.08) получает
+ * журнал. Что и почему — в `refresh.ts`.
  */
 
 const FIXTURES = CURRENT_BUILD_PARTS;
@@ -77,6 +83,7 @@ function main(): void {
   }
 
   let patched = 0;
+  let rebuilt = 0;
   for (const part of FIXTURES) {
     const path = fixtureLogPath(part);
     if (!existsSync(path)) {
@@ -103,23 +110,46 @@ function main(): void {
 
     const already = existing.get(gameSignature(record));
     if (already !== undefined) {
-      // Партия уже в датасете. Единственное, что досбор в ней ДОПИСЫВАЕТ, —
-      // журнал действий: записи до 19.08 его не несут, а без действий
-      // «какие ходы ведут к победе» не выучить. Ничего не перетирается:
-      // поле добавляется только там, где его не было.
+      // Партия уже в датасете. Что с ней делать, решает `refreshRecord`:
+      // запись старой схемы (без таблицы лобби) пересобирается целиком —
+      // точки и журнал берутся из сегодняшнего разбора, паспорт записи
+      // (время, исполнитель, флаг оверлея) остаётся; запись текущей схемы
+      // без журнала получает только журнал; остальное не трогается.
       for (const { fileName, record: stored } of already) {
-        if (stored.actions !== undefined) continue;
-        writeFileSync(
-          join(DATASET_DIR, fileName),
-          JSON.stringify({ ...stored, actions: finalState.actions }),
-          'utf8',
-        );
-        patched += 1;
-        console.log(
-          `part${String(part)}: дописаны действия (${String(finalState.actions.length)}) → ${fileName}`,
-        );
+        const plan = refreshRecord(stored, record);
+        if (plan.action === 'keep') continue;
+        writeFileSync(join(DATASET_DIR, fileName), JSON.stringify(plan.record), 'utf8');
+        if (plan.action === 'rebuild') {
+          rebuilt += 1;
+          console.log(
+            `part${String(part)}: пересобрана запись старой схемы — точек ` +
+              `${String(stored.checkpoints.length)} → ${String(checkpoints.length)}, ` +
+              `таблица лобби во всех точках, действий ${String(finalState.actions.length)} → ${fileName}`,
+          );
+        } else {
+          patched += 1;
+          console.log(
+            `part${String(part)}: дописаны действия (${String(finalState.actions.length)}) → ${fileName}`,
+          );
+        }
       }
       continue;
+    }
+
+    // Отпечаток не нашёлся, а партия того же билда, героя и места старой
+    // схемы лежит: скорее всего, редьюсер сдвинул ПЕРВУЮ точку решения,
+    // и досбор сейчас положит вторую запись рядом. Это называется вслух,
+    // потому что дедуп загрузчика такую пару не сведёт.
+    const passport = `${String(record.buildNumber)}|${String(record.heroCardId)}|${String(record.finalPlace)}|`;
+    for (const [signature, files] of existing) {
+      if (!signature.startsWith(passport)) continue;
+      for (const { fileName, record: stored } of files) {
+        if (lobbyKnown(stored)) continue;
+        console.log(
+          `ВНИМАНИЕ: part${String(part)} не нашлась по отпечатку, а запись старой схемы того же ` +
+            `билда, героя и места лежит — ${fileName}; проверьте первую точку решения`,
+        );
+      }
     }
 
     const fileName = `backfill_part${String(part)}_b${String(record.buildNumber ?? 'unknown')}_p${String(record.finalPlace ?? 'x')}.json`;
@@ -132,7 +162,10 @@ function main(): void {
     );
   }
 
-  console.log(`\nзаписано партий: ${String(written)}, дописано действий в записей: ${String(patched)}`);
+  console.log(
+    `\nзаписано партий: ${String(written)}, пересобрано записей старой схемы: ${String(rebuilt)}, ` +
+      `дописано действий в записей: ${String(patched)}`,
+  );
 }
 
 main();
