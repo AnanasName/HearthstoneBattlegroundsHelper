@@ -952,6 +952,68 @@ minion Windfury, Divine Shield, and Taunt») создаётся вместе с 
 левому — сверка расстановки по эпизодам part33 из-за этого мягче правды.
 Калибровку «как стоит» это не трогает: симулятор второй раз слова не даёт.
 
+## Сила «после N покупок — награда»: счётчик на силе, TEMP_RESOURCES у игрока (part34)
+
+**«Бранное дело» `TB_BaconShop_HP_048`** («After you buy 4 Battlecry
+minions, get a Brann Bronzebeard. (Once per game.)») создаётся вместе
+с героем (01:47:48, `Укротитель львов Бранн` `TB_BaconShop_HERO_43_SKIN_G`)
+как `CARDTYPE=HERO_POWER` с тегами `TRIGGER_VISUAL=1`, `SCORE_VALUE_1=4`
+(сколько покупок нужно), `HIDE_COST=1`, `BACON_HEROPOWER_BASE_HERO_ID=60214`;
+тегов `HAS_ACTIVATE_POWER`, `COST` и `TAG_SCRIPT_DATA_NUM_1` при создании
+НЕТ — остаток счётчика до первой покупки читается только из текста.
+
+**Счётчик — `TAG_SCRIPT_DATA_NUM_1` на силе, пишется блоком TRIGGER силы
+ВНУТРИ блока покупки** (`BLOCK_START BlockType=PLAY … TB_BaconShop_DragBuy`
+→ `BLOCK_START BlockType=POWER` → … → `BLOCK_START BlockType=TRIGGER
+Entity=[… cardId=TB_BaconShop_HP_048]`), вместе с `SCORE_VALUE_2` (сколько
+уже куплено) и `USE_ALTERNATE_CARD_TEXT=1`:
+
+| время | покупка | `NUM_1` | `SCORE_VALUE_2` |
+|---|---|---|---|
+| 01:48:04 (ход 1) | Southsea Busker `BG26_135` | 3 | 1 |
+| 01:49:00 (ход 3) | Southsea Busker | 2 | 2 |
+| 01:49:03 (ход 3) | Aureate Laureate `BG32_236` (без клича) | — | — |
+| 01:49:42 (ход 5) | Southsea Busker | 1 | 3 |
+| 01:50:54 (ход 7) | Shell Collector `BG23_002` | 0 | 4 |
+
+Покупка без клича счётчика не трогает: на Laureate ни блока TRIGGER
+на силе, ни смены тегов. Считается ПОКУПКА, а не розыгрыш: Busker хода 3
+был продан через две секунды (01:49:02, `DragSell`), и счётчик его засчитал.
+
+**Награда — тем же блоком TRIGGER, что и ноль счётчика** (01:50:54,
+`EffectIndex=1`): `FULL_ENTITY - Creating ID=1701 CardID=BG_LOE_077`
+в `ZONE=HAND` с `CREATOR=226` (сила) и `CREATOR_DBID=60218`, `TECH_LEVEL=5`,
+`IS_BACON_POOL_MINION=1`, `AURA=1`, следом энчант `TB_BaconShopBadsongE`
+на нём (розыгрыш бесплатен — part16). На силе тут же `HERO_POWER_DISABLED=1`
+и `USE_ALTERNATE_CARD_TEXT=0` — «Once per game» отработало. Сила
+остаётся в `PLAY` до 02:14:23, когда событие партии уводит её в `SETASIDE`
+и даёт игроку чужие силы (`TB_BaconShop_HP_020`, затем `BG20_HERO_202p`
+«Power of the Storm» с выбором каждый ход) — тот же класс, что «Сорванная
+маска» в part30.
+
+**`TEMP_RESOURCES` — временное золото хода, и редьюсер его не читал.**
+«Battlecry: Gain 1 Gold next turn» (Busker) кладёт в начале следующего
+хода `TAG_CHANGE Entity=AngryMem#2886 tag=TEMP_RESOURCES value=1`
+(01:48:36 ход 3, 01:49:23 ход 5, 01:50:25 ход 7), при `RESOURCES=4/5/6`.
+Тратится оно ПЕРВЫМ: подъём на тир 2 за 3 в 01:49:41 пишет
+`TEMP_RESOURCES value=0` и `RESOURCES_USED value=2` — три золота =
+один временный плюс два обычных. Продажа при нуле потраченного тоже идёт
+сюда, а не в `RESOURCES_USED` (01:56:12: `DragSell` → `TEMP_RESOURCES=1`
+при `RESOURCES_USED=0`; следом подъём за 10 → `TEMP=0`, `USED=9`).
+В part30 Careful Investment ×3 дают `TEMP_RESOURCES=6` на ходу 23
+(20:15:33), и покупки/продажи гуляют по нему 6 → 7 → 8 → 6 → 7 → 6
+при `RESOURCES_USED=0`. Тег с ненулевым значением встречается в 29
+фикстурах; границы хода с ненулевым остатком — ни одной (проверено
+part22/27/30/34: сброс в ноль всегда до смены `TURN`).
+
+Итого золото = `RESOURCES` + `TEMP_RESOURCES` − `RESOURCES_USED`
+(пункт 10 в CLAUDE.md уточнён). До правки ход после Busker читался
+на монету беднее (part34, ход 3: 4 вместо 5; ход 7: 6 вместо 7),
+а продажа первым действием хода — как ничего не давшая.
+
+**Три «Southsea Busker» и `BACON_PAIR_CANDIDATE`.** Не проверялось —
+здесь тройка не собиралась: Busker хода 3 продан сразу.
+
 ## Заклинания в руке и плейсхолдеры текстов
 
 Заклинания приходят обычными сущностями с `CARDTYPE=SPELL`. Факты part10:
