@@ -40,7 +40,8 @@ import {
   situationLine,
   trinketLine,
 } from './format.js';
-import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
+import { loadConfig } from '../app/config.js';
+import { detectLogsRoot } from '../watcher/installDir.js';
 import { checkGameSetup, waitingForLogText } from './setup.js';
 
 interface Args {
@@ -63,7 +64,8 @@ function parseArgs(argv: readonly string[]): Args {
   };
 
   return {
-    logsRoot: get('logs-root') ?? DEFAULT_LOGS_ROOT,
+    // Явный ключ → настройки приложения → реестр и перебор дисков → константа.
+    logsRoot: detectLogsRoot(get('logs-root') ?? loadConfig().logsRoot),
     replay: get('replay') ?? null,
     speed: number(get('speed'), 20) ?? 20,
     budgetMs: number(get('budget'), null),

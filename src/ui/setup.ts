@@ -19,6 +19,12 @@ export interface SetupProblem {
   readonly text: string;
   /** Нужен ли перезапуск клиента, чтобы починка подействовала. */
   readonly needsRestart: boolean;
+  /**
+   * Починка не удалась из-за прав: каталог игры пишется только
+   * администратором. Приложение в сборке по этому флагу перезапускает
+   * себя через UAC с ключом `--setup` (`app/elevate.ts`).
+   */
+  readonly needsElevation?: boolean;
 }
 
 export function checkGameSetup(logsRoot: string): SetupProblem | null {
@@ -55,6 +61,7 @@ function checkSizeLimit(logsRoot: string): SetupProblem | null {
     return {
       text: 'не хватило прав поправить client.config — запустите от администратора',
       needsRestart: false,
+      needsElevation: true,
     };
   }
 }
