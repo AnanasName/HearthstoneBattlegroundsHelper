@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { sameGameBuild } from '../data/builds.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from '../dataset/recorder.js';
+import { EMPTY_STATE, type GameState, type Hero } from '../state/types.js';
 
 /**
  * Загрузка датасета партий для фазы 6 — с дедупом и фильтром билда.
@@ -99,6 +100,41 @@ export interface LoadedDataset {
   readonly droppedUnusable: readonly string[];
 }
 
+/**
+ * Дополнение записи до ТЕКУЩЕЙ схемы состояния.
+ *
+ * Запись — снимок `GameState` на момент записи, и поля, вошедшие в состояние
+ * позже, в ней отсутствуют: `rerollCost` (16.08), `lobby` (part26),
+ * `actions` (19.08), `darkGiftCharges` (part31), у героя —
+ * `heroPowerScriptData` (part34). На 28.08 последнее поле есть у ОДНОЙ
+ * записи из 38. Советник читает состояние по типу и вправе индексировать
+ * массив без проверки — `hero.heroPowerScriptData[0]` на старой записи
+ * ронял `npm run ml:track` с TypeError. Прежние пропуски переживались
+ * случайно: `undefined` там, где ждут `null`, читался как «неизвестно».
+ *
+ * Умолчания — те же, что у пустого состояния (`EMPTY_STATE`) и у героя без
+ * силы: ровно то, что записал бы редьюсер, не знай он тега. Это ОДНО место
+ * на всех читателей (`ml:eval`, `ml:imitation`, `ml:track`, `spike:horizon`),
+ * а не `?? []` у каждого поля в советнике: там такая заплатка прятала бы
+ * настоящую дыру редьюсера, где массив обязан быть всегда.
+ */
+export function upgradeRecord(record: DatasetRecord): DatasetRecord {
+  return {
+    ...record,
+    checkpoints: record.checkpoints.map((c) => ({ ...c, state: upgradeState(c.state) })),
+  };
+}
+
+/** Герой старой записи: поле part34 в нём может отсутствовать. */
+type LegacyHero = Omit<Hero, 'heroPowerScriptData'> & Partial<Pick<Hero, 'heroPowerScriptData'>>;
+
+function upgradeState(state: GameState): GameState {
+  const legacyHero: LegacyHero | null = state.hero;
+  const hero: Hero | null =
+    legacyHero === null ? null : { heroPowerScriptData: [], ...legacyHero };
+  return { ...EMPTY_STATE, ...state, hero };
+}
+
 /** Запись ли это партии: в каталоге лежат и чужие JSON (снапшот статистики). */
 function isDatasetRecord(value: unknown): value is DatasetRecord {
   return (
@@ -120,7 +156,7 @@ export function loadDataset(dir: string = DATASET_DIR): LoadedDataset {
         continue;
       }
       if (!isDatasetRecord(parsed)) continue;
-      files.push({ fileName, record: parsed });
+      files.push({ fileName, record: upgradeRecord(parsed) });
     }
   }
 

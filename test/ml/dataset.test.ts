@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { dedupeBySignature, type RecordFile } from '../../src/ml/dataset.js';
+import { readFileSync } from 'node:fs';
+
+import { adviseTavern } from '../../src/advisors/tavern/advisor.js';
+import { CARDS_PATH, createCardIndex } from '../../src/data/cards.js';
+import { dedupeBySignature, upgradeRecord, type RecordFile } from '../../src/ml/dataset.js';
 import type { DatasetRecord } from '../../src/dataset/recorder.js';
-import { EMPTY_STATE } from '../../src/state/types.js';
+import { EMPTY_STATE, type GameState, type Hero } from '../../src/state/types.js';
 import { board } from '../minions.js';
 
 /**
@@ -69,5 +73,74 @@ describe('дедуп датасета по отпечатку', () => {
     const result = dedupeBySignature([one, other]);
     expect(result.kept).toHaveLength(2);
     expect(result.duplicates).toHaveLength(0);
+  });
+});
+
+/**
+ * Запись — снимок GameState на момент записи, и поля, вошедшие в состояние
+ * позже, в ней отсутствуют. На 28.08 heroPowerScriptData (part34) было
+ * у ОДНОЙ записи из 38, и hero.heroPowerScriptData[0] ронял
+ * npm run ml:track с TypeError. Старая запись здесь строится ВЫЧИТАНИЕМ
+ * поздних полей из текущей схемы — ровно так они и отсутствуют в JSON.
+ */
+describe('дополнение старой записи до текущей схемы', () => {
+  const LATE_STATE_KEYS = new Set(['rerollCost', 'lobby', 'actions', 'darkGiftCharges']);
+  // Бранн-укротитель (part34): единственная сила, чей разбор индексирует
+  // heroPowerScriptData без проверки — ровно та, что падала.
+  const HERO: Hero = {
+    entityId: 64,
+    cardId: 'TB_BaconShop_HERO_43_SKIN_G',
+    health: 30,
+    damage: 0,
+    armor: 0,
+    heroPowerCardId: 'TB_BaconShop_HP_048',
+    heroPowerEntityId: 65,
+    heroPowerCost: null,
+    heroPowerUsedThisTurn: false,
+    heroPowerUnplayable: false,
+    heroPowerHasActivate: false,
+    heroPowerScriptData: [],
+  };
+
+  function legacyState(): GameState {
+    const hero = Object.fromEntries(
+      Object.entries(HERO).filter(([k]) => k !== 'heroPowerScriptData'),
+    );
+    const fresh: GameState = { ...EMPTY_STATE, turn: 1, gold: 3, goldTotal: 3, shop: board([201, 202]) };
+    const state = Object.fromEntries(
+      Object.entries(fresh).filter(([k]) => !LATE_STATE_KEYS.has(k)),
+    );
+    // Старая запись по типу — не GameState: у неё нет обязательных полей.
+    return { ...state, hero } as unknown as GameState;
+  }
+
+  function recordWith(state: GameState): RecordFile['record'] {
+    return { ...recordOf('legacy.json').record, checkpoints: [{ turn: 1, state }] };
+  }
+
+  it('поля, вошедшие в состояние позже, получают умолчания пустого состояния', () => {
+    const state = upgradeRecord(recordWith(legacyState())).checkpoints[0]?.state;
+    expect(state?.hero?.heroPowerScriptData).toEqual([]);
+    expect(state?.rerollCost).toBeNull();
+    expect(state?.lobby).toEqual({});
+    expect(state?.actions).toEqual([]);
+    expect(state?.darkGiftCharges).toBeNull();
+    // Остальное — как было: дополнение не переписывает записанное.
+    expect(state?.gold).toBe(3);
+    expect(state?.hero?.heroPowerCardId).toBe('TB_BaconShop_HP_048');
+  });
+
+  it('советник на старой записи за Бранна-укротителя не падает — а без дополнения падает', () => {
+    const raw = JSON.parse(readFileSync(CARDS_PATH, 'utf8')) as unknown[];
+    const cards = createCardIndex(raw);
+    expect(() => adviseTavern(legacyState(), { cards })).toThrow(TypeError);
+    const upgraded = upgradeRecord(recordWith(legacyState())).checkpoints[0]?.state;
+    expect(upgraded).toBeDefined();
+    expect(() => adviseTavern(upgraded as GameState, { cards })).not.toThrow();
+  });
+
+  it('запись текущей схемы дополнение не меняет', () => {
+    const record = recordWith({ ...EMPTY_STATE, hero: HERO, shop: board([201]) });
+    expect(upgradeRecord(record)).toEqual(record);
   });
 });
