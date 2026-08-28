@@ -121,6 +121,13 @@ export interface Recommendation {
    */
   readonly grantsKeyword?: BinaryKeywordField;
   /**
+   * Остаток счётчика силы «после N покупок с механикой — награда» ПОСЛЕ
+   * этой покупки (part34, «Бранное дело»). Заполняется у покупки, которую
+   * сила засчитывает; план кладёт число в `heroPowerScriptData[0]`
+   * гипотетического героя, чтобы следующий шаг не считал тот же шаг дважды.
+   */
+  readonly heroPowerBuyLeft?: number;
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется только у подъёма таверны, и только потому, что его `score`
@@ -184,6 +191,17 @@ export interface ValueBreakdown {
   readonly tripleBet: boolean;
   /** Статы, которые даёт розыгрыш этой карты по силе героя (Hat Trick). */
   readonly heroPowerPlay: number;
+  /**
+   * Доля награды силы «after you buy N <механика> minions, get a <карта>»
+   * (part34): ценность награды на этом борде, делённая на оставшиеся
+   * покупки. Про ПРИОБРЕТЕНИЕ, как `copies`: у своего миньона и у розыгрыша
+   * из руки вычитается.
+   */
+  readonly heroPowerBuy: number;
+  /** Остаток счётчика той силы ПОСЛЕ этой покупки; `null` — не засчитывается. */
+  readonly heroPowerBuyLeft: number | null;
+  /** Имя награды той силы — для причины совета. */
+  readonly heroPowerBuyReward: string | null;
 }
 
 /** Один вариант открытого предложения тринкетов с оценкой. */
@@ -625,6 +643,79 @@ const HERO_POWER_PLAY_CACHE = new WeakMap<
   WeakMap<CardIndex, Map<string, number>>
 >();
 
+/** Сила «после N покупок с механикой — награда», разобранная из текста. */
+export interface HeroPowerBuyReward {
+  /** Сколько покупок нужно всего — число из текста. */
+  readonly count: number;
+  /** Механика снапшота, которую покупка обязана нести (BATTLECRY). */
+  readonly mechanic: string;
+  /** Награда — миньон пула, найденный по имени. */
+  readonly reward: CardInfo;
+  /** Сколько покупок ещё осталось: живой счётчик силы, без тега — `count`. */
+  readonly remaining: number;
+}
+
+/**
+ * Сила героя, платящая за ПОКУПКИ миньонов с механикой, — или `null`.
+ *
+ * «After you buy 4 Battlecry minions, get a Brann Bronzebeard. (Once per
+ * game.)» («Бранное дело», part34). Три вещи читаются из текста: число
+ * покупок, слово механики (сводится к механике снапшота той же таблицей
+ * `mechanicTextWords`, что синергия по тексту) и имя награды (ищется среди
+ * миньонов пула — «Brann Bronzebeard» в снапшоте пятнадцать карт, из пула
+ * одна). Четвёртая — остаток — живой тег `TAG_SCRIPT_DATA_NUM_1` на сущности
+ * силы: при создании его нет (остаток равен числу из текста), с первой
+ * засчитанной покупки 3 → 2 → 1 → 0. Ноль — сила отработала («Once per
+ * game»), и слагаемого больше нет.
+ *
+ * Разбор текста кэшируется по карте, остаток — нет: он меняется покупкой.
+ */
+export function heroPowerBuyReward(
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): HeroPowerBuyReward | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  const parsed = memoByCard(HERO_POWER_BUY_CACHE, hero.heroPowerCardId, cards, rules, () =>
+    parseHeroPowerBuyReward(hero.heroPowerCardId ?? '', cards, rules),
+  );
+  if (parsed === null) return null;
+  const remaining = hero.heroPowerScriptData[0] ?? parsed.count;
+  if (remaining <= 0) return null;
+  return { ...parsed, remaining };
+}
+
+function parseHeroPowerBuyReward(
+  powerId: string,
+  cards: CardIndex,
+  rules: TavernRules,
+): Omit<HeroPowerBuyReward, 'remaining'> | null {
+  const text = cards.info(powerId)?.text ?? '';
+  if (text === '') return null;
+  const hit = firstMatchAll(rules.heroPowerBuyRewardWords, text);
+  if (hit === null) return null;
+  const count = Number.parseInt(hit[1] ?? '', 10);
+  const word = (hit[2] ?? '').toLowerCase();
+  const name = (hit[3] ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!Number.isFinite(count) || count <= 0 || word === '' || name === '') return null;
+  const mechanic =
+    Object.entries(rules.mechanicTextWords).find(([, w]) =>
+      new RegExp(`^(?:${w})$`, 'i').test(word),
+    )?.[0] ?? null;
+  if (mechanic === null) return null;
+  for (let tier = 1; tier <= 6; tier += 1) {
+    const reward = cards.poolOfTier(tier).find((c) => c.name.toLowerCase() === name);
+    if (reward !== undefined) return { count, mechanic, reward };
+  }
+  return null;
+}
+
+const HERO_POWER_BUY_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, Omit<HeroPowerBuyReward, 'remaining'> | null>>
+>();
+
 /**
  * Бонус за уже имеющиеся копии — по РАССТОЯНИЮ до тройки, а не по их числу.
  *
@@ -651,6 +742,13 @@ function nthCopyWord(needed: number, form: 'nom' | 'acc'): string {
   if (needed === 2) return form === 'nom' ? 'вторая' : 'вторую';
   if (needed === 3) return form === 'nom' ? 'третья' : 'третью';
   return `${String(needed)}-${form === 'nom' ? 'я' : 'ю'}`;
+}
+
+/** «ещё одна такая покупка», «ещё 2 такие покупки», «ещё 5 таких покупок». */
+function purchasesWord(n: number): string {
+  if (n === 1) return 'одна такая покупка';
+  if (n >= 2 && n <= 4) return `${String(n)} такие покупки`;
+  return `${String(n)} таких покупок`;
 }
 
 /** Ценность миньона: во что складываются веса из таблицы правил. */
@@ -841,6 +939,36 @@ export function minionValue(
     if (heroSells && cardSells) heroPower += w.economy;
   }
 
+  // Сила, платящая за ПОКУПКИ миньонов с механикой (part34, «Бранное дело»:
+  // «After you buy 4 Battlecry minions, get a Brann Bronzebeard»). Игрок
+  // купил четыре кличевых за четыре хода таверны и получил Бранна на 4-м;
+  // советник на ходу 1 звал Risen Rider вместо Busker, на ходу 3 — золотую
+  // Laureate вместо Busker, потому что клич как условие силы не читал.
+  //
+  // Число без нового веса: ценность НАГРАДЫ на этом же борде той же
+  // функцией (тир, тело, удвоитель кличей своих — всё настоящее), делённая
+  // на ОСТАВШИЕСЯ покупки. Последняя покупка стоит целого Бранна — она его
+  // и приносит; первая из четырёх — четверть. Сумма долей больше целого,
+  // и это сказано вслух: каждая доля считается так, будто остальные шаги
+  // будут сделаны, — оценка ВЕРХНЯЯ, как и у выбора из трёх (part30).
+  // Награду считаем при герое без силы: иначе Бранн, будь он сам кличевым,
+  // считал бы себя же наградой за собственную покупку.
+  const buyReward = heroPowerBuyReward(state, cards, rules);
+  let heroPowerBuy = 0;
+  let heroPowerBuyLeft: number | null = null;
+  let heroPowerBuyRewardName: string | null = null;
+  if (buyReward !== null && (info?.mechanics ?? []).includes(buyReward.mechanic)) {
+    const rewardValue = minionValue(
+      minionFromCard(buyReward.reward, -1, true),
+      { ...state, hero: null },
+      { cards },
+      rules,
+    ).total;
+    heroPowerBuy = rewardValue / buyReward.remaining;
+    heroPowerBuyLeft = buyReward.remaining - 1;
+    heroPowerBuyRewardName = buyReward.reward.name;
+  }
+
   // Статы за сам розыгрыш (Hat Trick, part27). Слагаемое ОДИНАКОВО у всех
   // кандидатов и потому порядок покупок не меняет — оно меняет другое:
   // покупку против обновления, розыгрыш против «ничего». Считается
@@ -863,6 +991,9 @@ export function minionValue(
     doubler,
     heroPower,
     heroPowerPlay,
+    heroPowerBuy,
+    heroPowerBuyLeft,
+    heroPowerBuyReward: heroPowerBuyRewardName,
     total:
       tech +
       stats +
@@ -878,7 +1009,8 @@ export function minionValue(
       spellMagnet +
       doubler +
       heroPower +
-      heroPowerPlay,
+      heroPowerPlay +
+      heroPowerBuy,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -1393,7 +1525,10 @@ function ownValue(
   // Hat Trick — это НАСТОЯЩИЙ энчант на миньоне, и его +1/+1 уже посчитаны
   // в `stats` этого же разбора. Оставить слагаемое значило бы посчитать
   // одну и ту же шляпу дважды (part27).
-  return value.total - value.copies - value.heroPowerPlay;
+  //
+  // Доля награды за покупку (part34) — тоже про приобретение: свой кличевой
+  // миньон второй раз не покупается, и Бранна за него больше не дадут.
+  return value.total - value.copies - value.heroPowerPlay - value.heroPowerBuy;
 }
 
 /**
@@ -1555,6 +1690,14 @@ export function buyRules(
         notes.push(`связана по имени: своих ${String(value.namedCardMates)}`);
       }
       if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
+      if (value.heroPowerBuyLeft !== null && value.heroPowerBuyReward !== null) {
+        notes.push(
+          value.heroPowerBuyLeft === 0
+            ? `сила героя: эта покупка приносит ${value.heroPowerBuyReward}`
+            : `сила героя: до ${value.heroPowerBuyReward} ещё ` +
+                `${purchasesWord(value.heroPowerBuyLeft)} (${value.heroPowerBuy.toFixed(1)})`,
+        );
+      }
       if (value.economy > 0) notes.push('вернёт часть цены при продаже');
       if (minion.golden) notes.push('золотой');
       if (host !== null) {
@@ -1588,6 +1731,7 @@ export function buyRules(
           requiresSlot,
           sellFirst,
           magnetizeTo: host,
+          ...(value.heroPowerBuyLeft === null ? {} : { heroPowerBuyLeft: value.heroPowerBuyLeft }),
           reason:
             `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
             `тир ${tier === null ? '?' : String(tier)}, ценность ${value.total.toFixed(1)}` +
@@ -1711,7 +1855,8 @@ export function playRules(
     // стоял верхней строкой с 16.0 очков, из которых три — за копию.
     // Игрок: «непонятно, зачем ставить Бранна, ведь на следующий ход мне
     // придётся его продавать, если я не найду 3 копию».
-    const playValue = value.total - value.copies;
+    // Доля награды за покупку (part34) — тем более: карта уже куплена.
+    const playValue = value.total - value.copies - value.heroPowerBuy;
 
     // Ставка на тройку, занимающая ПОСЛЕДНИЙ свободный слот, разменивается
     // на ОДИН бой.
@@ -2103,7 +2248,8 @@ export function sellForGoldRule(
       // удержание, и шляпа вдобавок уже сидит в статах (`ownValue`).
       return {
         minion,
-        retained: value.total - value.copies - value.economy - value.heroPowerPlay,
+        retained:
+          value.total - value.copies - value.economy - value.heroPowerPlay - value.heroPowerBuy,
       };
     })
     .sort((a, b) => a.retained - b.retained);
@@ -3144,7 +3290,10 @@ function averagePoolValue(
     `${tiers.join(',')}|${race ?? ''}` +
     `|${state.hand.map((m) => `${m.cardId}${m.golden ? '_G' : ''}`).join(',')}` +
     `|${state.handSpells.map((s) => `${s.cardId}:${s.scriptData.join('.')}`).join(',')}` +
-    `|${state.hero?.heroPowerCardId ?? ''}`;
+    `|${state.hero?.heroPowerCardId ?? ''}` +
+    // Остаток счётчика силы «после N покупок» (part34): доля награды
+    // у кличевых кандидатов пула зависит от него.
+    `|${(state.hero?.heroPowerScriptData ?? []).join('.')}`;
 
   let byCards = POOL_VALUE_CACHE.get(rules);
   if (byCards === undefined) {
@@ -3211,7 +3360,10 @@ function discoverPoolValue(
     `best3|${tiers.join(',')}|${race ?? ''}` +
     `|${state.hand.map((m) => `${m.cardId}${m.golden ? '_G' : ''}`).join(',')}` +
     `|${state.handSpells.map((s) => `${s.cardId}:${s.scriptData.join('.')}`).join(',')}` +
-    `|${state.hero?.heroPowerCardId ?? ''}`;
+    `|${state.hero?.heroPowerCardId ?? ''}` +
+    // Остаток счётчика силы «после N покупок» (part34): доля награды
+    // у кличевых кандидатов пула зависит от него.
+    `|${(state.hero?.heroPowerScriptData ?? []).join('.')}`;
 
   let byCards = POOL_VALUE_CACHE.get(rules);
   if (byCards === undefined) {

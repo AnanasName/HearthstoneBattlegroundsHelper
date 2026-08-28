@@ -32,6 +32,7 @@ const HERO: GameState['hero'] = {
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
 };
 
 const state: GameState = {
@@ -346,6 +347,9 @@ describe('вид оверлея', () => {
       completesTriple: false,
       tripleBet: false,
       heroPowerPlay: 0,
+      heroPowerBuy: 0,
+      heroPowerBuyLeft: null,
+      heroPowerBuyReward: null,
     });
     const withChoice: TavernAdvice = {
       ...tavern,

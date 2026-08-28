@@ -76,7 +76,8 @@ function printTurn(state: GameState, advice: TavernAdvice, cards: CardIndex): vo
         ` бой ${value.battle.toFixed(1)}` +
         ` текст ${(value.textTribe + value.textMech + value.namedCard).toFixed(1)}` +
         ` магнит ${value.spellMagnet.toFixed(1)}` +
-        ` удвоитель ${value.doubler.toFixed(1)} герой ${value.heroPower.toFixed(1)})`,
+        ` удвоитель ${value.doubler.toFixed(1)} герой ${value.heroPower.toFixed(1)}` +
+        ` награда-за-покупку ${value.heroPowerBuy.toFixed(1)})`,
     );
   }
 

@@ -164,6 +164,21 @@ export function createReducer(players: Players): Reducer {
   let techLevelUpTurn: number | null = null;
   let goldTotal = 0;
   let goldSpent = 0;
+  /**
+   * Временное золото хода — тег `TEMP_RESOURCES` (part34). Его дают «Gain
+   * 1 Gold next turn» (Southsea Busker) и «Gain 2 Gold next turn» (Careful
+   * Investment, part30), а ещё ПРОДАЖА, пока в этом ходу ничего не потрачено
+   * (возврат не может опустить `RESOURCES_USED` ниже нуля — он идёт сюда).
+   * Тратится оно ПЕРВЫМ: подъём за 3 при `TEMP_RESOURCES=1` пишет
+   * `TEMP_RESOURCES=0` и `RESOURCES_USED=2`. Прежняя формула «RESOURCES минус
+   * RESOURCES_USED» такого золота не видела вовсе, и ход после Busker
+   * читался на монету беднее, а продажа при нуле потраченного — как
+   * ничего не давшая. Границу хода с ненулевым остатком в фикстурах не
+   * встретили ни разу — сброс доверен тегам игры.
+   */
+  let goldTemp = 0;
+  /** Сколько временного золота потрачено в этом ходу — чтобы `goldSpent` видел и его. */
+  let tempSpent = 0;
   let anomalyCardId: string | null = null;
   let finalPlace: number | null = null;
   let buildNumber: number | null = null;
@@ -434,6 +449,7 @@ export function createReducer(players: Players): Reducer {
           heroPowerUsedThisTurn = false;
           darkGiftUsedThisTurn = false;
           activatedEntityIds.clear();
+          tempSpent = 0;
         }
         return;
       case 'STEP':
@@ -452,6 +468,12 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'RESOURCES_USED':
         if (subject.kind === 'self' && n !== null) goldSpent = n;
+        return;
+      case 'TEMP_RESOURCES':
+        if (subject.kind === 'self' && n !== null) {
+          if (n < goldTemp) tempSpent += goldTemp - n;
+          goldTemp = n;
+        }
         return;
       case 'PLAYER_LEADERBOARD_PLACE':
         if (subject.kind === 'entity' && subject.id === heroEntityId) finalPlace = n;
@@ -805,6 +827,7 @@ export function createReducer(players: Players): Reducer {
     heroPowerUsedThisTurn: boolean;
     heroPowerUnplayable: boolean;
     heroPowerHasActivate: boolean;
+    heroPowerScriptData: readonly (number | null)[];
   }
 
   /** Своя сила героя: живая сущность HERO_POWER под своим контроллером. */
@@ -817,6 +840,7 @@ export function createReducer(players: Players): Reducer {
       heroPowerUsedThisTurn: false,
       heroPowerUnplayable: false,
       heroPowerHasActivate: false,
+      heroPowerScriptData: [],
     };
     if (self === null) return none;
 
@@ -832,6 +856,11 @@ export function createReducer(players: Players): Reducer {
         // part13, «Мана в минуту» Хроми: HAS_ACTIVATE_POWER=1, тега COST нет.
         // Пассивные силы тега не имеют, и «нажать» их советовать нельзя.
         heroPowerHasActivate: flag(e, 'HAS_ACTIVATE_POWER'),
+        // Счётчик «после N покупок» (part34, «Бранное дело»): NUM_1 — остаток,
+        // тега при создании нет вовсе, дальше 3 → 2 → 1 → 0.
+        heroPowerScriptData: [1, 2, 3, 4].map(
+          (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
+        ),
       };
     }
     return none;
@@ -1019,9 +1048,15 @@ export function createReducer(players: Players): Reducer {
       rerollCost: rerollButton(),
       maxTechLevel,
       // Остаток, а не выданное на ход: в игре слева от дроби показан именно он.
-      gold: Math.max(0, goldTotal - goldSpent),
+      // Временное золото (`TEMP_RESOURCES`) входит в остаток, как в игре
+      // в числитель («11/10» при двух золотых «на следующий ход»), а «всего»
+      // остаётся базовым максимумом — знаменателем. Потраченная временная
+      // часть входит в `goldSpent`: точки решения (`turns.ts`) и датасет
+      // читают «потрачено ли что-то в этом ходу», и покупка целиком
+      // из временного золота обязана считаться тратой.
+      gold: Math.max(0, goldTotal + goldTemp - goldSpent),
       goldTotal,
-      goldSpent,
+      goldSpent: goldSpent + tempSpent,
       anomalyCardId,
       globalInfo: { ...globalInfo },
       nextOpponentPlayerId,

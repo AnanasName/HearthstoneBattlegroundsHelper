@@ -75,6 +75,7 @@ describe('покрытие сил героя правилами советник
     if (matches(id, R.tripleCopiesWords)) on.push('triple');
     if (matches(id, R.heroPowerPlayStatsWords)) on.push('play');
     if (matches(id, R.heroPowerKeywordWords)) on.push('keyword');
+    if (matches(id, R.heroPowerBuyRewardWords)) on.push('buy');
     return on;
   };
 
@@ -100,16 +101,22 @@ describe('покрытие сил героя правилами советник
     // of Light; пассивный «Start of Combat: Give your left-most minion…»
     // (Swatting Insects) шаблон не ловит намеренно: нажимать там нечего.
     expect(count('keyword')).toBe(2);
+    // «After you buy 4 Battlecry minions, get a Brann Bronzebeard» —
+    // «Бранное дело» (part34), первая внесённая сила класса «платит
+    // за действие». Шаблон требует и механику-условие, и награду-миньона:
+    // «After you buy 3 minions, get a Tavern Coin» (Verdant Spheres)
+    // и «After you buy 12 cards, get Sulfuras» (BUY, INSECT!) он не ловит.
+    expect(count('buy')).toBe(1);
   });
 
-  it('из 174 сил пула советник не берёт ничего у 122', () => {
+  it('из 174 сил пула советник не берёт ничего у 121', () => {
     const mute = pool.filter((id) => channelsOf(id).length === 0);
-    expect(mute).toHaveLength(122);
+    expect(mute).toHaveLength(121);
 
     // Число большое, и прятать его незачем: сила героя определяет стиль
     // партии, а мы читаем меньше трети пула. Что из этого стоит вносить —
     // решается фикстурой, а не списком (см. «Отложено сознательно»).
-    expect(mute.length / pool.length).toBeGreaterThan(0.7);
+    expect(mute.length / pool.length).toBeGreaterThan(2 / 3);
   });
 
   it('племя называют 24 силы пула, а не 140 — 140 было по всему Hearthstone', () => {
@@ -133,6 +140,9 @@ describe('покрытие сил героя правилами советник
     expect(channelsOf('TB_BaconShop_HP_042')).toEqual(['play']);
     expect(channelsOf('TB_BaconShop_HP_056')).toEqual(['tribe', 'sell']);
     expect(channelsOf('TB_BaconShop_HP_024')).toEqual(['keyword']);
+    expect(channelsOf('TB_BaconShop_HP_048')).toEqual(['buy']);
+    expect(channelsOf('TB_BaconShop_HP_066')).toEqual([]);
+    expect(channelsOf('TB_BaconShop_HP_087')).toEqual([]);
 
     // А это — сила самой частой партии датасета (три раза), и она
     // показывает, почему счёт по тексту ВЕРХНИЙ: «Discover a minion with

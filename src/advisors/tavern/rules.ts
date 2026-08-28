@@ -506,6 +506,22 @@ export interface TavernRules {
    * и шаблон «give a minion» его не ловит намеренно: нажимать там нечего.
    */
   readonly heroPowerKeywordWords: readonly string[];
+  /**
+   * Текст силы героя, ПЛАТЯЩЕЙ ЗА ПОКУПКИ миньонов с механикой, — «After you
+   * buy 4 Battlecry minions, get a Brann Bronzebeard. (Once per game.)»
+   * («Бранное дело», part34). Группы шаблона: 1 — сколько покупок, 2 — слово
+   * механики (сводится к механике снапшота таблицей `mechanicTextWords`),
+   * 3 — имя награды (ищется среди миньонов пула по имени).
+   *
+   * Это первая внесённая сила класса «сила платит за ДЕЙСТВИЕ» (CLAUDE.md,
+   * «отложено»), и внесена она по фикстуре одной партии: игрок купил четыре
+   * кличевых миньона за четыре хода таверны, получил Бранна на 4-м
+   * и пришёл первым — а советник ни разу не назвал клич причиной покупки.
+   * Остальные силы этого класса («After you buy 3 minions, get a Tavern
+   * Coin», «After you buy 12 cards, get Sulfuras») шаблон не ловит намеренно:
+   * у них нет ни механики-условия, ни награды-миньона, и фикстуры нет.
+   */
+  readonly heroPowerBuyRewardWords: readonly string[];
   readonly heroPowerSpellValue: number;
 
   /**
@@ -1109,6 +1125,12 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   heroPowerShotWords: ['remove a minion[^.]*tavern'],
   heroPowerKeywordWords: [
     '\\bgive a (?:friendly )?minion\\s+(?:<b>)?(reborn|divine shield|taunt|windfury|poisonous|venomous|stealth)\\b',
+  ],
+  // «After you buy 4 <b>Battlecry</b> minions, get a Brann Bronzebeard.»
+  // Разметка стоит вокруг слова механики, число — литералом, имя награды —
+  // до точки. Между словами `\s+`: переносы строк посреди фразы (part16).
+  heroPowerBuyRewardWords: [
+    '\\bafter\\s+you\\s+buy\\s+(\\d+)\\s+(?:<b>)?([a-z]+)(?:</b>)?\\s+minions?,?\\s+get\\s+an?\\s+([^.<]+?)\\s*\\.',
   ],
   heroPowerSpellValue: 6,
 

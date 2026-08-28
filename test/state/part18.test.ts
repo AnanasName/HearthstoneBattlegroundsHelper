@@ -39,7 +39,14 @@ describe('part18: продажа в план, раннее обновление,
       if (s.phase !== 'tavern') continue;
 
       // Ход 5, момент скриншота: River Skipper на борде, Mini-Myrmidon в руке.
-      if (s.turn === 5 && s.gold === 5 && s.board.length === 1 && s.hand.length === 1) turn5 = s;
+      // Точка решения — до продажи: золото 5/5, Skipper на борде, рука
+      // пуста. Прежний селектор (`hand.length === 1`) ловил состояние
+      // ПОСРЕДИ блока продажи — миньон от Skipper уже в руке, сам он ещё
+      // на борде, а возврат за продажу (`TEMP_RESOURCES`, part34) редьюсер
+      // тогда не видел.
+      if (s.turn === 5 && s.goldSpent === 0 && s.gold === 5 && s.board.length === 1 && s.hand.length === 0) {
+        turn5 = s;
+      }
       // Ход 7: цена подъёма уже упала до 5 — то, что видел игрок.
       if (s.turn === 7 && s.gold === 6 && s.tavernUpgradeCost === 5) turn7 = s;
       if (s.turn === 17 && s.gold === 6 && s.board.length === 7) turn17 = s;
@@ -69,9 +76,16 @@ describe('part18: продажа в план, раннее обновление,
     expect(sell?.minion?.cardId).toBe('BG33_140');
     expect(sell?.reason).toContain('только при продаже');
 
+    // ЗАПИСАННАЯ ГРАНИЦА (part34): на честной точке решения — рука пуста,
+    // в витрине заклинание за 2 — жадная цепочка тратит пять золотых
+    // целиком (Winterfinner за 3 → заклинание за 2), золото не сгорает,
+    // развилки нет, и продажа Skipper (3.0 в списке) в план не попадает,
+    // хотя открыла бы второе тело (игрок продал и купил двоих). Прежний
+    // тест утверждал обратное на состоянии посреди блока продажи. Если
+    // план научится продавать ради второго тела без сгорания — этот тест
+    // обязан упасть, и правило пересмотрят, а не унаследуют молча.
     const plan = spendPlan(turn5, { cards });
-    expect(plan.steps.some((s) => s.recommendation.action === 'sell')).toBe(true);
-    // Золото уходит целиком: ради этого продажа и делается.
+    expect(plan.steps.some((s) => s.recommendation.action === 'sell')).toBe(false);
     expect(plan.goldLeft).toBe(0);
   });
 

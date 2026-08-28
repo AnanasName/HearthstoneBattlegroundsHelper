@@ -23,6 +23,7 @@ const HERO: Hero = {
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
 };
 
 function state(patch: Partial<GameState>): GameState {

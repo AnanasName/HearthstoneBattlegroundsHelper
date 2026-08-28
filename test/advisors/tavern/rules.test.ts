@@ -9,6 +9,7 @@ import {
   copiesOwned,
   darkGiftRule,
   freeHeroPowerRule,
+  heroPowerBuyReward,
   heroPowerKeywordRule,
   heroPowerShotRule,
   freezeRule,
@@ -84,6 +85,7 @@ const hero = (health: number, damage = 0, armor = 0): Hero => ({
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
 });
 
 function state(patch: Partial<GameState> = {}): GameState {
@@ -2781,6 +2783,7 @@ describe('бесплатная сила героя', () => {
     heroPowerEntityId: 136,
     heroPowerCost: null,
     heroPowerHasActivate: true,
+    heroPowerScriptData: [],
     ...patch,
   });
   const chromieDeps = { cards: chromieCards };
@@ -2850,6 +2853,7 @@ describe('сила героя, дающая своему миньону ключ
     heroPowerEntityId: 121,
     heroPowerCost: null,
     heroPowerHasActivate: true,
+    heroPowerScriptData: [],
     ...patch,
   });
   const lichDeps = { cards: lichCards };
@@ -2984,6 +2988,7 @@ describe('сила героя, ВЫСТРЕЛИВАЮЩАЯ миньоном в�
     heroPowerEntityId: 181,
     heroPowerCost: null,
     heroPowerHasActivate: true,
+    heroPowerScriptData: [],
     ...patch,
   });
   const tavishDeps = { cards: tavishCards };
@@ -3052,6 +3057,7 @@ describe('сила героя, дающая заклинание таверны 
     heroPowerEntityId: 166,
     heroPowerCost: 1,
     heroPowerHasActivate: true,
+    heroPowerScriptData: [],
     ...patch,
   });
   const holliDeps = { cards: holliCards };
@@ -3940,5 +3946,144 @@ describe('заклинание витрины «даёт миньона» на �
       expect(rec.reason).toContain('борд полон — место через продажу');
       expect(rec.score).toBeLessThan(withRoom?.score ?? 0);
     }
+  });
+});
+
+/**
+ * Сила «после N покупок с механикой — награда» (part34, «Бранное дело»:
+ * «After you buy 4 Battlecry minions, get a Brann Bronzebeard»). Игрок
+ * купил четыре кличевых миньона за четыре хода таверны, получил Бранна
+ * на 4-м и пришёл первым; советник ни разу не назвал клич причиной покупки.
+ */
+describe('сила героя «после N кличевых покупок — Бранн» в ценности покупки (part34)', () => {
+  const brandCards = createCardIndex([
+    ...STUB_CARDS,
+    {
+      id: 'BRAND',
+      name: 'Battle Brand',
+      type: 'Hero_power',
+      text: '[x]After you buy 4 <b>Battlecry</b> minions, get a Brann Bronzebeard. <i>(Once per game.)</i>',
+    },
+    {
+      id: 'BRANN',
+      name: 'Brann Bronzebeard',
+      type: 'Minion',
+      techLevel: 5,
+      attack: 2,
+      health: 4,
+      races: [],
+      isBaconPool: true,
+      mechanics: ['AURA'],
+      text: 'Your <b>Battlecries</b> trigger twice.',
+    },
+    {
+      id: 'BUSKER',
+      name: 'Southsea Busker',
+      type: 'Minion',
+      techLevel: 1,
+      attack: 3,
+      health: 1,
+      races: ['PIRATE'],
+      isBaconPool: true,
+      mechanics: ['BATTLECRY'],
+      text: '<b>Battlecry:</b> Gain 1 Gold next turn.',
+    },
+    {
+      id: 'RIDER',
+      name: 'Risen Rider',
+      type: 'Minion',
+      techLevel: 1,
+      attack: 2,
+      health: 1,
+      races: ['UNDEAD'],
+      isBaconPool: true,
+      mechanics: ['TAUNT', 'REBORN'],
+      text: '<b>Taunt</b> <b>Reborn</b>',
+    },
+    // «After you buy 3 minions, get a Tavern Coin» — без механики-условия
+    // и без награды-миньона: шаблон молчит намеренно.
+    { id: 'SPHERES', name: 'Verdant Spheres', type: 'Hero_power', text: '[x]After you buy 3 minions, get a Tavern Coin.' },
+  ]);
+  const brandDeps = { cards: brandCards };
+  const brann = (scriptData: readonly (number | null)[] = []): Hero => ({
+    ...hero(30),
+    heroPowerCardId: 'BRAND',
+    heroPowerEntityId: 226,
+    heroPowerCost: null,
+    heroPowerHasActivate: false,
+    heroPowerScriptData: scriptData,
+  });
+  const busker = minion(7, { cardId: 'BUSKER', attack: 3, health: 1, techLevel: 1 });
+  const rider = minion(8, { cardId: 'RIDER', attack: 2, health: 1, techLevel: 1, taunt: true, reborn: true });
+
+  it('сила читается из текста: четыре покупки, механика BATTLECRY, награда — Бранн из пула', () => {
+    const r = heroPowerBuyReward(state({ hero: brann() }), brandCards);
+    expect(r).not.toBeNull();
+    expect(r?.count).toBe(4);
+    expect(r?.mechanic).toBe('BATTLECRY');
+    expect(r?.reward.id).toBe('BRANN');
+    // Тега при создании силы нет — остаток равен числу из текста.
+    expect(r?.remaining).toBe(4);
+    // Живой счётчик — `TAG_SCRIPT_DATA_NUM_1`: 3 → 2 → 1 → 0.
+    expect(heroPowerBuyReward(state({ hero: brann([2]) }), brandCards)?.remaining).toBe(2);
+    // Ноль — сила отработала («Once per game»).
+    expect(heroPowerBuyReward(state({ hero: brann([0]) }), brandCards)).toBeNull();
+    // Без силы такого рода — ничего.
+    expect(heroPowerBuyReward(state({ hero: hero(30) }), brandCards)).toBeNull();
+    expect(heroPowerBuyReward(state({ hero: { ...brann(), heroPowerCardId: 'SPHERES' } }), brandCards)).toBeNull();
+  });
+
+  it('кличевой кандидат получает долю награды, некличевой — нет (part34, ход 1)', () => {
+    // Ход 1: витрина Southsea Busker 3/1 (клич) и Risen Rider 2/1 (провокация,
+    // перерождение). Прежде Rider 6.0 стоял над Busker 4.0.
+    const s = state({ hero: brann(), board: [], shop: [busker, rider], turn: 1, techLevel: 1, gold: 3, goldTotal: 3 });
+    const b = minionValue(busker, s, brandDeps);
+    const r = minionValue(rider, s, brandDeps);
+    expect(r.heroPowerBuy).toBe(0);
+    expect(r.heroPowerBuyLeft).toBeNull();
+    // Бранн на пустом борде: тир 5 → 10, тело 2/4 → 3; четверть — 3.25.
+    expect(b.heroPowerBuy).toBeCloseTo(13 / 4, 5);
+    expect(b.heroPowerBuyLeft).toBe(3);
+    expect(b.heroPowerBuyReward).toBe('Brann Bronzebeard');
+    expect(b.total).toBeGreaterThan(r.total);
+
+    // `buyRules` отдаёт советы в порядке витрины — ранжирует `adviseTavern`.
+    const recs = [...buyRules(s, brandDeps)].sort((a, b) => b.score - a.score);
+    expect(recs[0]?.minion?.cardId).toBe('BUSKER');
+    expect(recs[0]?.heroPowerBuyLeft).toBe(3);
+    expect(recs[0]?.reason).toContain('сила героя: до Brann Bronzebeard ещё 3 такие покупки');
+    expect(recs.find((x) => x.minion?.cardId === 'RIDER')?.heroPowerBuyLeft).toBeUndefined();
+  });
+
+  it('доля растёт к последней покупке: последняя стоит целого Бранна', () => {
+    const at = (left: number) => minionValue(busker, state({ hero: brann([left]), board: [] }), brandDeps);
+    expect(at(1).heroPowerBuy).toBeCloseTo(13, 5);
+    expect(at(1).heroPowerBuyLeft).toBe(0);
+    expect(at(2).heroPowerBuy).toBeCloseTo(13 / 2, 5);
+    const recs = buyRules(state({ hero: brann([1]), board: [], shop: [busker] }), brandDeps);
+    expect(recs[0]?.reason).toContain('сила героя: эта покупка приносит Brann Bronzebeard');
+  });
+
+  it('награда считается на ЭТОМ борде: при своих кличевых Бранн дороже', () => {
+    const empty = minionValue(busker, state({ hero: brann([1]), board: [] }), brandDeps);
+    const withBattlecries = minionValue(
+      busker,
+      state({
+        hero: brann([1]),
+        board: [
+          minion(1, { cardId: 'BUSKER', attack: 3, health: 1, techLevel: 1 }),
+          minion(2, { cardId: 'BUSKER', attack: 3, health: 1, techLevel: 1 }),
+        ],
+      }),
+      brandDeps,
+    );
+    // «Your Battlecries trigger twice» — механика из текста, своих с кличем два.
+    expect(withBattlecries.heroPowerBuy).toBeGreaterThan(empty.heroPowerBuy);
+  });
+
+  it('после нуля слагаемого нет — сила отработала', () => {
+    const b = minionValue(busker, state({ hero: brann([0]), board: [] }), brandDeps);
+    expect(b.heroPowerBuy).toBe(0);
+    expect(b.heroPowerBuyLeft).toBeNull();
   });
 });

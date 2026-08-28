@@ -40,7 +40,10 @@ describe('советник таверны на фикстурах', () => {
     for (const { state } of [...part3, ...part2]) {
       expect(state.phase).toBe('tavern');
       expect(state.goldSpent).toBe(0);
-      expect(state.gold).toBe(state.goldTotal);
+      // Не меньше максимума, а не ровно: временное золото хода
+      // (`TEMP_RESOURCES` — «Gain 1 Gold next turn», part34) поднимает
+      // остаток выше базового максимума, как «11/10» в игре.
+      expect(state.gold).toBeGreaterThanOrEqual(state.goldTotal);
       expect(state.gold).toBeGreaterThan(0);
       // Одиночный миньон в витрине означал бы, что снимок взят до её
       // наполнения — ровно та ошибка, что была в первой версии.

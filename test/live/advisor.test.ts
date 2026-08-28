@@ -85,6 +85,7 @@ const HERO: GameState['hero'] = {
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
 };
 
 function tavernState(patch: Partial<GameState> = {}): GameState {

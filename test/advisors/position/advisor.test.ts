@@ -213,6 +213,7 @@ describe('счёт против поля из нескольких бордов'
     heroPowerUsedThisTurn: false,
     heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
   };
 
   const setupAgainst = (mine: readonly Minion[], opponent: readonly Minion[]): BattleSetup => ({
@@ -305,6 +306,7 @@ describe('вопрос советнику из состояния партии',
     heroPowerUsedThisTurn: false,
     heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
   };
 
   const stateFor = (patch: Partial<GameState>): GameState => ({

@@ -55,7 +55,10 @@ describe('part20: кривая подъёма считает ходы тавер
     if (state === undefined) return;
 
     expect(tavernTurnOf(state.turn)).toBe(8);
-    expect(state.gold).toBe(10);
+    expect(state.goldTotal).toBe(10);
+    // Остаток — одиннадцать: базовые десять плюс один временный золотой
+    // «на следующий ход» (`TEMP_RESOURCES`, part34); в игре это «11/10».
+    expect(state.gold).toBe(11);
     expect(state.techLevel).toBe(5);
     expect(state.tavernUpgradeCost).toBe(10);
   });

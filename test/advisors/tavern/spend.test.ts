@@ -41,6 +41,7 @@ const hero = (): Hero => ({
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
   heroPowerHasActivate: false,
+  heroPowerScriptData: [],
 });
 
 function state(patch: Partial<GameState> = {}): GameState {
@@ -404,8 +405,10 @@ describe('золото заклинания доезжает до следующ
     // 2 − 2 + 3 = 3: на покупку за 3 хватает ровно.
     const next = applyRecommendation(s, rec as Recommendation);
     expect(next?.state.gold).toBe(3);
-    // `goldSpent` держится согласованным с остатком.
-    expect(next?.state.goldSpent).toBe(s.goldTotal - 3);
+    // `goldSpent` — приращение остатка, не ниже нуля: монета принесла
+    // больше, чем стоила, и «потрачено» осталось нулём (с `TEMP_RESOURCES`
+    // остаток бывает выше максимума, и разность `goldTotal − gold` врала бы).
+    expect(next?.state.goldSpent).toBe(0);
   });
 
   it('заклинание не по карману не советуется — как и всё остальное', () => {
@@ -429,5 +432,29 @@ describe('золото заклинания доезжает до следующ
     const plan = spendPlan(withCoin(), d);
     const actions = plan.steps.map((step) => step.recommendation.action);
     expect(actions.slice(0, 2)).toEqual(['play', 'buy']);
+  });
+});
+
+describe('счётчик силы «после N покупок» в плане (part34)', () => {
+  const brand = (scriptData: readonly (number | null)[]): Hero => ({
+    ...hero(),
+    heroPowerCardId: 'BRAND',
+    heroPowerEntityId: 226,
+    heroPowerScriptData: scriptData,
+  });
+
+  it('покупка, которую сила засчитывает, уменьшает остаток — и когда тега ещё не было', () => {
+    const m = shopMinion(20, 'BODY_1');
+    const fresh = applyRecommendation(state({ hero: brand([]), shop: [m] }), buy(m, { heroPowerBuyLeft: 3 }));
+    expect(fresh?.state.hero?.heroPowerScriptData).toEqual([3]);
+    const live = applyRecommendation(state({ hero: brand([2, null]), shop: [m] }), buy(m, { heroPowerBuyLeft: 1 }));
+    expect(live?.state.hero?.heroPowerScriptData).toEqual([1, null]);
+  });
+
+  it('покупка без отметки героя не трогает — та же ссылка', () => {
+    const m = shopMinion(20, 'BODY_1');
+    const s = state({ hero: brand([2]), shop: [m] });
+    const applied = applyRecommendation(s, buy(m));
+    expect(applied?.state.hero).toBe(s.hero);
   });
 });

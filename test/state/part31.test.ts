@@ -66,7 +66,9 @@ describe('part31: цена придержанного заряда дара, м�
         [21, (v: GameState) => (turn21 = v)],
         [23, (v: GameState) => (turn23 = v)],
       ] as const) {
-        if (s.turn === turn && s.gold === 10 && s.shop.length >= 5 && !s.darkGiftUsedThisTurn) {
+        // Золото не сравнивается с десяткой: на этих ходах есть временное
+        // золото (`TEMP_RESOURCES` 2/1/1, part34), и остаток больше максимума.
+        if (s.turn === turn && s.goldSpent === 0 && s.shop.length >= 5 && !s.darkGiftUsedThisTurn) {
           set(s);
         }
       }

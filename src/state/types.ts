@@ -228,6 +228,16 @@ export interface Hero {
    * тега `COST` — сила активная и бесплатная.
    */
   readonly heroPowerHasActivate: boolean;
+  /**
+   * Плейсхолдеры силы — теги `TAG_SCRIPT_DATA_NUM_1..4` на её сущности,
+   * как `scriptData` у миньона. У сил «после N покупок…» первый из них —
+   * живой остаток счётчика: «Бранное дело» (part34, «After you buy 4
+   * Battlecry minions, get a Brann Bronzebeard») создаётся БЕЗ тега
+   * (остаток равен числу из текста), а с первой кличевой покупки идёт
+   * 3 → 2 → 1 → 0 блоком TRIGGER внутри блока покупки. `null` на месте —
+   * тега нет; пустой массив — силы нет.
+   */
+  readonly heroPowerScriptData: readonly (number | null)[];
 }
 
 /**

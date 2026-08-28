@@ -8,6 +8,22 @@ import {
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 
 /**
+ * Сила героя после покупки миньона: остаток счётчика «после N покупок»
+ * на один меньше, если покупка засчитывается. Иначе — прежний герой
+ * (та же ссылка: без силы такого рода менять нечего).
+ */
+function withHeroPowerBuyCounted(state: GameState, rec: Recommendation): GameState['hero'] {
+  const hero = state.hero;
+  if (hero === null || rec.heroPowerBuyLeft === undefined) return hero;
+  const scriptData = [...hero.heroPowerScriptData];
+  // Запись по индексу, а не отображением: на пустом массиве `map` не сделал
+  // бы ничего — ровно там, где «тега нет» читается как «счётчик полный»
+  // (урок заряда магнита-хранителя, 18.08).
+  scriptData[0] = rec.heroPowerBuyLeft;
+  return { ...hero, heroPowerScriptData: scriptData };
+}
+
+/**
  * План трат хода: что делать со ВСЕМ золотом, а не только первым действием.
  *
  * Зачем это отдельно от списка советов. Советы — это ранжирование отдельных
@@ -146,10 +162,10 @@ export function applyRecommendation(
   /**
    * Общая часть любого платного шага: золото ушло.
    *
-   * `goldSpent` держится согласованным с остатком (`gold = goldTotal −
-   * goldSpent`) — тем самым равенством, которое поддерживает редьюсер.
-   * Складывать цены отдельно нельзя: продажа возвращает золото, и счётчик
-   * разошёлся бы с остатком. По `goldSpent > 0` определяются точки решения
+   * `goldSpent` держится согласованным с остатком: на сколько уменьшился
+   * остаток, на столько выросло «потрачено» — как у редьюсера. Складывать
+   * цены отдельно нельзя: продажа возвращает золото, и счётчик разошёлся
+   * бы с остатком. По `goldSpent > 0` определяются точки решения
    * (`turns.ts`) и запись в датасет, и гипотетическое состояние обязано
    * выглядеть как настоящее.
    */
@@ -160,7 +176,10 @@ export function applyRecommendation(
     // покупка» и тут же её не делает (part24, ход 9).
     const gained = rec.grantsGold ?? 0;
     const withGold = gained > 0 ? { ...next, gold: next.gold + gained } : next;
-    return { ...withGold, goldSpent: state.goldTotal - withGold.gold };
+    // Приращением, а не `goldTotal − gold`: с временным золотом
+    // (`TEMP_RESOURCES`, part34) остаток бывает больше базового максимума,
+    // и разность дала бы отрицательное «потрачено».
+    return { ...withGold, goldSpent: Math.max(0, state.goldSpent + (state.gold - withGold.gold)) };
   };
 
   switch (rec.action) {
@@ -212,6 +231,13 @@ export function applyRecommendation(
           shop,
           board: room ? [...board, rec.minion] : board,
           hand: room ? state.hand : [...state.hand, rec.minion],
+          // Сила «после N покупок с механикой — награда» (part34) считает
+          // ЭТУ покупку: следующий шаг плана обязан видеть остаток на один
+          // меньше, иначе на последнем шаге два кличевых миньона подряд оба
+          // стоили бы «целого Бранна». Саму награду гипотетическое
+          // состояние не получает: выдумывать сущность в нём — тот же
+          // отказ, что у силы-Discover (part30).
+          hero: withHeroPowerBuyCounted(state, rec),
         }),
         opaque: false,
         terminal: false,
