@@ -12,6 +12,8 @@ export default tseslint.config(
      */
     ignores: [
       'dist/**',
+      // Вывод electron-builder: та же сборка, скопированная в release/.
+      'release/**',
       'node_modules/**',
       'data/**',
       '*-tmp.ts',

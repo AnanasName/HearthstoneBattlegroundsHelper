@@ -1,26 +1,25 @@
 import { fileURLToPath } from 'node:url';
 
-import { app, BrowserWindow, globalShortcut, screen } from 'electron';
+import { BrowserWindow, globalShortcut, screen } from 'electron';
 
+import { spendPlan } from '../advisors/tavern/spend.js';
 import { loadCardIndex } from '../data/cards.js';
 import { DATASET_DIR, DatasetRecorder } from '../dataset/recorder.js';
 import { PositionWorker } from '../live/position/client.js';
 import { startLiveSession, type LiveSession } from '../live/session.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
-import { checkGameSetup, waitingForLogText } from '../ui/setup.js';
-import { DEFAULT_LOGS_ROOT } from '../watcher/logPaths.js';
-import { spendPlan } from '../advisors/tavern/spend.js';
+import { waitingForLogText } from '../ui/setup.js';
 import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.js';
 
 /**
- * Оверлей поверх игры.
- *
- *   npm run overlay
+ * Окно оверлея поверх игры.
  *
  * Здесь только окно и передача готового вида в разметку: что показывать,
  * решает `view.ts`, а когда считать — `live/advisor.ts`. Оба проверены
- * тестами, окно проверить нечем.
+ * тестами, окно проверить нечем. Жизненным циклом приложения (трей,
+ * выход, сборщик логов) заведует `app/main.ts`: оверлей — одна из его
+ * функций, включаемая и выключаемая на ходу.
  *
  * ## Свойства окна и почему именно такие
  *
@@ -42,26 +41,30 @@ const WIDTH = 460;
 const HEIGHT = 520;
 const MARGIN = 24;
 
-let window: BrowserWindow | null = null;
-let position: PositionWorker | null = null;
-let session: LiveSession | null = null;
-
 /**
- * Последний показанный вид.
+ * Как спрятать оверлей.
  *
- * Разметка грузится дольше, чем поднимается живой цикл, а сообщения,
- * отправленные до её готовности, пропадают молча. Поэтому вид хранится
- * и отправляется заново, когда окно готово: иначе оверлей до первой перемены
- * в игре показывал бы «жду партию» посреди уже идущей партии.
+ * Окно намеренно без рамки, без кнопок и не принимает фокус — закрыть его
+ * мышью нельзя по построению. Терминал не всегда под рукой: помощник
+ * запускают и ярлыком. Поэтому горячая клавиша, общесистемная — окно
+ * ведь фокуса не получает. Клавиша выключает ОВЕРЛЕЙ, а не приложение:
+ * сборщик логов в трее продолжает работать.
  */
-let lastView: OverlayView = EMPTY_VIEW;
+export const HIDE_SHORTCUT = 'Control+Shift+Q';
 
-function send(view: OverlayView): void {
-  lastView = view;
-  window?.webContents.send('overlay:view', view);
+export interface OverlayOptions {
+  readonly logsRoot: string;
+  /** Что показать первой строкой до первого совета — например, проблему настройки. */
+  readonly initialHeader: string | null;
+  /** Игрок нажал клавишу — оверлей просит себя выключить. */
+  readonly onHideRequested: () => void;
 }
 
-function createWindow(): BrowserWindow {
+export interface OverlayHandle {
+  stop: () => Promise<void>;
+}
+
+function createWindow(getLastView: () => OverlayView): BrowserWindow {
   const area = screen.getPrimaryDisplay().workArea;
 
   const created = new BrowserWindow({
@@ -90,14 +93,17 @@ function createWindow(): BrowserWindow {
   // forward: события мыши всё равно доходят до игры, а окно их не перехватывает.
   created.setIgnoreMouseEvents(true, { forward: true });
 
+  // Разметка грузится дольше, чем поднимается живой цикл, а сообщения,
+  // отправленные до её готовности, пропадают молча. Поэтому последний вид
+  // хранится и отправляется заново, когда окно готово.
   created.webContents.on('did-finish-load', () => {
-    created.webContents.send('overlay:view', lastView);
+    created.webContents.send('overlay:view', getLastView());
   });
 
   // Путь абсолютный, и это не придирка: относительный `loadFile` считается
-  // не от рабочего каталога, а от каталога точки входа (`app.getAppPath()`,
-  // то есть dist/overlay), и разметка искалась в dist/overlay/src/overlay.
-  // Поэтому она кладётся в сборку рядом с main.js — см. npm run build.
+  // не от рабочего каталога, а от каталога точки входа (`app.getAppPath()`),
+  // и разметка искалась в dist/overlay/src/overlay. Поэтому она кладётся
+  // в сборку рядом с main.js — см. npm run build.
   void created.loadFile(fileURLToPath(new URL('index.html', import.meta.url)));
   return created;
 }
@@ -128,13 +134,20 @@ function describeNotice(notice: LiveNotice): OverlayView | null {
   }
 }
 
-function start(): void {
+export function startOverlay(options: OverlayOptions): OverlayHandle {
+  let lastView: OverlayView = EMPTY_VIEW;
+  let window: BrowserWindow | null = null;
+
+  const send = (view: OverlayView): void => {
+    lastView = view;
+    if (window !== null && !window.isDestroyed()) window.webContents.send('overlay:view', view);
+  };
+
+  window = createWindow(() => lastView);
+  if (options.initialHeader !== null) send({ ...EMPTY_VIEW, header: options.initialHeader });
+
   const cards = loadCardIndex();
   const worker = new PositionWorker();
-  position = worker;
-
-  const problem = checkGameSetup(DEFAULT_LOGS_ROOT);
-  if (problem !== null) send({ ...EMPTY_VIEW, header: problem.text });
 
   let latest: GameState | null = null;
   let tavern: ViewInput['tavern'] = null;
@@ -159,7 +172,7 @@ function start(): void {
     );
   };
 
-  session = startLiveSession(
+  const session: LiveSession = startLiveSession(
     {
       cards,
       position: worker,
@@ -218,36 +231,20 @@ function start(): void {
         if (view !== null) send(view);
       },
     },
+    { watcher: { logsRoot: options.logsRoot } },
   );
-}
 
-/**
- * Как закрыть оверлей.
- *
- * Окно намеренно без рамки, без кнопок и не принимает фокус — закрыть его
- * мышью нельзя по построению. Терминал не всегда под рукой: помощник
- * запускают и ярлыком. Поэтому горячая клавиша, общесистемная — окно
- * ведь фокуса не получает.
- */
-const QUIT_SHORTCUT = 'Control+Shift+Q';
-
-void app.whenReady().then(() => {
-  window = createWindow();
-  globalShortcut.register(QUIT_SHORTCUT, () => {
-    app.quit();
+  globalShortcut.register(HIDE_SHORTCUT, () => {
+    options.onHideRequested();
   });
-  start();
-});
 
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-});
-
-app.on('window-all-closed', () => {
-  app.quit();
-});
-
-app.on('before-quit', () => {
-  session?.stop();
-  void position?.close();
-});
+  return {
+    stop: async () => {
+      globalShortcut.unregister(HIDE_SHORTCUT);
+      session.stop();
+      await worker.close();
+      if (window !== null && !window.isDestroyed()) window.destroy();
+      window = null;
+    },
+  };
+}

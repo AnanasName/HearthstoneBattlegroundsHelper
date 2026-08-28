@@ -1,6 +1,6 @@
 {
   "name": "hs-bg-assistant",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Помощник для Hearthstone Battlegrounds: читает Power.log и советует ходы",
@@ -10,8 +10,12 @@
   "scripts": {
     "capture": "tsx src/ui/capture.ts",
     "watch": "tsx src/ui/watch.ts",
-    "overlay": "npm run build && electron dist/overlay/main.js",
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/overlay/index.html','dist/overlay/index.html')\"",
+    "collector": "npm run build && electron dist/app/main.js",
+    "overlay": "npm run build && electron dist/app/main.js --overlay",
+    "collect": "tsx src/collector/cli.ts",
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs=require('fs');fs.copyFileSync('src/overlay/index.html','dist/overlay/index.html');fs.cpSync('src/app/icons','dist/app/icons',{recursive:true})\"",
+    "dist": "npm run build && electron-builder --win nsis",
+    "dist:dir": "npm run build && electron-builder --dir",
     "demo:phase1": "tsx src/ui/demo-phase1.ts",
     "demo:phase3": "tsx src/ui/demo-phase3.ts",
     "demo:phase4": "tsx src/ui/demo-phase4.ts",
@@ -30,6 +34,7 @@
     "update:bgstats": "tsx src/data/updateBgStats.ts",
     "update:cardstats": "tsx src/data/updateCardStats.ts",
     "dataset:backfill": "tsx src/dataset/backfill.ts",
+    "dataset:import": "tsx src/dataset/importCli.ts",
     "ml:eval": "tsx src/ml/report.ts",
     "ml:imitation": "tsx src/ml/imitationReport.ts",
     "ml:track": "tsx src/ml/track.ts",
@@ -49,9 +54,12 @@
     "tsx": "^4.20.7",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.47.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "electron-builder": "^26.0.0"
   },
   "dependencies": {
     "@firestone-hs/simulate-bgs-battle": "^1.1.737"
-  }
+  },
+  "main": "dist/app/main.js",
+  "author": "Nikita"
 }

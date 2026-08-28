@@ -1,0 +1,43 @@
+# Сборка инсталлятора: npm run dist → release/HS BG Assistant Setup <версия>.exe
+#
+# Что кладётся и почему:
+# - dist/ и package.json — само приложение (main: dist/app/main.js);
+# - node_modules с зависимостями рантайма electron-builder берёт сам
+#   (devDependencies не попадают);
+# - снапшот карт и статистика — как extraResources: приложение читает их
+#   из process.resourcesPath/data (src/app/paths.ts), а не из cwd;
+# - asar выключен: воркер советников (worker_threads) грузится по пути
+#   к файлу, и проверять, что Electron умеет читать воркер из asar,
+#   значит проверять то, что нам ничего не даёт.
+#
+# NSIS с правами на машину (perMachine): инсталлятор идёт с повышением,
+# и сразу после копирования файлов запускает приложение с --setup —
+# то есть правит client.config в каталоге игры (build/installer.nsh).
+appId: ru.hsbg.assistant
+productName: HS BG Assistant
+copyright: HS BG Assistant
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: data/cards/cards_enUS.json
+    to: data/cards/cards_enUS.json
+  - from: data/bgstats
+    to: data/bgstats
+    filter:
+      - '*.json'
+asar: false
+win:
+  target:
+    - nsis
+  icon: src/app/icons/icon.png
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  runAfterFinish: true
+  artifactName: '${productName} Setup ${version}.${ext}'
