@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { EXPORT_FORMAT, type ExportManifest } from '../../src/collector/export.js';
 import { writeTar } from '../../src/collector/tar.js';
-import { aliasOf, importArchive, sessionStamp, splitGames } from '../../src/dataset/import.js';
+import { aliasOf, gameTypeOf, importArchive, sessionStamp, splitGames } from '../../src/dataset/import.js';
 import { type DatasetRecord } from '../../src/dataset/recorder.js';
 import { part7Game } from '../fixtures.js';
 
@@ -133,6 +133,41 @@ describe('импорт архива логов', () => {
     expect(report.skipped).toHaveLength(1);
     expect(report.skipped[0]?.reason).toBe('обрыв');
     expect(report.alias).toBe('tester');
+  }, 120_000);
+
+  it('партия другого режима отбраковывается как «не Battlegrounds», а не как обрыв', async () => {
+    // Первый архив игрока: сессия из четырёх партий Standard (GT_RANKED).
+    const ranked = [
+      'D 03:14:25.0518293 GameState.DebugPrintPower() - CREATE_GAME',
+      'D 03:14:25.0518293 GameState.DebugPrintPower() -     GameEntity EntityID=1',
+      'D 03:14:25.0518293 GameState.DebugPrintGame() - GameType=GT_RANKED',
+      'D 03:14:25.0518293 GameState.DebugPrintGame() - FormatType=FT_STANDARD',
+    ].join('\r\n');
+    expect(gameTypeOf(ranked)).toBe('GT_RANKED');
+    expect(gameTypeOf(text)).toBe('GT_BATTLEGROUNDS');
+    expect(gameTypeOf('без строки режима')).toBeNull();
+
+    const tar = await makeArchive('hsbg-logs_ranked.tar', ranked, null);
+    const report = importArchive(tar, { datasetDir: join(dir, 'dataset-ranked'), contribDir: join(dir, 'contrib-ranked'), alias: 'tester' });
+    expect(report.accepted).toEqual([]);
+    expect(report.skipped).toEqual([
+      { session: SESSION, index: 1, reason: 'не Battlegrounds', detail: 'GT_RANKED' },
+    ]);
+  });
+
+  it('--own: свои партии ложатся без пометки исполнителя', async () => {
+    const datasetDir = join(dir, 'dataset-own');
+    const contribDir = join(dir, 'contrib-own');
+    const tar = await makeArchive('hsbg-logs_own.tar', text, false);
+    const report = importArchive(tar, { datasetDir, contribDir, own: true, rating: 9000 });
+
+    expect(report.alias).toBe('own');
+    expect(report.accepted[0]?.fileName).toBe('own_2026-08-13T20-19-19_g1_b248348_p7.json');
+    const record = JSON.parse(readFileSync(join(datasetDir, report.accepted[0]?.fileName ?? ''), 'utf8')) as DatasetRecord;
+    expect(record.contributor).toBeUndefined();
+    expect(record.contributorRating).toBeUndefined();
+    expect(record.overlay).toBe(false);
+    expect(report.rawDir).toBe(join(contribDir, 'own', 'hsbg-logs_own'));
   }, 120_000);
 
   it('чужой файл не принимается за архив', async () => {

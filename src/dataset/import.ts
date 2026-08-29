@@ -69,7 +69,23 @@ export interface ImportedGame {
   readonly overlay: boolean | null;
 }
 
-export type SkipReason = 'обрыв' | 'нет точек решения' | 'дубль' | 'не разобран';
+export type SkipReason = 'не Battlegrounds' | 'обрыв' | 'нет точек решения' | 'дубль' | 'не разобран';
+
+/**
+ * Режим партии — строка `GameType=…` канала `DebugPrintGame` сразу после
+ * CREATE_GAME. У Battlegrounds это `GT_BATTLEGROUNDS` (part1, part7,
+ * part33); первый же архив игрока принёс сессию из четырёх партий
+ * `GT_RANKED` — обычный Standard, — и без этой проверки они шли
+ * в отчёт как «обрыв на ходу 22», то есть как вина исполнителя.
+ * У сегмента переподключения строки может не быть — тогда режим
+ * неизвестен, и партия идёт в разбор как есть.
+ */
+export const BATTLEGROUNDS_GAME_TYPE = 'GT_BATTLEGROUNDS';
+
+export function gameTypeOf(text: string): string | null {
+  const m = /GameState\.DebugPrintGame\(\) - GameType=(\w+)/.exec(text);
+  return m?.[1] ?? null;
+}
 
 export interface SkippedGame {
   readonly session: string;
@@ -97,14 +113,26 @@ export interface ImportOptions {
   readonly alias: string | null;
   /** Рейтинг со слов исполнителя; в логе его нет. */
   readonly rating: number | null;
+  /**
+   * Свои партии, сыгранные через установленное приложение: записи без
+   * поля `contributor` (отсутствие и значит «своя», как у живого
+   * рекордера), сырой архив — в `contrib/own/`. Нужно потому, что
+   * сборка пишет записи в `%LOCALAPPDATA%`, а не в датасет репозитория,
+   * а в режиме сборщика не пишет их вовсе — единственный путь своих
+   * партий в датасет теперь тот же архив.
+   */
+  readonly own: boolean;
   readonly now: () => Date;
 }
+
+export const OWN_ALIAS = 'own';
 
 export const DEFAULT_IMPORT_OPTIONS: ImportOptions = {
   datasetDir: DATASET_DIR,
   contribDir: CONTRIB_DIR,
   alias: null,
   rating: null,
+  own: false,
   now: () => new Date(),
 };
 
@@ -174,6 +202,10 @@ interface ParsedGame {
 
 function parseGame(session: string, index: number, text: string, overlay: boolean | null, now: Date): ParsedGame {
   const base = { session, index, overlay };
+  const gameType = gameTypeOf(text);
+  if (gameType !== null && gameType !== BATTLEGROUNDS_GAME_TYPE) {
+    return { ...base, record: null, battleTag: null, skip: { reason: 'не Battlegrounds', detail: gameType } };
+  }
   let record: DatasetRecord;
   let battleTag: string | null;
   try {
@@ -242,7 +274,9 @@ export function importArchive(tarPath: string, overrides: Partial<ImportOptions>
   }
 
   const tagged = parsed.find((g) => g.battleTag !== null)?.battleTag ?? null;
-  const alias = options.alias ?? (tagged === null ? 'unknown' : aliasOf(tagged));
+  const alias = options.own
+    ? OWN_ALIAS
+    : (options.alias ?? (tagged === null ? 'unknown' : aliasOf(tagged)));
 
   // Сырой архив — как пришёл: это сырьё для фикстур.
   const rawDir = join(options.contribDir, alias, basename(tarPath, '.tar'));
@@ -267,8 +301,8 @@ export function importArchive(tarPath: string, overrides: Partial<ImportOptions>
 
     const record: DatasetRecord = {
       ...game.record,
-      contributor: alias,
-      ...(options.rating === null ? {} : { contributorRating: options.rating }),
+      ...(options.own ? {} : { contributor: alias }),
+      ...(options.rating === null || options.own ? {} : { contributorRating: options.rating }),
       ...(game.overlay === null ? {} : { overlay: game.overlay }),
     };
     const signature = gameSignature(record);
@@ -280,7 +314,7 @@ export function importArchive(tarPath: string, overrides: Partial<ImportOptions>
 
     const place = record.finalPlace ?? 0;
     const fileName =
-      `c-${alias}_${sessionStamp(game.session)}_g${String(game.index)}` +
+      `${options.own ? OWN_ALIAS : `c-${alias}`}_${sessionStamp(game.session)}_g${String(game.index)}` +
       `_b${String(record.buildNumber ?? 'unknown')}_p${String(place)}.json`;
     writeFileSync(join(options.datasetDir, fileName), JSON.stringify(record), 'utf8');
 
@@ -312,7 +346,7 @@ export function importArchive(tarPath: string, overrides: Partial<ImportOptions>
 export function formatReport(report: ImportReport): string {
   const lines: string[] = [];
   lines.push(
-    `${report.archive}: исполнитель ${report.alias}` +
+    `${report.archive}: ${report.alias === OWN_ALIAS ? 'свои партии' : `исполнитель ${report.alias}`}` +
       (report.rating === null ? '' : `, рейтинг ${String(report.rating)}`) +
       `, приложение ${report.appVersion}, сессий ${String(report.sessions)}`,
   );

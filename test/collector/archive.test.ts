@@ -161,7 +161,8 @@ describe('архив Power.log по сессиям', () => {
     await a.start();
 
     const outDir = join(gamesDir, 'out');
-    const result = await exportArchive(a, outDir, '0.1.0', new Date('2026-08-28T12:34:56Z'));
+    // Местное время, без часового пояса: имя файла должно совпадать с часами игрока.
+    const result = await exportArchive(a, outDir, '0.1.0', new Date(2026, 7, 28, 12, 34, 56));
     await a.stop();
 
     expect(result.sessions).toBe(2);

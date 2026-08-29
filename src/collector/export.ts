@@ -41,8 +41,15 @@ export interface ExportResult {
   readonly bytes: number;
 }
 
+/**
+ * Имя — по МЕСТНОМУ времени: первый же экспорт игрока в 12:36 назвался
+ * `09-36` (UTC), и сверить его с «я только что нажал» было нельзя.
+ */
 export function exportFileName(now: Date): string {
-  const stamp = now.toISOString().replace(/[:]/g, '-').replace('T', '_').slice(0, 16);
+  const two = (n: number): string => String(n).padStart(2, '0');
+  const stamp =
+    `${String(now.getFullYear())}-${two(now.getMonth() + 1)}-${two(now.getDate())}` +
+    `_${two(now.getHours())}-${two(now.getMinutes())}`;
   return `${EXPORT_PREFIX}_${stamp}.tar`;
 }
 

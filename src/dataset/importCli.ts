@@ -1,12 +1,15 @@
 import { formatReport, importArchive } from './import.js';
 
 /**
- * Приём архива логов от исполнителя.
+ * Приём архива логов от исполнителя — или своего.
  *
  *   npm run dataset:import -- <путь к hsbg-logs_….tar> [--from <псевдоним>] [--rating <число>]
+ *   npm run dataset:import -- <путь к hsbg-logs_….tar> --own
  *
  * Без `--from` псевдоним — BattleTag игрока из лога. Рейтинг в логе
  * не пишется, его исполнитель называет словами вместе с архивом.
+ * `--own` — архив собран установленным приложением на своей машине:
+ * записи ложатся как свои, без пометки исполнителя.
  */
 function main(): void {
   const argv = process.argv.slice(2);
@@ -26,6 +29,7 @@ function main(): void {
   const report = importArchive(tarPath, {
     alias: get('from') ?? null,
     rating: rating !== null && Number.isFinite(rating) ? rating : null,
+    own: argv.includes('--own'),
   });
   console.log(formatReport(report));
 }
