@@ -44,5 +44,13 @@ describe('part4: скидка на покупку миньона', () => {
     const fullPrice = state.shop.filter((m) => (m.tags['BACON_REDUCE_BUY_COST'] ?? 0) === 0);
     expect(fullPrice.length).toBeGreaterThan(0);
     for (const m of fullPrice) expect(buyCostOf(m)).toBe(3);
+
+    // Оба источника цены сходятся: кнопка `DragBuy` (живой `COST`, part35)
+    // показывает то же, что тег скидки на миньоне, — 1 у скидочных, 3
+    // у остальных. Сверка по всем снимкам таверны партии: 6824 согласий,
+    // 2 расхождения — и оба на одном событии, где кнопка меняет цену
+    // строкой РАНЬШЕ тега на миньоне (00:25:09, сущности 5922 и 5928).
+    for (const m of discounted) expect(m.buyCost).toBe(1);
+    for (const m of fullPrice) expect(m.buyCost).toBe(3);
   });
 });

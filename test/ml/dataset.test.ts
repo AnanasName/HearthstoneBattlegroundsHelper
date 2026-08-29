@@ -106,12 +106,16 @@ describe('дополнение старой записи до текущей с�
     const hero = Object.fromEntries(
       Object.entries(HERO).filter(([k]) => k !== 'heroPowerScriptData'),
     );
-    const fresh: GameState = { ...EMPTY_STATE, turn: 1, gold: 3, goldTotal: 3, shop: board([201, 202]) };
+    // Миньоны старой записи — без живой цены покупки (`buyCost`, part35).
+    const legacyShop = board([201, 202]).map((m) =>
+      Object.fromEntries(Object.entries(m).filter(([k]) => k !== 'buyCost')),
+    );
+    const fresh: GameState = { ...EMPTY_STATE, turn: 1, gold: 3, goldTotal: 3 };
     const state = Object.fromEntries(
       Object.entries(fresh).filter(([k]) => !LATE_STATE_KEYS.has(k)),
     );
     // Старая запись по типу — не GameState: у неё нет обязательных полей.
-    return { ...state, hero } as unknown as GameState;
+    return { ...state, shop: legacyShop, hero } as unknown as GameState;
   }
 
   function recordWith(state: GameState): RecordFile['record'] {
@@ -125,6 +129,10 @@ describe('дополнение старой записи до текущей с�
     expect(state?.lobby).toEqual({});
     expect(state?.actions).toEqual([]);
     expect(state?.darkGiftCharges).toBeNull();
+    // Миньоны без живой цены покупки получают «кнопки не видно» (part35),
+    // а не `undefined`, который `buyCostOf` превратил бы в NaN.
+    expect(state?.shop).toHaveLength(2);
+    expect(state?.shop.every((m) => m.buyCost === null)).toBe(true);
     // Остальное — как было: дополнение не переписывает записанное.
     expect(state?.gold).toBe(3);
     expect(state?.hero?.heroPowerCardId).toBe('TB_BaconShop_HP_048');

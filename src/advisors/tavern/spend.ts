@@ -247,6 +247,10 @@ export function applyRecommendation(
     case 'play': {
       // Заклинание руки: бесплатно или за цену тега, эффект неизвестен.
       if (rec.minion === null) {
+        // Заклинание, ОБНОВЛЯЮЩЕЕ витрину («Refresh the Tavern with Battlecry
+        // minions», part35), — то же, что обновление кнопкой: витрина стала
+        // другой, и планировать по старой больше нечего.
+        const refreshes = rec.refreshesShop === true;
         return {
           state: paid({
             handSpells: withoutSpell(state.handSpells, rec.spellCardId),
@@ -254,9 +258,14 @@ export function applyRecommendation(
             // заклинание той же цепочки постоянным на нём уже не станет
             // (part21). Счётчик живёт в `scriptData[0]` — «({0} left!)».
             board: withoutMagnetCharge(state.board, rec),
+            shop: refreshes ? [] : state.shop,
+            // Покупки после обновления обещаны самим советом («на 4 золота
+            // покупок 4 по 1»), и их золото уходит здесь же: шаг обрывает
+            // план, и иначе остаток числился бы сгоревшим (`refreshSpend`).
+            gold: state.gold - rec.cost - (refreshes ? (rec.refreshSpend ?? 0) : 0),
           }),
           opaque: true,
-          terminal: false,
+          terminal: refreshes,
         };
       }
 

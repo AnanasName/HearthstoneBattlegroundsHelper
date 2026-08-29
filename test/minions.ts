@@ -31,6 +31,8 @@ export function minion(entityId: number, patch: Partial<Minion> = {}): Minion {
     enchantments: [],
     scriptData: [null, null, null, null, null, null],
     tags: {},
+    // Кнопки покупки у тестового миньона нет: цена — правило игры.
+    buyCost: null,
     ...patch,
   };
 }

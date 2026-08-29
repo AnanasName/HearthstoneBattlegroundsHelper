@@ -1,6 +1,6 @@
 import { RACE_ALL, type CardIndex, type CardInfo } from '../../data/cards.js';
 import { baseHeroCardId, sharedBgStats, type BgStats } from '../../data/bgStats.js';
-import type { ChoiceOption, GameState, Minion, TrinketOffer } from '../../state/types.js';
+import type { ChoiceOption, GameState, HandSpell, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf, type TavernRules } from './rules.js';
 
 /**
@@ -139,6 +139,23 @@ export interface Recommendation {
    * то есть отставание от кривой (part25, развилка плана).
    */
   readonly standaloneScore?: number;
+  /**
+   * Действие ЗАМЕНЯЕТ витрину: «Refresh the Tavern with Battlecry minions»
+   * заклинанием руки (part35). Нужно плану: после такого шага всё, что мы
+   * знали о витрине, больше не про неё, и цепочка обрывается там же, где
+   * после обновления кнопкой, — а не тянет старые покупки дальше.
+   */
+  readonly refreshesShop?: boolean;
+  /**
+   * Золото, которое заберут покупки, обещанные ПОСЛЕ обновления витрины
+   * (`refreshesShop`): «на 4 золота покупок 4 по 1» — это четыре золота.
+   * Нужно плану: шаг обрывает цепочку, и без этого поля остаток числился
+   * бы сгоревшим — а развилка плана штрафует сгоревшее золото и ставила бы
+   * заклинание туда, где остаток меньше, вместо того места, где оно даёт
+   * больше тел (part35, ход 19: четыре тела на остаток четыре, а не одно
+   * на остаток один).
+   */
+  readonly refreshSpend?: number;
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -1244,15 +1261,26 @@ function isMagnetic(minion: Minion, cards: CardIndex): boolean {
 /**
  * Сколько стоит купить именно этого миньона.
  *
- * Цена покупки — правило игры (3 золота, тега цены у миньонов витрины нет),
- * но герои, дары и тринкеты её меняют, и скидка видна на самом миньоне:
- * тег `BACON_REDUCE_BUY_COST` — сколько золота скинуто; парный
- * `BACON_SHOW_OVERRIDEN_MINION_COST=1` велит клиенту рисовать новую цену.
- * Фактура: part3 — 9999 на ранних витринах (миньоны бесплатны, кламп
- * в ноль), part4 — скидка 2 на части витрины (цена 1). По окончании
- * эффекта тег сбрасывается в 0.
+ * Первый источник — ЖИВАЯ цена с кнопки покупки (`Minion.buyCost`, тег
+ * `COST` кнопки `TB_BaconShop_DragBuy`, привязанной к миньону; part35).
+ * Это единственный источник, который не пропускает: «Refresh the Tavern
+ * with Battlecry minions. They cost (1)» («Мозаика Стылой Межи») пишет
+ * цену только на кнопки, и по тегу миньона витрина числилась по три —
+ * при двух золотых совет был «НИЧЕГО», а игрок купил двоих по одному.
+ *
+ * Запасной путь — правило игры (3 золота, тега цены у миньонов витрины
+ * нет) со скидкой на самом миньоне: тег `BACON_REDUCE_BUY_COST` — сколько
+ * золота скинуто; парный `BACON_SHOW_OVERRIDEN_MINION_COST=1` велит
+ * клиенту рисовать новую цену. Фактура: part3 — 9999 на ранних витринах
+ * (миньоны бесплатны, кламп в ноль), part4 — скидка 2 на части витрины
+ * (цена 1); там же кнопка показывает то же самое (`COST` 3 → 1 строкой
+ * раньше тега на миньоне). По окончании эффекта тег сбрасывается в 0.
+ * Запасной путь живёт ради старых записей датасета и тестов без кнопок.
  */
 export function buyCostOf(minion: Minion, rules: TavernRules = DEFAULT_TAVERN_RULES): number {
+  // `!= null`, а не `!== null`: у записей датасета до part35 поля нет вовсе,
+  // и `undefined` обязан идти запасным путём, а не превращаться в NaN.
+  if (minion.buyCost != null) return Math.max(0, minion.buyCost);
   const reduce = minion.tags['BACON_REDUCE_BUY_COST'] ?? 0;
   return Math.max(0, rules.minionCost - reduce);
 }
@@ -3183,6 +3211,8 @@ function minionFromCard(info: CardInfo, entityId: number, keywords: boolean): Mi
     enchantments: [],
     scriptData: [],
     tags: {},
+    // Заготовка не стоит в витрине — кнопки покупки у неё нет.
+    buyCost: null,
   };
 }
 
@@ -3264,6 +3294,10 @@ function averagePoolValue(
   // не любую карту тира, а квилбоара, и на борде квилбоаров это разные
   // числа — 18.8 против 11.6 по всему пулу тиров 1–4.
   race: string | null = null,
+  // Механика, которой пул ограничен: «Refresh the Tavern with Battlecry
+  // minions» (part35) наполняет витрину только кличевыми — 46 карт пула
+  // из 396, — и ожидание по ним считается по ним, а не по всему тиру.
+  mechanic: string | null = null,
 ): number | null {
   // Кэш по БОРДУ: ценность пула зависит только от того, что у нас стоит
   // (племя, копии), а сотня `minionValue` на вызов — дорого. План строит
@@ -3287,7 +3321,7 @@ function averagePoolValue(
   //    заморозки и дар, посчитанные с уже разыгранным заклинанием;
   //  - СИЛА ГЕРОЯ: её текст входит в ценность покупки с part22.
   const key =
-    `${tiers.join(',')}|${race ?? ''}` +
+    `${tiers.join(',')}|${race ?? ''}|${mechanic ?? ''}` +
     `|${state.hand.map((m) => `${m.cardId}${m.golden ? '_G' : ''}`).join(',')}` +
     `|${state.handSpells.map((s) => `${s.cardId}:${s.scriptData.join('.')}`).join(',')}` +
     `|${state.hero?.heroPowerCardId ?? ''}` +
@@ -3316,10 +3350,14 @@ function averagePoolValue(
   // Пул склеивается только на ПРОМАХЕ: тиры 1..6 — это 382 заготовки,
   // и на попадании этот массив строился и выбрасывался впустую.
   const whole = tiers.flatMap((t) => tierPool(t, deps));
-  const pool =
+  const byRace =
     race === null
       ? whole
       : whole.filter((m) => deps.cards.info(m.cardId)?.races.includes(race) ?? false);
+  const pool =
+    mechanic === null
+      ? byRace
+      : byRace.filter((m) => deps.cards.info(m.cardId)?.mechanics.includes(mechanic) ?? false);
   if (pool.length === 0) return null;
 
   const value =
@@ -4984,6 +5022,12 @@ export function spellRules(
 ): Recommendation[] {
   return state.handSpells.flatMap((spell): Recommendation[] => {
     if (spell.unplayable) return [];
+
+    // Обновление витрины с ценой — «Мозаика Стылой Межи» (part35): ни статов,
+    // ни золота, ни миньона в тексте, и разбор эффекта вернул бы `null`.
+    const discount = discountRefreshRule(spell, state, deps, rules);
+    if (discount !== null) return [discount];
+
     const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
     if (effect === null) return [];
     const name = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
@@ -5127,6 +5171,110 @@ export function spellRules(
       },
     ];
   });
+}
+
+/** Как назвать механику наполнения витрины в причине совета. */
+const REFRESH_MECHANIC_LABEL: Readonly<Record<string, string>> = {
+  BATTLECRY: 'кличевыми',
+  DEATHRATTLE: 'с хрипом',
+  BACON_RALLY: 'с ралли',
+  BACON_SPELLCRAFT_ID: 'с чародейством',
+};
+
+/**
+ * Заклинание руки, которое ОБНОВЛЯЕТ витрину и назначает ей цену —
+ * «Refresh the Tavern with Battlecry minions. They cost (1)», чародейское
+ * заклинание тринкета «Мозаика Стылой Межи» (part35, приходит в руку
+ * каждый ход бесплатно).
+ *
+ * Прежде оно было невидимо целиком: ни статов, ни золота, ни миньона
+ * в тексте — `spellEffect` возвращал `null`, — и на скриншоте хода 19
+ * (золото 2/10 после подъёма, витрина по три) совет был «ОБНОВИТЬ за 1»
+ * и «НИЧЕГО», тогда как игрок разыграл заклинание и купил двоих по одному.
+ *
+ * Ценность считается ТЕЛАМИ, без нового веса: сколько тел даёт остаток
+ * золота по новой цене (не больше размера витрины тира) при ожидании
+ * по пулу названной механики тиров 1..своего — минус то, что витрина
+ * по карману прямо сейчас (лучшие по ценности, пока хватает золота).
+ * Второе слагаемое и делает совет честным против покупки: при десяти
+ * золотых и двух драконах в витрине за 30 очков заклинание в списке
+ * молчит, а в плане встаёт ПОСЛЕ этих покупок — на остаток в четыре
+ * золота это четыре тела вместо одного. Ожидание — среднее по пулу,
+ * а не лучшее-из-N (оценка нижняя, как у «Get a random X»). Механика
+ * читается таблицей `mechanicTextWords`; без неё пул не фильтруется.
+ *
+ * Что заклинание принесёт на деле, решает игра, поэтому план после него
+ * обрывается, как после обновления кнопкой (`refreshesShop`).
+ */
+export function discountRefreshRule(
+  spell: HandSpell,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const info = deps.cards.info(spell.cardId);
+  const text = info?.text ?? '';
+  if (text === '') return null;
+  const hit = firstMatchAll(rules.discountRefreshWords, text);
+  if (hit === null) return null;
+  const price = Number(hit[1]);
+  if (!Number.isFinite(price)) return null;
+
+  const goldCost = spell.cost;
+  if (goldCost > state.gold) return null;
+  const goldAfter = state.gold - goldCost;
+
+  // Механика наполнения — слово внутри того же предложения («with
+  // Battlecry minions»), той же таблицей, что синергии по тексту.
+  let mechanic: string | null = null;
+  for (const [mech, pattern] of Object.entries(rules.mechanicTextWords)) {
+    if (new RegExp(`\\b(?:${pattern})\\b`, 'i').test(hit[0])) {
+      mechanic = mech;
+      break;
+    }
+  }
+
+  const shopSize = rules.shopSizeByTier[state.techLevel] ?? state.shop.length;
+  const bodiesAfter = Math.min(shopSize, price <= 0 ? shopSize : Math.floor(goldAfter / price));
+  if (bodiesAfter <= 0) return null;
+  const expected = averagePoolValue(shopTiers(state.techLevel), state, deps, rules, null, mechanic);
+  if (expected === null) return null;
+
+  // Что теряем: покупки нынешней витрины по карману — лучшие по ценности,
+  // пока хватает золота, по живой цене каждого.
+  const offers = state.shop
+    .map((m) => ({ cost: buyCostOf(m, rules), value: minionValue(m, state, deps, rules).total }))
+    .sort((a, b) => b.value - a.value);
+  let left = state.gold;
+  let lost = 0;
+  let bodiesNow = 0;
+  for (const offer of offers) {
+    if (offer.cost > left) continue;
+    left -= offer.cost;
+    lost += offer.value;
+    bodiesNow += 1;
+  }
+
+  const score = bodiesAfter * expected - lost - goldCost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  const name = info?.name ?? spell.cardId;
+  const filling = mechanic === null ? '' : `${REFRESH_MECHANIC_LABEL[mechanic] ?? mechanic} `;
+  return {
+    action: 'play',
+    minion: null,
+    spellCardId: spell.cardId,
+    score,
+    cost: goldCost,
+    requiresSlot: false,
+    sellFirst: null,
+    refreshesShop: true,
+    refreshSpend: bodiesAfter * price,
+    reason:
+      `${name} — обновление витрины ${filling}по ${String(price)}: ` +
+      `на ${String(goldAfter)} золота покупок ${String(bodiesAfter)} ` +
+      `(тело по пулу ≈ ${expected.toFixed(1)}) против ${String(bodiesNow)} по карману сейчас`,
+  };
 }
 
 /**

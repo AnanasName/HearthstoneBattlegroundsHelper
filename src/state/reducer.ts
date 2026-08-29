@@ -72,6 +72,18 @@ const DRAG_SELL = 'TB_BaconShop_DragSell';
 const LOCK_ALL_BUTTON = 'TB_BaconShopLockAll_Button';
 
 /**
+ * Тег кнопки покупки со значением — id её товара. Игра тег не именует
+ * (в логе он числом), но ставит на каждую кнопку `TB_BaconShop_DragBuy`
+ * следом за созданием: `TAG_CHANGE Entity=7345 tag=2442 value=7344`,
+ * а на миньоне — `HAS_DRAG_TO_BUY=1`. При обновлении витрины кнопка уходит
+ * в `REMOVEDFROMGAME` и тег сбрасывается в 0 (part35, 18:05:10). Через эту
+ * связку читается ЖИВАЯ цена покупки — тег `COST` кнопки: 3 обычно, 1 при
+ * скидке part4 (там же и `BACON_REDUCE_BUY_COST=2` на миньоне), 1 у всей
+ * витрины после «Мозаики Стылой Межи» (part35 — без тега на миньонах).
+ */
+const DRAG_BUY_TARGET_TAG = '2442';
+
+/**
  * Заголовок открытия выбора: `id=3 Player=AngryMem#2886 TaskList= ChoiceType=GENERAL …`.
  *
  * `TaskList` бывает пуст — на part9 у раскопок он не заполнен, поэтому
@@ -120,7 +132,11 @@ function toEnchantment(e: Entity): Enchantment {
   };
 }
 
-function toMinion(e: Entity, enchantments: readonly Enchantment[]): Minion {
+function toMinion(
+  e: Entity,
+  enchantments: readonly Enchantment[],
+  buyCost: number | null = null,
+): Minion {
   const health = e.tags.get('HEALTH') ?? null;
   const damage = e.tags.get('DAMAGE') ?? 0;
   return {
@@ -129,6 +145,7 @@ function toMinion(e: Entity, enchantments: readonly Enchantment[]): Minion {
     zonePos: e.zonePos,
     attack: e.tags.get('ATK') ?? null,
     health: health === null ? null : health - damage,
+    buyCost,
     enchantments,
     scriptData: [1, 2, 3, 4, 5, 6].map(
       (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
@@ -572,6 +589,7 @@ export function createReducer(players: Players): Reducer {
     zone: string,
     ownedBySelf: boolean,
     enchantments: Map<number, Enchantment[]>,
+    buyCosts: ReadonlyMap<number, number> = new Map(),
   ): Minion[] => {
     const self = players.selfPlayerId;
     if (self === null) return [];
@@ -583,7 +601,32 @@ export function createReducer(players: Players): Reducer {
           (ownedBySelf ? e.controller === self : e.controller !== self),
       )
       .sort((a, b) => a.zonePos - b.zonePos)
-      .map((e) => toMinion(e, enchantments.get(e.id) ?? []));
+      .map((e) => toMinion(e, enchantments.get(e.id) ?? [], buyCosts.get(e.id) ?? null));
+  };
+
+  /**
+   * Живые цены покупки по миньонам витрины: `COST` кнопки `DragBuy`,
+   * привязанной к товару тегом `DRAG_BUY_TARGET_TAG`.
+   *
+   * Берутся только кнопки в `PLAY`: при обновлении витрины отработавшие
+   * уходят в `REMOVEDFROMGAME` с обнулённой привязкой, и без фильтра
+   * по зоне старая кнопка могла бы назвать цену новому миньону с тем же
+   * id (id не переиспользуются, но фильтр — то самое утверждение, которое
+   * лог подтверждает, а не надежда). Кнопка без тега `COST` цены
+   * не называет — тогда миньон остаётся с `buyCost: null`.
+   */
+  const dragBuyCosts = (): Map<number, number> => {
+    const self = players.selfPlayerId;
+    const costs = new Map<number, number>();
+    if (self === null) return costs;
+    for (const e of entities.values()) {
+      if (e.cardId !== DRAG_BUY || e.controller !== self || e.zone !== 'PLAY') continue;
+      const target = e.tags.get(DRAG_BUY_TARGET_TAG) ?? 0;
+      const cost = e.tags.get('COST');
+      if (target <= 0 || cost === undefined) continue;
+      costs.set(target, cost);
+    }
+    return costs;
   };
 
   /**
@@ -957,8 +1000,18 @@ export function createReducer(players: Players): Reducer {
     const upgrade = upgradeButton();
 
     // Чужие миньоны в PLAY — это магазин в таверне и борд противника в бою.
-    // Различает их только фаза: сама зона и контроллер одинаковые.
-    const theirs = phase === 'gameOver' ? [] : collectMinions('PLAY', false, enchantmentsByHost);
+    // Различает их только фаза: сама зона и контроллер одинаковые. Цены
+    // покупки (кнопки `DragBuy`) осмыслены только у витрины: в бою кнопок
+    // нет, и чужой борд честно остаётся без цен.
+    const theirs =
+      phase === 'gameOver'
+        ? []
+        : collectMinions(
+            'PLAY',
+            false,
+            enchantmentsByHost,
+            phase === 'tavern' ? dragBuyCosts() : new Map(),
+          );
 
     // Открытое предложение тринкетов: варианты показаны, выбор ещё не сделан.
     // Маркер — BACON_TRINKET=1 при жизни в SETASIDE: на выборе клиент уводит

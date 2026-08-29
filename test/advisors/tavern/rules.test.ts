@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   adviseTavern,
   buyCostOf,
+  discountRefreshRule,
   buyRules,
   choiceAdvice,
   copiesForTriple,
@@ -3163,6 +3164,36 @@ describe('изменённая цена покупки', () => {
     expect(buyCostOf(minion(3))).toBe(3);
   });
 
+  /**
+   * part35: «They cost (1)» у «Мозаики Стылой Межи» пишет цену ТОЛЬКО
+   * на кнопки `DragBuy`, тега скидки на миньонах нет вовсе. Живая цена
+   * с кнопки — первый источник; тег — запасной путь для старых записей
+   * датасета (там поля нет: `undefined`, а не `null`) и тестов без кнопок.
+   */
+  it('живая цена с кнопки DragBuy идёт первой, тег скидки — запасной путь', () => {
+    expect(buyCostOf(minion(1, { buyCost: 1 }))).toBe(1);
+    expect(buyCostOf(minion(2, { buyCost: 0 }))).toBe(0);
+    // Кнопка и тег расходятся на одно событие (part4, 00:25:09): верит кнопке.
+    expect(buyCostOf(minion(3, { buyCost: 1, tags: { BACON_REDUCE_BUY_COST: 0 } }))).toBe(1);
+    expect(buyCostOf(minion(4, { buyCost: null, tags: { BACON_REDUCE_BUY_COST: 2 } }))).toBe(1);
+    // Запись датасета до part35: поля нет — запасной путь, не NaN.
+    const legacy = { ...minion(5, { tags: { BACON_REDUCE_BUY_COST: 2 } }) } as Record<string, unknown>;
+    delete legacy['buyCost'];
+    expect(buyCostOf(legacy as unknown as Minion)).toBe(1);
+  });
+
+  it('покупка по цене с кнопки советуется при золоте меньше трёх — с её ценой и вслух', () => {
+    const s = state({
+      gold: 2,
+      shop: [shopMinion(9, 'MURLOC_1', { buyCost: 1 }), shopMinion(8, 'MURLOC_2', { buyCost: 3 })],
+    });
+    const buys = buyRules(s, deps);
+    expect(buys).toHaveLength(1);
+    expect(buys[0]?.minion?.cardId).toBe('MURLOC_1');
+    expect(buys[0]?.cost).toBe(1);
+    expect(buys[0]?.reason).toContain('скидка — за 1 вместо 3');
+  });
+
   it('покупка со скидкой советуется при золоте меньше трёх — с её ценой и вслух', () => {
     const s = state({
       gold: 1,
@@ -4085,5 +4116,72 @@ describe('сила героя «после N кличевых покупок —
     const b = minionValue(busker, state({ hero: brann([0]), board: [] }), brandDeps);
     expect(b.heroPowerBuy).toBe(0);
     expect(b.heroPowerBuyLeft).toBeNull();
+  });
+});
+
+/**
+ * part35: «Refresh the Tavern with Battlecry minions. They cost (1)» —
+ * чародейское заклинание тринкета «Мозаика Стылой Межи» в руке. Прежде
+ * невидимо (ни статов, ни золота, ни миньона), советник на скриншоте
+ * говорил «ОБНОВИТЬ за 1» и «НИЧЕГО» при двух золотых.
+ */
+describe('заклинание руки, обновляющее витрину с ценой (part35)', () => {
+  const MOSAIC = 'MOSAIC';
+  const mosaicCards = createCardIndex([
+    ...STUB_CARDS,
+    { id: 'CRIER_1', name: 'Кликун', type: 'Minion', techLevel: 1, races: [], isBaconPool: true, mechanics: ['BATTLECRY'] },
+    { id: 'CRIER_2', name: 'Кликун 2', type: 'Minion', techLevel: 2, races: [], isBaconPool: true, mechanics: ['BATTLECRY'] },
+    {
+      id: MOSAIC,
+      name: 'Мозаика',
+      type: 'Spell',
+      isBaconPool: true,
+      text: '[x]<b>Refresh</b> the Tavern with\n<b>Battlecry</b> minions.\nThey cost (1).',
+    },
+  ]);
+  const mosaicDeps = { cards: mosaicCards };
+  const mosaic = (cost = 0) => ({ entityId: 700, cardId: MOSAIC, cost, scriptData: [null, null, null, null], unplayable: false, costsHealth: false });
+
+  it('шаблон читает цену после обновления сквозь разметку и переносы строк', () => {
+    const s = state({ gold: 2, shop: [shopMinion(9, 'DRAGON_1')] });
+    const rec = discountRefreshRule(mosaic(), s, mosaicDeps);
+    expect(rec?.action).toBe('play');
+    expect(rec?.spellCardId).toBe(MOSAIC);
+    expect(rec?.refreshesShop).toBe(true);
+    expect(rec?.reason).toContain('обновление витрины кличевыми по 1');
+  });
+
+  it('ценность — тела: покупок по 1 на остаток золота против покупок по карману сейчас', () => {
+    // Два золота, витрина по три: сейчас покупок ноль, после — две (витрина тира 2 — четыре слота).
+    const s = state({ gold: 2, techLevel: 2, shop: [shopMinion(9, 'DRAGON_1')] });
+    const rec = discountRefreshRule(mosaic(), s, mosaicDeps);
+    expect(rec).not.toBeNull();
+    expect(rec?.refreshSpend).toBe(2);
+    expect(rec?.reason).toContain('на 2 золота покупок 2');
+    expect(rec?.reason).toContain('против 0 по карману сейчас');
+    // Покупок не больше размера витрины тира: десять золота на тире 2 — четыре тела.
+    const rich = discountRefreshRule(mosaic(), state({ gold: 10, techLevel: 2, shop: [] }), mosaicDeps);
+    expect(rich?.refreshSpend).toBe(4);
+    expect(rich?.reason).toContain('покупок 4');
+  });
+
+  it('витрина с покупками по карману вычитается: при равных телах заклинание молчит', () => {
+    // Три золота и одна покупка по карману сейчас против трёх тел по 1 после —
+    // ожидание кличевого пула должно перебить ценность конкретной карты.
+    const bodies = discountRefreshRule(mosaic(), state({ gold: 3, techLevel: 2, shop: [shopMinion(9, 'MURLOC_1')] }), mosaicDeps);
+    expect(bodies).not.toBeNull();
+    // Ноль золота — покупать нечего и после обновления: молчание.
+    expect(discountRefreshRule(mosaic(), state({ gold: 0, techLevel: 2, shop: [] }), mosaicDeps)).toBeNull();
+    // Заклинание с ценой выше золота не по карману.
+    expect(discountRefreshRule(mosaic(5), state({ gold: 2, techLevel: 2, shop: [] }), mosaicDeps)).toBeNull();
+  });
+
+  it('входит в spellRules вместо разбора эффекта, а без шаблона правило молчит', () => {
+    const s = state({ gold: 2, techLevel: 2, shop: [], handSpells: [mosaic()] });
+    const recs = spellRules(s, mosaicDeps);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]?.refreshesShop).toBe(true);
+    const plain = { ...mosaic(), cardId: 'SKIPPER' };
+    expect(discountRefreshRule(plain, s, mosaicDeps)).toBeNull();
   });
 });

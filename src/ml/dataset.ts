@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { sameGameBuild } from '../data/builds.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from '../dataset/recorder.js';
-import { EMPTY_STATE, type GameState, type Hero } from '../state/types.js';
+import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../state/types.js';
 
 /**
  * Загрузка датасета партий для фазы 6 — с дедупом и фильтром билда.
@@ -128,11 +128,33 @@ export function upgradeRecord(record: DatasetRecord): DatasetRecord {
 /** Герой старой записи: поле part34 в нём может отсутствовать. */
 type LegacyHero = Omit<Hero, 'heroPowerScriptData'> & Partial<Pick<Hero, 'heroPowerScriptData'>>;
 
+/** Миньон старой записи: живой цены покупки (part35) в нём может не быть. */
+type LegacyMinion = Omit<Minion, 'buyCost'> & Partial<Pick<Minion, 'buyCost'>>;
+
+/**
+ * Умолчание — «кнопки не видно», то есть цена по правилу игры со скидкой
+ * по тегу: ровно то, чем `buyCostOf` и жил до part35.
+ */
+function upgradeMinions(list: readonly LegacyMinion[]): Minion[] {
+  return list.map((m) => ({ buyCost: null, ...m }));
+}
+
 function upgradeState(state: GameState): GameState {
   const legacyHero: LegacyHero | null = state.hero;
   const hero: Hero | null =
     legacyHero === null ? null : { heroPowerScriptData: [], ...legacyHero };
-  return { ...EMPTY_STATE, ...state, hero };
+  return {
+    ...EMPTY_STATE,
+    ...state,
+    hero,
+    board: upgradeMinions(state.board),
+    hand: upgradeMinions(state.hand),
+    shop: upgradeMinions(state.shop),
+    opponentBoard: upgradeMinions(state.opponentBoard),
+    lastSeenBoards: Object.fromEntries(
+      Object.entries(state.lastSeenBoards).map(([id, b]) => [id, upgradeMinions(b)]),
+    ),
+  };
 }
 
 /** Запись ли это партии: в каталоге лежат и чужие JSON (снапшот статистики). */
