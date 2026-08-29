@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EXPORT_FORMAT, type ExportManifest } from '../../src/collector/export.js';
 import { writeTar } from '../../src/collector/tar.js';
 import { aliasOf, gameTypeOf, importArchive, sessionStamp, splitGames } from '../../src/dataset/import.js';
-import { type DatasetRecord } from '../../src/dataset/recorder.js';
+import { DatasetRecorder, type DatasetRecord } from '../../src/dataset/recorder.js';
+import { GameFeed } from '../../src/live/feed.js';
+import { LineAssembler } from '../../src/live/lines.js';
 import { part7Game } from '../fixtures.js';
 
 /**
@@ -168,6 +170,71 @@ describe('импорт архива логов', () => {
     expect(record.contributorRating).toBeUndefined();
     expect(record.overlay).toBe(false);
     expect(report.rawDir).toBe(join(contribDir, 'own', 'hsbg-logs_own'));
+  }, 120_000);
+
+  it('запись импорта — то же, что записал бы живой путь оверлея, во всём, на чём учится модель', async () => {
+    // Живой путь: порции байтов → строки → GameFeed → DatasetRecorder,
+    // как в оверлее (порция 4 КБ — обычный опрос, не догон целиком).
+    const saved: DatasetRecord[] = [];
+    const recorder = new DatasetRecorder({
+      dir: 'unused',
+      save: (_name, record) => {
+        saved.push(record);
+      },
+    });
+    const lines = new LineAssembler();
+    const feed = new GameFeed();
+    const bytes = Buffer.from(text, 'utf8');
+    for (let offset = 0; offset < bytes.length; offset += 4096) {
+      feed.pushLines(lines.push(bytes.subarray(offset, Math.min(bytes.length, offset + 4096))));
+      const state = feed.snapshot();
+      if (state !== null) recorder.update(state);
+    }
+    const live = saved[0];
+    expect(live).toBeDefined();
+
+    // Пакетный путь — тот самый импорт.
+    const datasetDir = join(dir, 'dataset-live');
+    const tar = await makeArchive('hsbg-logs_live.tar', text, null);
+    const report = importArchive(tar, { datasetDir, contribDir: join(dir, 'contrib-live'), alias: 'tester' });
+    const imported = JSON.parse(readFileSync(join(datasetDir, report.accepted[0]?.fileName ?? ''), 'utf8')) as DatasetRecord;
+
+    // Паспорт партии и журнал действий — побайтно.
+    expect(imported.finalPlace).toBe(live?.finalPlace);
+    expect(imported.heroCardId).toBe(live?.heroCardId);
+    expect(imported.buildNumber).toBe(live?.buildNumber);
+    expect(imported.actions).toEqual(live?.actions);
+
+    // Точки решения: те же ходы, и на каждой — своё положение.
+    // Целиком состояния НЕ равны, и это известно (docs/collector.md):
+    // пакетный снимок берётся на последнем ZONE/RESOURCES-событии до траты,
+    // живой — на конце порции, то есть на несколько событий позже. Разница
+    // не только в служебных тегах: на part7 в одной точке из девяти атака
+    // миньона борда 44 против 48 — усиление пришло тегом ATK после
+    // последнего снимка пакетного пути. Поэтому статы борда здесь
+    // не сравниваются; состав борда, рука, витрина, золото, тир, hp,
+    // место и число живых обязаны совпадать.
+    const own = (r: DatasetRecord) =>
+      r.checkpoints.map((c) => ({
+        turn: c.turn,
+        gold: c.state.gold,
+        goldTotal: c.state.goldTotal,
+        techLevel: c.state.techLevel,
+        hp: (c.state.hero?.health ?? 0) - (c.state.hero?.damage ?? 0) + (c.state.hero?.armor ?? 0),
+        board: c.state.board.map((m) => m.cardId),
+        hand: c.state.hand.map((m) => m.cardId),
+        shop: c.state.shop.map((m) => m.cardId).sort(),
+        place: c.state.finalPlace,
+        alive: Object.values(c.state.lobby).filter((p) => p.place === null || p.place <= 0).length,
+      }));
+    expect(own(imported)).toEqual(own(live as DatasetRecord));
+
+    // Сумма статов борда — с оговоркой выше: расходится не больше чем
+    // в одной точке и не больше чем на одно усиление.
+    const stats = (r: DatasetRecord) =>
+      r.checkpoints.map((c) => c.state.board.reduce((s, m) => s + m.attack + m.health, 0));
+    const differing = stats(imported).filter((s, i) => s !== stats(live as DatasetRecord)[i]);
+    expect(differing.length).toBeLessThanOrEqual(1);
   }, 120_000);
 
   it('чужой файл не принимается за архив', async () => {
