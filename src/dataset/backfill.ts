@@ -171,7 +171,7 @@ function main(): void {
   }
 
   console.log(
-    `\nзаписано партий: ${String(written)}, пересобрано записей старой схемы: ${String(rebuilt)}, ` +
+    `\nзаписано партий: ${String(written)}, пересобрано записей${force ? '' : ' старой схемы'}: ${String(rebuilt)}, ` +
       `дописано действий в записей: ${String(patched)}`,
   );
 }
