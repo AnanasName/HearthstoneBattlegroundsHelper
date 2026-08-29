@@ -32,17 +32,26 @@ export interface MlGame {
 }
 
 /**
+ * Извлечение признаков точки: состояние, её индекс и ВСЕ точки партии
+ * по порядку — признаки по истории (замер 4) читают точки до текущей.
+ * Будущего в них быть не должно; это держит тест, а не тип.
+ */
+export type FeatureExtractor = (
+  state: GameState,
+  index: number,
+  states: readonly GameState[],
+) => readonly number[];
+
+/**
  * Партия в числах. Набор признаков — параметр: замер 1 считает семь
  * «своих» (`extractFeatures`), замер 3 — относительные
- * (`extractRelativeFeatures`). Ход таверны читается из состояния,
+ * (`extractRelativeFeatures`), замер 4 — по истории
+ * (`extractHistoryFeatures`). Ход таверны читается из состояния,
  * а не из первого признака: у относительного набора первый признак —
  * место, и корзины ходов с полосой D̄_late обязаны считаться одинаково
  * для любого набора.
  */
-export function toMlGame(
-  game: DatasetGame,
-  extract: (state: GameState) => readonly number[] = extractFeatures,
-): MlGame {
+export function toMlGame(game: DatasetGame, extract: FeatureExtractor = extractFeatures): MlGame {
   const states = game.record.checkpoints.map((cp) => cp.state);
   return {
     name: game.fileName,

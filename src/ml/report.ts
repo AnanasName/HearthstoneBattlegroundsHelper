@@ -1,6 +1,7 @@
 import { createRng, mean, shuffleInPlace, summarize } from '../advisors/tavern/statAnalysis.js';
 import type { GameState } from '../state/types.js';
 import { extractFeatures, FEATURE_NAMES } from './features.js';
+import { extractHistoryFeatures, HISTORY_FEATURE_NAMES } from './historyFeatures.js';
 import {
   extractRelativeFeatures,
   lobbyKnownInState,
@@ -19,6 +20,7 @@ import {
   toMlGame,
   verdictOf,
   verdictOfRelative,
+  type FeatureExtractor,
   type MlGame,
 } from './evaluate.js';
 import { loadDataset } from './dataset.js';
@@ -28,21 +30,26 @@ import { loadDataset } from './dataset.js';
  *
  *   npm run ml:eval     — замер 1: семь «своих» признаков
  *   npm run ml:eval3    — замер 3: относительные признаки (против стола)
+ *   npm run ml:eval4    — замер 4: те же плюс признаки по истории партии
  *
  * Процедура и критерий приёмки каждого замера предрегистрированы
  * в docs/ml.md ДО первого прогона; этот скрипт только считает и называет
  * вердикт по записанным условиям. Решает ОСНОВНАЯ ветка (λ=1, глобальная
  * стандартизация, LOGO по партиям); всё остальное — печать для сведения.
- * Набор признаков — параметр (`--features=relative`), процедура одна:
- * замер 3 отличается от замера 1 признаками, зёрнами, исключением партий
+ * Набор признаков — параметр (`--features=…`), процедура одна: замеры 3
+ * и 4 отличаются от замера 1 признаками, зёрнами, исключением партий
  * без таблицы лобби и вторым условием приёмки — сигналом сверх сжатия B2.
+ * Замер 4 печатает ещё и разность с моделью замера 3 (B3) — она
+ * не решает, а отвечает, добавила ли история что-нибудь к одной точке.
  */
 
 interface FeatureSet {
-  readonly key: 'own' | 'relative';
+  readonly key: 'own' | 'relative' | 'history';
   readonly title: string;
   readonly names: readonly string[];
-  readonly extract: (state: GameState) => readonly number[];
+  readonly extract: FeatureExtractor;
+  /** Модель-предшественник для вторичной разности D̄₃ (замер 4 против замера 3). */
+  readonly predecessor: { readonly title: string; readonly extract: FeatureExtractor; readonly bandSeed: number } | null;
   /** Индекс признака «текущее место» — единственного признака бейзлайна B2. */
   readonly placeIndex: number;
   /** Зёрна — предрегистрированы: полоса sign-flip и отрицательный контроль. */
@@ -64,6 +71,7 @@ const OWN_FEATURES: FeatureSet = {
   controlSeed: 20260819,
   band2Seed: null,
   requiresLobby: false,
+  predecessor: null,
 };
 
 const RELATIVE_FEATURES: FeatureSet = {
@@ -76,6 +84,24 @@ const RELATIVE_FEATURES: FeatureSet = {
   controlSeed: 20260830,
   band2Seed: 20260831,
   requiresLobby: true,
+  predecessor: null,
+};
+
+const HISTORY_FEATURES: FeatureSet = {
+  key: 'history',
+  title: 'замер 4 — относительные признаки плюс история партии',
+  names: HISTORY_FEATURE_NAMES,
+  extract: extractHistoryFeatures,
+  placeIndex: RELATIVE_PLACE_INDEX,
+  bandSeed: 20260901,
+  controlSeed: 20260902,
+  band2Seed: 20260903,
+  requiresLobby: true,
+  predecessor: {
+    title: 'B3 (модель замера 3, относительные признаки)',
+    extract: extractRelativeFeatures,
+    bandSeed: 20260904,
+  },
 };
 
 /** Вторичная ветка замера 3: семь «своих» плюс четыре относительных (место — один раз). */
@@ -98,8 +124,9 @@ function featureSetFromArgs(argv: readonly string[]): FeatureSet {
   if (arg === undefined) return OWN_FEATURES;
   const key = arg.slice('--features='.length);
   if (key === 'relative') return RELATIVE_FEATURES;
+  if (key === 'history') return HISTORY_FEATURES;
   if (key === 'own') return OWN_FEATURES;
-  throw new Error(`неизвестный набор признаков: ${key} (own | relative)`);
+  throw new Error(`неизвестный набор признаков: ${key} (own | relative | history)`);
 }
 
 function main(featureSet: FeatureSet): void {
@@ -229,6 +256,25 @@ function main(featureSet: FeatureSet): void {
     );
   }
   console.log(`вердикт по предрегистрированному критерию: ${verdict}`);
+
+  if (featureSet.predecessor !== null) {
+    // Вторичное, предобъявленное чтение: добавила ли история что-нибудь
+    // к модели с одной точки. Не решает — вердикт выше уже назван.
+    const pred = featureSet.predecessor;
+    const predEvals = evaluateLogo(
+      usable.map((g) => toMlGame(g, pred.extract)),
+      RIDGE_LAMBDA,
+      'global',
+    );
+    const d3 = pairedDeltas(evals, predEvals);
+    const d3Stats = summarize(d3);
+    const band3 = signFlipBand(d3, BAND_ITERATIONS, createRng(pred.bandSeed));
+    console.log(
+      `${pred.title}: MAE ${fmt(mean(predEvals.map((e) => e.maeModel)))}, ` +
+        `D̄₃ = MAE(B3) − MAE(модель) = ${fmt(d3Stats.mean)} ` +
+        `(SE ${fmt(d3Stats.se)}, МРЭ₃ ${fmt(1.645 * d3Stats.se)}, полоса 5-й ${fmt(band3.p05)} … 95-й ${fmt(band3.p95)})`,
+    );
+  }
 
   console.log('');
   console.log('— по корзинам ходов (по точкам; сравнивать только внутри корзины) —');
