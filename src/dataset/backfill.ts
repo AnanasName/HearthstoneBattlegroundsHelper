@@ -68,6 +68,14 @@ function existingSignatures(): Map<string, ExistingRecord[]> {
 }
 
 function main(): void {
+  // `--rebuild` — пересобрать точки и журнал у ВСЕХ лежащих записей фикстур,
+  // а не только у записей старой схемы: нужно, когда меняется определение
+  // точки решения (см. `refreshRecord`). Записи исполнителей (`c-*`)
+  // и свои с установленного приложения (`own_*`) фикстур не имеют —
+  // их пересобирает повторный `dataset:import` после удаления старых.
+  const force = process.argv.includes('--rebuild');
+  if (force) console.log('режим --rebuild: точки и журнал всех записей фикстур пересобираются');
+
   mkdirSync(DATASET_DIR, { recursive: true });
   const existing = existingSignatures();
   let written = 0;
@@ -116,13 +124,13 @@ function main(): void {
       // (время, исполнитель, флаг оверлея) остаётся; запись текущей схемы
       // без журнала получает только журнал; остальное не трогается.
       for (const { fileName, record: stored } of already) {
-        const plan = refreshRecord(stored, record);
+        const plan = refreshRecord(stored, record, force);
         if (plan.action === 'keep') continue;
         writeFileSync(join(DATASET_DIR, fileName), JSON.stringify(plan.record), 'utf8');
         if (plan.action === 'rebuild') {
           rebuilt += 1;
           console.log(
-            `part${String(part)}: пересобрана запись старой схемы — точек ` +
+            `part${String(part)}: пересобрана запись${force ? '' : ' старой схемы'} — точек ` +
               `${String(stored.checkpoints.length)} → ${String(checkpoints.length)}, ` +
               `таблица лобби во всех точках, действий ${String(finalState.actions.length)} → ${fileName}`,
           );

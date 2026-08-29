@@ -1,4 +1,4 @@
-import { readPowerEvents } from '../../parser/blocks.js';
+import { readPowerEvents, type BlockContext } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
 import type { GameState } from '../../state/types.js';
@@ -34,11 +34,41 @@ export interface TavernTurn {
  * впервые тратит золото, в логе есть, и он же и есть точка решения — всё, что
  * игра успела показать к этому моменту, игрок видел.
  */
+/**
+ * ## Снимок берётся ПЕРЕД действием, которое тратит золото
+ *
+ * Снимок дорогой, поэтому по ходу он берётся только на событиях, которые
+ * могут изменить витрину, золото или борд (`ZONE`, `RESOURCES`,
+ * `BOARD_VISUAL_STATE`). Но «последнее состояние до траты» — это состояние
+ * со ВСЕМИ событиями до неё, включая те, что фильтр не замечает: усиление
+ * тегом `ATK` без смены зоны, тир соперника в таблице лобби, закрытый
+ * выбор тринкета. Живой путь (`DatasetRecorder` в оверлее) их видит —
+ * он снимает состояние на конце порции, — и на part7 пакетная точка
+ * отставала от живой на усиление: атака 44 против 48 (замер 29.08,
+ * docs/collector.md).
+ *
+ * Границей служит не сама строка `RESOURCES_USED`, а НАЧАЛО ДЕЙСТВИЯ:
+ * трата приходит внутри блока `PLAY` (покупка, сила героя, дар), и первые
+ * строки блока уже меняют состояние — флаг «сила нажата» ставится
+ * на BLOCK_START, а золото списывается строкой позже (part30). Снимок
+ * «перед событием траты» попал бы внутрь действия, и совет по силе героя
+ * на такой точке молчал бы (part11, ход 5). Строки BLOCK_START событиями
+ * не являются — первое событие внутри блока несёт весь открытый стек,
+ * и объект верхнего блока в нём один и тот же до конца блока, — поэтому
+ * состояние снимается перед первым событием каждого нового верхнего
+ * блока, а трата вне блоков (тринкет за золото, part32) — перед самим
+ * событием. Снимков это добавляет по одному на верхний блок хода до первой
+ * траты — единицы против тысяч на `ZONE`.
+ */
 export function readTavernTurns(text: string): TavernTurn[] {
   const reducer = createReducer(readPlayers(text));
   const turns: TavernTurn[] = [];
 
   let pending: TavernTurn | null = null;
+  /** Верхний блок предыдущего события — чтобы заметить начало нового. */
+  let topBlock: BlockContext | null = null;
+  /** Состояние перед действием, которое может оказаться тратой. */
+  let beforeAction: GameState | null = null;
 
   const commit = (): void => {
     if (pending !== null && pending.state.shop.length > 0) turns.push(pending);
@@ -46,18 +76,23 @@ export function readTavernTurns(text: string): TavernTurn[] {
   };
 
   for (const event of readPowerEvents(text)) {
-    reducer.step(event);
-
-    // Снимок дорогой: берётся только на событиях, которые могут изменить
-    // витрину, золото или борд.
     const { content } = event.line;
-    if (
-      !content.includes('ZONE') &&
-      !content.includes('RESOURCES') &&
-      !content.includes('BOARD_VISUAL_STATE')
-    ) {
-      continue;
+    const notable =
+      content.includes('ZONE') || content.includes('RESOURCES') || content.includes('BOARD_VISUAL_STATE');
+
+    // Снимок нужен только пока у хода есть точка решения и золото цело:
+    // до первого снимка хода тратить ещё нечего, после первой траты
+    // снимок уже взят.
+    const outer = event.blocks[0] ?? null;
+    if (pending !== null && pending.state.goldSpent === 0) {
+      if (outer !== null ? outer !== topBlock : content.includes('RESOURCES')) {
+        beforeAction = reducer.snapshot();
+      }
     }
+    topBlock = outer;
+
+    reducer.step(event);
+    if (!notable) continue;
 
     const state = reducer.snapshot();
 
@@ -66,8 +101,21 @@ export function readTavernTurns(text: string): TavernTurn[] {
       continue;
     }
     if (pending !== null && pending.turn !== state.turn) commit();
-    // Золото тронуто — решение уже принято, дальше состояние не наше.
-    if (state.goldSpent > 0 || state.goldTotal === 0) continue;
+    // Золото тронуто — решение уже принято. Точка решения — состояние
+    // перед действием, со всем, что случилось после прошлого снимка.
+    if (state.goldSpent > 0) {
+      if (
+        beforeAction !== null &&
+        pending !== null &&
+        pending.turn === state.turn &&
+        beforeAction.turn === state.turn &&
+        beforeAction.goldSpent === 0
+      ) {
+        pending = { turn: state.turn, state: beforeAction };
+      }
+      continue;
+    }
+    if (state.goldTotal === 0) continue;
 
     pending = { turn: state.turn, state };
   }

@@ -158,4 +158,23 @@ describe('досбор поверх лежащей записи', () => {
     expect(plan.action).toBe('keep');
     expect(plan.record).toBe(stored);
   });
+
+  it('--rebuild пересобирает и запись текущей схемы: точка решения сдвинулась по определению, а не по схеме', () => {
+    // 29.08: снимок стал браться перед событием траты — старые точки
+    // отличаются от новых моментом, и по полям этого не видно.
+    const stored = recordOf([{ turn: 1, state: tavern(1, { lobby: LOBBY }) }], {
+      actions: [],
+      contributor: 'alice',
+      overlay: true,
+    });
+
+    const plan = refreshRecord(stored, FRESH, true);
+
+    expect(plan.action).toBe('rebuild');
+    expect(plan.record.checkpoints).toBe(FRESH.checkpoints);
+    expect(plan.record.actions).toBe(FRESH.actions);
+    expect(plan.record.savedAt).toBe(stored.savedAt);
+    expect(plan.record.contributor).toBe('alice');
+    expect(plan.record.overlay).toBe(true);
+  });
 });

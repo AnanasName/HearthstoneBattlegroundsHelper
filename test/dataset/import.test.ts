@@ -205,15 +205,17 @@ describe('импорт архива логов', () => {
     expect(imported.buildNumber).toBe(live?.buildNumber);
     expect(imported.actions).toEqual(live?.actions);
 
-    // Точки решения: те же ходы, и на каждой — своё положение.
-    // Целиком состояния НЕ равны, и это известно (docs/collector.md):
-    // пакетный снимок берётся на последнем ZONE/RESOURCES-событии до траты,
-    // живой — на конце порции, то есть на несколько событий позже. Разница
-    // не только в служебных тегах: на part7 в одной точке из девяти атака
-    // миньона борда 44 против 48 — усиление пришло тегом ATK после
-    // последнего снимка пакетного пути. Поэтому статы борда здесь
-    // не сравниваются; состав борда, рука, витрина, золото, тир, hp,
-    // место и число живых обязаны совпадать.
+    // Точки решения: те же ходы, и на каждой — своё положение, включая
+    // статы борда. До 29.08 пакетный снимок брался на последнем
+    // ZONE/RESOURCES-событии и на part7 отставал от живого на усиление
+    // (атака 44 против 48 в одной точке из девяти); теперь он берётся
+    // перед действием, которое тратит золото (docs/collector.md).
+    // Целиком состояния всё же не равны, и теперь отстаёт ЖИВОЙ путь:
+    // его снимок — конец порции, а не начало действия. На part7 выбор
+    // тринкета закрывается за считанные строки до покупки, граница
+    // порции легла раньше, и живая запись видит выбор ещё открытым;
+    // плюс мигающий служебный тег 1196 посреди действия. Ни то ни другое
+    // в сравнение не входит — это предел живого пути, а не импорта.
     const own = (r: DatasetRecord) =>
       r.checkpoints.map((c) => ({
         turn: c.turn,
@@ -221,20 +223,13 @@ describe('импорт архива логов', () => {
         goldTotal: c.state.goldTotal,
         techLevel: c.state.techLevel,
         hp: (c.state.hero?.health ?? 0) - (c.state.hero?.damage ?? 0) + (c.state.hero?.armor ?? 0),
-        board: c.state.board.map((m) => m.cardId),
+        board: c.state.board.map((m) => `${m.cardId}:${String(m.attack)}/${String(m.health)}`),
         hand: c.state.hand.map((m) => m.cardId),
         shop: c.state.shop.map((m) => m.cardId).sort(),
         place: c.state.finalPlace,
         alive: Object.values(c.state.lobby).filter((p) => p.place === null || p.place <= 0).length,
       }));
     expect(own(imported)).toEqual(own(live as DatasetRecord));
-
-    // Сумма статов борда — с оговоркой выше: расходится не больше чем
-    // в одной точке и не больше чем на одно усиление.
-    const stats = (r: DatasetRecord) =>
-      r.checkpoints.map((c) => c.state.board.reduce((s, m) => s + m.attack + m.health, 0));
-    const differing = stats(imported).filter((s, i) => s !== stats(live as DatasetRecord)[i]);
-    expect(differing.length).toBeLessThanOrEqual(1);
   }, 120_000);
 
   it('чужой файл не принимается за архив', async () => {

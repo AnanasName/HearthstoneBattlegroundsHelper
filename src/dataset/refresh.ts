@@ -67,8 +67,16 @@ export function lobbyKnown(record: DatasetRecord): boolean {
   });
 }
 
-export function refreshRecord(stored: DatasetRecord, fresh: DatasetRecord): RefreshPlan {
-  if (!lobbyKnown(stored)) {
+/**
+ * `force` — пересобрать и запись текущей схемы: когда меняется само
+ * определение точки решения (29.08 снимок стал браться перед событием
+ * траты, а не на последнем ZONE-событии — `advisors/tavern/turns.ts`),
+ * старые точки отличаются от новых не полями, а моментом, и по схеме
+ * этого не видно. Паспорт записи сохраняется так же, как при обычной
+ * пересборке.
+ */
+export function refreshRecord(stored: DatasetRecord, fresh: DatasetRecord, force = false): RefreshPlan {
+  if (force || !lobbyKnown(stored)) {
     return {
       action: 'rebuild',
       record: { ...stored, checkpoints: fresh.checkpoints, actions: fresh.actions },
