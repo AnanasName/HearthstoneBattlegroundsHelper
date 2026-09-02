@@ -7,8 +7,6 @@
  * правил или нужен полный оптимизатор трат. Устройство и оговорки —
  * в spendQuality.ts, числа и выводы — в docs/tavern.md.
  */
-import { readFileSync } from 'node:fs';
-
 import { createBattleSimulator } from '../battle/simulator.js';
 import { loadCardIndex } from '../../data/cards.js';
 import {
@@ -18,9 +16,12 @@ import {
   spendCost,
   type SpendComparison,
 } from './spendQuality.js';
-import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 
-const FIXTURES = CURRENT_BUILD_LOGS;
+const FIXTURES = CURRENT_BUILD_PARTS;
+
+/** Граница «внутри выборки / вне её» — см. пояснение в `validate.ts`. */
+const IN_SAMPLE_UNTIL = 26;
 
 function main(): void {
   const cards = loadCardIndex();
@@ -29,18 +30,26 @@ function main(): void {
   const all: SpendComparison[] = [];
   const decisive: SpendComparison[] = [];
   const sameShape: SpendComparison[] = [];
+  const inSample: SpendComparison[] = [];
+  const outOfSample: SpendComparison[] = [];
   let skippedNoBattle = 0;
   let skippedNoChoice = 0;
 
-  for (const path of FIXTURES) {
-    const report = measureSpendQuality(readFileSync(path, 'utf8'), { cards, simulator });
+  for (const part of FIXTURES) {
+    const text = readFixtureGame(part);
+    if (text === null) {
+      console.log(`part${String(part)}: лога нет, пропущено`);
+      continue;
+    }
+    const report = measureSpendQuality(text, { cards, simulator });
+    (part <= IN_SAMPLE_UNTIL ? inSample : outOfSample).push(...report.sameShapeRows);
     all.push(...report.rows);
     decisive.push(...report.decisive);
     sameShape.push(...report.sameShapeRows);
     skippedNoBattle += report.skippedNoBattle;
     skippedNoChoice += report.skippedNoChoice;
 
-    console.log(`\n═══ ${path.split('/')[2] ?? path} ═══`);
+    console.log(`\n═══ part${String(part)} ═══`);
     console.log('  ход  наборов  план  лучший  цена  разброс  подъём (план/лучший)  остаток (план/лучший)');
     for (const r of report.rows) {
       const cost = r.bestOutcome - r.planOutcome;
@@ -96,6 +105,19 @@ function main(): void {
     `  пропущено: без боя следом ${String(skippedNoBattle)},` +
       ` без выбора или вне перебора ${String(skippedNoChoice)}`,
   );
+
+  // Разводка считается ВНУТРИ ФОРМЫ — по главному итогу этой сверки.
+  const line = (label: string, rows: readonly SpendComparison[]): void => {
+    if (rows.length === 0) return;
+    console.log(
+      `  ${label.padEnd(34)} ходов ${String(rows.length).padStart(3)}` +
+        `, совпало ${(spendAgreement(rows) * 100).toFixed(0).padStart(2)}%` +
+        `, цена ${spendCost(rows).toFixed(2)} п.п.`,
+    );
+  };
+  console.log('\n═══ разводка по загрязнению (внутри формы) ═══');
+  line(`part4–part${String(IN_SAMPLE_UNTIL)} (внутри выборки)`, inSample);
+  line(`part${String(IN_SAMPLE_UNTIL + 1)}+ (вне выборки)`, outOfSample);
   console.log(
     '\n  Читать с оговоркой: сравнивается только ближайший бой, и купленные\n' +
       '  тела дописываются в хвост борда без поиска расстановки. Поэтому\n' +

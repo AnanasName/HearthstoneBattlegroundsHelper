@@ -18,11 +18,9 @@
  * Оговорки, обязательные к чтению вместе с числами, — в `chooserArena.ts`:
  * мерка слепа к экономике, а игрок покупает как раз экономику и племя.
  */
-import { readFileSync, existsSync } from 'node:fs';
-
 import { createBattleSimulator } from '../battle/simulator.js';
 import { loadCardIndex } from '../../data/cards.js';
-import { CURRENT_BUILD_PARTS, fixtureLogPath } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 import {
   CHOOSER_NAMES,
   contrastAgainstPlayer,
@@ -34,26 +32,12 @@ import {
 } from './chooserArena.js';
 
 /**
- * Партии патч-группы целиком — 4..35, а не `CURRENT_BUILD_PARTS`.
- *
- * Вопрос замера про ИГРОКА, а не про текущий срез сверок, и выбрасывать
- * девять партий 250339 значило бы выбросить единственную клетку, где мерка
- * ближайшего боя НЕ участвовала в отборе правил советника: `validate:tavern`
- * по part27–part35 не гонялся ни разу. Разводка печатается отдельно.
+ * Партии патч-группы целиком. До 02.09.2026 это был свой список
+ * (`CURRENT_BUILD_PARTS` плюс part27–part35), потому что общий обрывался
+ * на part26; теперь общий список и есть 4..35, а сегменты part35 читает
+ * `readFixtureGame`. Разводка по загрязнению печатается отдельно.
  */
-const LATE_PARTS = [27, 28, 29, 30, 31, 32, 33, 34, 35];
-const PARTS = [...CURRENT_BUILD_PARTS, ...LATE_PARTS];
-
-/** part35 сыграна в двух сегментах — клиент перезапускался посреди партии. */
-function readGame(part: number): string | null {
-  const single = fixtureLogPath(part);
-  if (existsSync(single)) return readFileSync(single, 'utf8');
-  const segments = [1, 2]
-    .map((n) => `data/fixtures/part${String(part)}/segment${String(n)}.log`)
-    .filter((p) => existsSync(p));
-  if (segments.length === 0) return null;
-  return segments.map((p) => readFileSync(p, 'utf8')).join('\n');
-}
+const PARTS = CURRENT_BUILD_PARTS;
 
 function pad(value: number, width: number, digits = 2): string {
   return value.toFixed(digits).padStart(width);
@@ -134,7 +118,7 @@ function main(): void {
   let advisorSilent = 0;
 
   for (const part of PARTS) {
-    const text = readGame(part);
+    const text = readFixtureGame(part);
     if (text === null) {
       console.log(`part${String(part)}: лога нет, пропуск`);
       continue;
@@ -216,8 +200,12 @@ function main(): void {
     'part4–part26: мерка УЧАСТВОВАЛА в отборе правил советника',
     perGame.map((rows, i) => (parts[i]! <= 26 ? rows : [])),
   );
+  // Вечером 02.09 `validate:tavern` по этим партиям прогнан ВПЕРВЫЕ (список
+  // партий дошёл до part35), но правил по его числам не принято ни одного —
+  // клетка чиста до первой такой правки, и тогда эту страту надо перечитать
+  // как «была чистой на момент замера», а не как «чистая».
   printContrasts(
-    'part27–part35: validate:tavern по ним не гонялся ни разу',
+    'part27–part35: по ним правила советника не отбирались',
     perGame.map((rows, i) => (parts[i]! >= 27 ? rows : [])),
   );
 

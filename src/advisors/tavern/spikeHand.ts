@@ -101,8 +101,6 @@
  * поэтому неиграбельные и смертники исключены тем же условием, каким
  * их отсекает `playRules`. Критерии приёмки снова не менялись.
  */
-import { readFileSync } from 'node:fs';
-
 import { loadCardIndex, type CardIndex } from '../../data/cards.js';
 import type { Minion } from '../../state/types.js';
 import { endOfTurnAuraGains, withEndOfTurnAuras } from '../battle/endOfTurn.js';
@@ -114,9 +112,9 @@ import { summarize, type SpikeSummary } from './statAnalysis.js';
 import { isHandWorker } from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 import { readTavernTurns } from './turns.js';
-import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 
-const FIXTURES = CURRENT_BUILD_LOGS;
+const FIXTURES = CURRENT_BUILD_PARTS;
 
 const SIMULATIONS = 2000;
 const SEED = 20_260_817;
@@ -173,11 +171,13 @@ function main(): void {
 
   const points: Point[] = [];
 
-  for (const path of FIXTURES) {
-    const part = path.split('/')[2] ?? path;
+  for (const partNumber of FIXTURES) {
+    const part = `part${String(partNumber)}`;
+    const text = readFixtureGame(partNumber);
+    if (text === null) continue;
     let used = 0;
 
-    for (const { state } of readTavernTurns(readFileSync(path, 'utf8'))) {
+    for (const { state } of readTavernTurns(text)) {
       const question = battleQuestion(state);
       if (question === null || state.hand.length === 0) continue;
 

@@ -39,7 +39,7 @@
 | `src/advisors/position/spikeField.ts` | замеры цели-поля: молчание, цена K бордов, качество |
 | `src/data/cards.ts` | справочник карт: племя, тир, статы по cardId; пул миньонов тира |
 | `src/data/bgStats.ts` | статистика мест героев и тринкетов (снапшот Firestone) |
-| `src/data/fixtureGames.ts` | партии текущего билда — один список на все скрипты |
+| `src/data/fixtureGames.ts` | партии текущего билда — один список на все скрипты, и одно чтение партии (`readFixtureGame`: `game.log` либо сегменты) |
 | `src/data/cardStats.ts` | статистика мест миньонов — только для замера, вне рантайма |
 | `src/advisors/tavern/measureCardStats.ts` | дамп «кандидат покупки → исход боя» |
 | `src/advisors/tavern/statAnalysis.ts` | арифметика замера: ранжирование, связь, перестановки |

@@ -31,13 +31,11 @@
  * Качество самих покупок мерит `npm run validate:tavern`, план хода —
  * `npm run validate:spend`.
  */
-import { readFileSync } from 'node:fs';
-
 import { loadCardIndex } from '../../data/cards.js';
 import { adviseTavern } from './advisor.js';
 import { tavernTurnOf } from './rules.js';
 import { readTavernTurns } from './turns.js';
-import { CURRENT_BUILD_PARTS, fixtureLogPath } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 
 /** Партии текущего билда 248348 — те же, на которых считается качество советов. */
 const PARTS = CURRENT_BUILD_PARTS;
@@ -50,13 +48,8 @@ interface PartResult {
 }
 
 function measurePart(part: number, cards: ReturnType<typeof loadCardIndex>): PartResult | null {
-  const path = fixtureLogPath(part);
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch {
-    return null;
-  }
+  const text = readFixtureGame(part);
+  if (text === null) return null;
 
   let turns = 0;
   let behind = 0;

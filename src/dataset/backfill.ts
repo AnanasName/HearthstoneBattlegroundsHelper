@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 
 import { readTavernTurns } from '../advisors/tavern/turns.js';
-import { CURRENT_BUILD_PARTS, fixtureLogPath } from '../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../data/fixtureGames.js';
 import { reduceLog } from '../state/reducer.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from './recorder.js';
 import { lobbyKnown, refreshRecord } from './refresh.js';
@@ -93,13 +93,12 @@ function main(): void {
   let patched = 0;
   let rebuilt = 0;
   for (const part of FIXTURES) {
-    const path = fixtureLogPath(part);
-    if (!existsSync(path)) {
+    const text = readFixtureGame(part);
+    if (text === null) {
       console.log(`part${String(part)}: лога нет, пропущено`);
       continue;
     }
 
-    const text = readFileSync(path, 'utf8');
     const finalState = reduceLog(text);
     const checkpoints = readTavernTurns(text);
     if (checkpoints.length === 0) {
@@ -144,18 +143,32 @@ function main(): void {
       continue;
     }
 
-    // Отпечаток не нашёлся, а партия того же билда, героя и места старой
-    // схемы лежит: скорее всего, редьюсер сдвинул ПЕРВУЮ точку решения,
-    // и досбор сейчас положит вторую запись рядом. Это называется вслух,
-    // потому что дедуп загрузчика такую пару не сведёт.
+    // Отпечаток не нашёлся, а партия того же билда, героя и места лежит:
+    // досбор сейчас положит вторую запись рядом, и дедуп загрузчика такую
+    // пару не сведёт. Причин у расхождения отпечатка ДВЕ, и вторая нашлась
+    // 02.09, когда список дошёл до part35:
+    //
+    //  - редьюсер сдвинул ПЕРВУЮ точку решения (запись старой схемы);
+    //  - живая запись НЕПОЛНАЯ — оверлей включили посреди партии (part28:
+    //    первая точка на ходу 3 вместо 1) или клиент перезапускался и живой
+    //    путь начал с реконнекта (part35: три точки с хода 21 из двенадцати).
+    //
+    // Прежде проверка молчала во втором случае: она пропускала записи,
+    // у которых `lobby` уже есть, — а у живых записей 26–28.08 он есть.
+    // Условие снято: это ПРЕДУПРЕЖДЕНИЕ, а не действие, и цена ложного
+    // срабатывания (совпали билд, герой и место у разных партий) — одна
+    // строка в отчёте против молча задвоенной партии в обучении.
     const passport = `${String(record.buildNumber)}|${String(record.heroCardId)}|${String(record.finalPlace)}|`;
     for (const [signature, files] of existing) {
       if (!signature.startsWith(passport)) continue;
       for (const { fileName, record: stored } of files) {
-        if (lobbyKnown(stored)) continue;
+        const why = lobbyKnown(stored)
+          ? `в лежащей записи ${String(stored.checkpoints.length)} точек против ` +
+            `${String(checkpoints.length)} здесь — похоже на неполную живую запись`
+          : 'запись старой схемы';
         console.log(
-          `ВНИМАНИЕ: part${String(part)} не нашлась по отпечатку, а запись старой схемы того же ` +
-            `билда, героя и места лежит — ${fileName}; проверьте первую точку решения`,
+          `ВНИМАНИЕ: part${String(part)} не нашлась по отпечатку, а партия того же ` +
+            `билда, героя и места лежит — ${fileName} (${why}); проверьте первую точку решения`,
         );
       }
     }

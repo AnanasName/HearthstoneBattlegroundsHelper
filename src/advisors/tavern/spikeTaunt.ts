@@ -16,7 +16,7 @@
  * достаётся телу, которое и так самое крупное, а размен телами — то,
  * ради чего его покупают. Такое различают замером, а не мнением: у нас
  * есть симулятор, который ралли-призыв МОДЕЛИРУЕТ (`expert-aviator.js`),
- * и все партии текущего билда (`CURRENT_BUILD_PARTS`, сейчас 23).
+ * и все партии текущего билда (`CURRENT_BUILD_PARTS`, сейчас 32).
  *
  * Замер стал возможен только вместе с передачей РУКИ в симулятор (part21):
  * без неё ралли-призыв не срабатывал вовсе, и любая цифра про носителя
@@ -64,8 +64,6 @@
  *  - у части носителей ралли эффект срабатывает от СВОЕЙ атаки, у части —
  *    от атаки любого своего миньона с ралли; замер их не разделяет.
  */
-import { readFileSync } from 'node:fs';
-
 import { loadCardIndex, type CardIndex } from '../../data/cards.js';
 import type { Minion } from '../../state/types.js';
 import { endOfTurnAuraGains, withEndOfTurnAuras } from '../battle/endOfTurn.js';
@@ -75,9 +73,9 @@ import { battleQuestion } from '../position/advisor.js';
 import { withSeededRandom } from '../position/rng.js';
 import { summarize } from './statAnalysis.js';
 import { readTavernTurns } from './turns.js';
-import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 
-const FIXTURES = CURRENT_BUILD_LOGS;
+const FIXTURES = CURRENT_BUILD_PARTS;
 
 const SIMULATIONS = 2000;
 const SEED = 20_260_817;
@@ -125,8 +123,10 @@ function main(): void {
   const points: Point[] = [];
   let skipped = 0;
 
-  for (const path of FIXTURES) {
-    const turns = readTavernTurns(readFileSync(path, 'utf8'));
+  for (const part of FIXTURES) {
+    const text = readFixtureGame(part);
+    if (text === null) continue;
+    const turns = readTavernTurns(text);
     let used = 0;
 
     for (const { state } of turns) {
@@ -164,7 +164,7 @@ function main(): void {
       used += 1;
     }
 
-    console.log(`${(path.split('/')[2] ?? path).padEnd(8)} точек ${String(used).padStart(3)}`);
+    console.log(`${`part${String(part)}`.padEnd(8)} точек ${String(used).padStart(3)}`);
   }
 
   if (points.length === 0) {

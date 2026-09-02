@@ -14,7 +14,7 @@
  *
  * Выдумывать правило («атака всегда лучше») нельзя — это было бы чужое
  * мнение под видом факта. Зато есть симулятор и все партии текущего билда
- * (`CURRENT_BUILD_PARTS`, сейчас 23): вопрос решается замером. Список
+ * (`CURRENT_BUILD_PARTS`, сейчас 32): вопрос решается замером. Список
  * общий намеренно — своя копия у каждого замера уже разъезжалась, и цена
  * названа вслух: с каждой новой фикстурой записанные числа устаревают
  * до перезапуска.
@@ -46,8 +46,6 @@
  *  - разделение 3/1 взято от Alliance Flag; на другие суммы результат
  *    переносится по смыслу, а не по замеру.
  */
-import { readFileSync } from 'node:fs';
-
 import { loadCardIndex } from '../../data/cards.js';
 import type { Minion } from '../../state/types.js';
 import { endOfTurnAuraGains, withEndOfTurnAuras } from '../battle/endOfTurn.js';
@@ -58,9 +56,9 @@ import { withSeededRandom } from '../position/rng.js';
 import { summarize, type SpikeSummary } from './statAnalysis.js';
 import { buffTarget } from './advisor.js';
 import { readTavernTurns } from './turns.js';
-import { CURRENT_BUILD_LOGS } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 
-const FIXTURES = CURRENT_BUILD_LOGS;
+const FIXTURES = CURRENT_BUILD_PARTS;
 
 /** Разделение статов замера: сумма одна, розданы по-разному. */
 const SPLIT = { attack: 3, health: 1 } as const;
@@ -87,8 +85,10 @@ function main(): void {
   const diffs: { readonly turn: number; readonly diff: number }[] = [];
   let skipped = 0;
 
-  for (const path of FIXTURES) {
-    const turns = readTavernTurns(readFileSync(path, 'utf8'));
+  for (const part of FIXTURES) {
+    const text = readFixtureGame(part);
+    if (text === null) continue;
+    const turns = readTavernTurns(text);
     let used = 0;
 
     for (const { state } of turns) {
@@ -122,7 +122,7 @@ function main(): void {
       used += 1;
     }
 
-    console.log(`${(path.split('/')[2] ?? path).padEnd(8)} точек ${String(used).padStart(3)}`);
+    console.log(`${`part${String(part)}`.padEnd(8)} точек ${String(used).padStart(3)}`);
   }
 
   if (diffs.length === 0) {
