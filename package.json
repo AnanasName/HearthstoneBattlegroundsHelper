@@ -27,6 +27,7 @@
     "spike:taunt": "tsx src/advisors/tavern/spikeTaunt.ts",
     "spike:hand": "tsx src/advisors/tavern/spikeHand.ts",
     "spike:horizon": "tsx src/advisors/tavern/spikeHorizon.ts",
+    "spike:arena": "tsx src/advisors/tavern/spikeArena.ts",
     "calibrate": "tsx src/advisors/battle/calibrate.ts",
     "validate:tavern": "tsx src/advisors/tavern/validate.ts",
     "validate:spend": "tsx src/advisors/tavern/validateSpend.ts",
