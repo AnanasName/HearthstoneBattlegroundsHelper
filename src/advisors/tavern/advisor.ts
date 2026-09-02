@@ -5762,6 +5762,18 @@ export function trinketAdvice(
     const statNote =
       stat === null ? '' : `; по статистике место ${stat.averagePlacement.toFixed(2)}`;
 
+    // Цена НАЗЫВАЕТСЯ, но в ранжирование не входит. Она настоящая и внутри
+    // одного предложения разная (part32, ход 17: 4, 5, 5 и 2 при золоте 10),
+    // так что молчать о ней нельзя: точка решения показывает золото ДО
+    // выбора, и план строился на золото, которого после выбора не будет.
+    // Веса же у неё нет намеренно — сколько мест стоит золотой на этом
+    // ходу, у нас не замерено, а выдуманный коэффициент перевернул бы
+    // ранжирование, которое подтверждено игроком (docs/jeefhs.md).
+    const costNote =
+      offer.cost === null || offer.cost === 0
+        ? ''
+        : `; ${String(offer.cost)} золота, останется ${String(Math.max(0, state.gold - offer.cost))}`;
+
     return {
       offer,
       name,
@@ -5773,7 +5785,8 @@ export function trinketAdvice(
           : tribeMinions === 0
             ? `для племени ${tribes.join('/')}, а своих таких нет${unseenNote}`
             : `упоминает ${tribes.join('/')} — своих ${String(tribeMinions)}${unseenNote}`) +
-        (tribes.length === 0 && stat === null ? ' — оценить не берёмся' : statNote),
+        (tribes.length === 0 && stat === null ? ' — оценить не берёмся' : statNote) +
+        costNote,
     };
   });
 

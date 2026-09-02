@@ -1042,6 +1042,7 @@ export function createReducer(players: Players): Reducer {
         subsetRaces: [...e.tags.entries()]
           .filter(([tag, v]) => tag.startsWith('BACON_SUBSET_') && v > 0)
           .map(([tag]) => tag.slice('BACON_SUBSET_'.length)),
+        cost: e.tags.get('COST') ?? null,
       }));
 
     // Взятые тринкеты всех игроков — теги на сущностях героев. Один игрок

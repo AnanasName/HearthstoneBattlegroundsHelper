@@ -287,7 +287,7 @@ describe('живой советник: когда звать и когда бр�
     const state = tavernState();
     const withOffer = {
       ...state,
-      trinketOffer: [{ entityId: 900, cardId: 'BG30_MagicItem_425', subsetRaces: [] }],
+      trinketOffer: [{ entityId: 900, cardId: 'BG30_MagicItem_425', subsetRaces: [], cost: null }],
     };
     expect(situationKey(state)).not.toBe(situationKey(withOffer));
   });

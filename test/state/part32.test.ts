@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   adviseTavern,
+  trinketAdvice,
   buyRules,
   heroPowerKeywordRule,
   minionValue,
@@ -32,6 +33,8 @@ describe('part32: бесплатная сила «даёт перерожден�
   let shot2: GameState | null = null;
   /** Ход 13 до нажатия: на борде Mummifier — первое из шести нажатий на него. */
   let turn13: GameState | null = null;
+  /** Ход 17: предложение тринкетов ЦЕЛИКОМ, все четыре варианта видны. */
+  let trinkets17: GameState | null = null;
   let finalState: GameState;
 
   beforeAll(() => {
@@ -57,6 +60,11 @@ describe('part32: бесплатная сила «даёт перерожден�
       // BLOCK_START, и все снимки после неё уже с ним.
       if (s.turn === 13 && !used && s.board.some((m) => m.cardId === 'BG28_309')) {
         turn13 = s;
+      }
+      // Второе предложение тринкетов: варианты приходят по одному, и полным
+      // оно бывает ровно до выбора — ловим первое состояние со всеми четырьмя.
+      if (s.turn === 17 && s.trinketOffer.length === 4 && trinkets17 === null) {
+        trinkets17 = s;
       }
     }
     finalState = reducer.snapshot();
@@ -171,5 +179,20 @@ describe('part32: бесплатная сила «даёт перерожден�
     const rec13 = heroPowerKeywordRule(turn13 as GameState, { cards }, DEFAULT_TAVERN_RULES);
     expect(rec13?.targetMinion?.cardId).toBe('BG28_309');
     expect(rec13?.reason).toContain('цепочка');
+  });
+  it('цена тринкета читается из лога и ВНУТРИ одного предложения разная', () => {
+    // Тег COST на сущности варианта. Это не формальность: на ходу 17
+    // при десяти золотых четыре варианта стоят 4, 5, 5 и 2 — то есть
+    // выбор тринкета решает и то, останется ли золото на покупку.
+    expect(trinkets17).not.toBeNull();
+    const s = trinkets17 as GameState;
+    expect(s.gold).toBe(10);
+    expect(s.trinketOffer.map((t) => t.cost)).toEqual([4, 5, 5, 2]);
+
+    // Совет цену НАЗЫВАЕТ (в ранжирование она не входит — веса у неё нет).
+    const advice = trinketAdvice(s, { cards });
+    expect(advice).toHaveLength(4);
+    const cheapest = advice.find((a) => a.offer.cardId === 'BG30_MagicItem_420t');
+    expect(cheapest?.reason).toContain('2 золота, останется 8');
   });
 });

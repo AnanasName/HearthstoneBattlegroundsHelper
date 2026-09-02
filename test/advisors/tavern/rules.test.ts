@@ -2050,7 +2050,7 @@ describe('совет по выбору тринкета', () => {
   const trinketDeps = { cards: trinketCards };
 
   const offer = (...cardIds: string[]): Partial<GameState> => ({
-    trinketOffer: cardIds.map((cardId, i) => ({ entityId: 9000 + i, cardId, subsetRaces: [] })),
+    trinketOffer: cardIds.map((cardId, i) => ({ entityId: 9000 + i, cardId, subsetRaces: [], cost: null })),
   });
 
   it('без открытого предложения совет пуст', () => {
@@ -2138,7 +2138,7 @@ describe('совет по выбору тринкета', () => {
     ]);
     const s = state({
       board: [minion(1, { cardId: 'DRAGON_D' }), minion(2, { cardId: 'DRAGON_D' })],
-      trinketOffer: [{ entityId: 9000, cardId: 'TR_COMPASS', subsetRaces: ['DRAGON'] }],
+      trinketOffer: [{ entityId: 9000, cardId: 'TR_COMPASS', subsetRaces: ['DRAGON'], cost: null }],
     });
     const advice = trinketAdvice(s, { cards: compassCards });
     expect(advice[0]?.tribeMinions).toBe(2);
@@ -2160,7 +2160,7 @@ describe('совет по выбору тринкета', () => {
     ]);
     const s = state({
       board: [minion(1, { cardId: 'MECH_M' }), minion(2, { cardId: 'MECH_M' })],
-      trinketOffer: [{ entityId: 9000, cardId: 'TR_MECH', subsetRaces: [] }],
+      trinketOffer: [{ entityId: 9000, cardId: 'TR_MECH', subsetRaces: [], cost: null }],
     });
     const advice = trinketAdvice(s, { cards: mechCards });
     expect(advice[0]?.tribeMinions).toBe(2);
@@ -3234,7 +3234,7 @@ describe('состав племён партии по витрине', () => {
     const s = state({
       seenShopCardIds: ['U1', 'N1', 'Q1'],
       board: [minion(1, { cardId: 'AM' })],
-      trinketOffer: [{ entityId: 900, cardId: 'TRINK_D', subsetRaces: ['DRAGON'] }],
+      trinketOffer: [{ entityId: 900, cardId: 'TRINK_D', subsetRaces: ['DRAGON'], cost: null }],
     });
     const advice = trinketAdvice(s, { cards: lobbyCards });
     expect(advice[0]?.tribeMinions).toBe(1);
@@ -3245,7 +3245,7 @@ describe('состав племён партии по витрине', () => {
     const s = state({
       seenShopCardIds: ['U1'],
       board: [minion(1, { cardId: 'AM' })],
-      trinketOffer: [{ entityId: 900, cardId: 'TRINK_D', subsetRaces: ['DRAGON'] }],
+      trinketOffer: [{ entityId: 900, cardId: 'TRINK_D', subsetRaces: ['DRAGON'], cost: null }],
     });
     const advice = trinketAdvice(s, { cards: lobbyCards });
     expect(advice[0]?.reason).not.toContain('не встречалось');
