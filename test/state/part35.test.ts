@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   adviseTavern,
+  bodiesAffordable,
   buyCostOf,
   buyRules,
   discountRefreshRule,
@@ -220,5 +221,29 @@ describe('part35: «Мозаика Стылой Межи» — обновлен�
     expect(mosaicAt).toBeGreaterThanOrEqual(0);
     const buysAfter = turn19.slice(mosaicAt + 1).filter((a) => a.type === 'buy');
     expect(buysAfter.length).toBeGreaterThanOrEqual(2);
+  });
+  /**
+   * Дыра 3, названная игроком той же партией: расчёты «сколько тел
+   * по карману» делили золото на тройку из правил, а не считали живые цены.
+   * После «Мозаики» витрина по одному, и два золота — это ДВЕ покупки,
+   * а не ноль.
+   */
+  it('«сколько тел по карману» считается по живым ценам витрины', () => {
+    const cheap = must(afterMosaic17, 'ход 17 после «Мозаики»');
+    // Пять кличевых по одному: на два золота — двое, на пять — пятеро,
+    // и больше витрины не купишь при любом золоте.
+    expect(bodiesAffordable(cheap, 2)).toBe(2);
+    expect(bodiesAffordable(cheap, 5)).toBeGreaterThanOrEqual(5);
+    expect(bodiesAffordable(cheap, 99)).toBe(cheap.shop.length);
+
+    // Та же партия, витрина по правилу игры: числа прежние.
+    const normal = must(shot19, 'скриншот хода 19');
+    expect(bodiesAffordable(normal, 2)).toBe(0);
+    expect(bodiesAffordable(normal, 3)).toBe(1);
+    expect(bodiesAffordable(normal, 7)).toBe(2);
+
+    // Пустая витрина — это «цен не видно», а не «купить не на что»:
+    // вопрос у зовущих про золото, и ответ там по правилу игры.
+    expect(bodiesAffordable({ ...normal, shop: [] }, 7)).toBe(2);
   });
 });

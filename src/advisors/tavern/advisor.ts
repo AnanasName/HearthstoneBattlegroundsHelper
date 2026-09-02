@@ -1286,6 +1286,50 @@ export function buyCostOf(minion: Minion, rules: TavernRules = DEFAULT_TAVERN_RU
 }
 
 /**
+ * Сколько тел из ЭТОЙ витрины можно купить на `gold` — по живым ценам.
+ *
+ * Считается дешёвыми вперёд: это верхняя граница числа покупок, и она же
+ * единственная, которую можно назвать, не решая, ЧТО именно покупать.
+ * Когда вся витрина по правилу игры, число совпадает с прежним
+ * `floor(gold / minionCost)` — то есть правки поведения там нет вовсе.
+ *
+ * Зачем понадобилось (part35): «Мозаика Стылой Межи» («They cost (1)»)
+ * делает витрину по одному, а расчёты «сколько тел по карману» делили
+ * золото на тройку из правил. Симптом игрок и назвал: при двух золотых
+ * причина заморозки говорила «хватает лишь на 0 покупок», хотя купить
+ * можно было двоих. Скидка part3/part4 (`BACON_REDUCE_BUY_COST`) даёт
+ * тот же перекос в другую сторону.
+ *
+ * Граница проведена сознательно: этой функцией считается только ТЕКУЩАЯ
+ * витрина. Там, где вопрос про витрину БУДУЩЕГО хода (планка заморозки,
+ * `turnAffordingBoth`, `purchasesAfter`), цен ещё не существует, и цена
+ * по правилу игры остаётся честной оценкой — менять её значило бы
+ * выдумывать будущую скидку.
+ */
+export function bodiesAffordable(
+  state: GameState,
+  gold: number,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  if (gold <= 0) return 0;
+  // Пустая витрина — это «цен не видно», а не «купить не на что»: вопрос
+  // у зовущих про ЗОЛОТО («хватит ли остатка на тело»), и отвечать на него
+  // нулём из-за отсутствия витрины значило бы путать нехватку денег
+  // с отсутствием товара. Тогда — цена по правилу игры, ровно как
+  // в запасном пути `buyCostOf`.
+  if (state.shop.length === 0) return Math.floor(gold / rules.minionCost);
+  const prices = state.shop.map((m) => buyCostOf(m, rules)).sort((a, b) => a - b);
+  let left = gold;
+  let bought = 0;
+  for (const price of prices) {
+    if (price > left) break;
+    left -= price;
+    bought += 1;
+  }
+  return bought;
+}
+
+/**
  * Цена обновления витрины — живая, из кнопки; таблица только запасной путь.
  *
  * Экономику меняют не только тринкеты: «Leaf Through the Pages» («Gain 2
@@ -1451,7 +1495,7 @@ export function levelUpRule(
     const triple = buys
       .filter((b) => b.minion !== null && copiesOwned(b.minion, state) >= copiesToTriple - 1)
       .reduce((best: number | null, b) => (best === null || b.score > best ? b.score : best), null);
-    const affordBoth = state.gold >= cost + rules.minionCost;
+    const affordBoth = bodiesAffordable(state, state.gold - cost, rules) >= 1;
 
     score =
       triple !== null && !affordBoth
@@ -1478,7 +1522,7 @@ export function levelUpRule(
   const leftover = state.gold - cost;
   const late = (state.tavernUpgradeTarget ?? state.techLevel + 1) >= rules.lateRerollTier;
   const leftoverTail =
-    leftover >= rerollCostOf(state, rules) && leftover < rules.minionCost
+    leftover >= rerollCostOf(state, rules) && bodiesAffordable(state, leftover, rules) === 0
       ? late
         ? `; остаток ${String(leftover)} — на обновление витрины нового тира`
         : `; остаток ${String(leftover)} сгорит — это цена подъёма`
@@ -2230,7 +2274,7 @@ export function sellForGoldRule(
   if (state.board.length === 0 || state.shop.length === 0) return null;
 
   // Продажа открывает покупку только если меняет ЧИСЛО доступных покупок.
-  const affordable = (gold: number): number => Math.floor(gold / rules.minionCost);
+  const affordable = (gold: number): number => bodiesAffordable(state, gold, rules);
   if (affordable(state.gold + rules.sellGold) <= affordable(state.gold)) return null;
 
   const sellable = state.board.filter((m) => {
@@ -2611,7 +2655,7 @@ export function freezeRule(
   if (state.shop.length === 0) return null;
   if (state.shop.every((m) => m.frozen)) return null;
 
-  const affordable = Math.floor(state.gold / rules.minionCost);
+  const affordable = bodiesAffordable(state, state.gold, rules);
 
   // Порог относителен тиру таверны, как у реролла: плоский порог к четвёртому
   // тиру пробивала любая дешёвка со статами (part10, Snow Baller).
@@ -3797,7 +3841,7 @@ export function heroPowerShotRule(
 
   // Купить можно не больше, чем позволяют и золото, и место на борде.
   const affordable = Math.min(
-    Math.floor(state.gold / rules.minionCost),
+    bodiesAffordable(state, state.gold, rules),
     rules.boardSize - state.board.length,
   );
   const leftovers = state.shop
@@ -5513,7 +5557,7 @@ export function shopSpellRules(
     if (effect.buffsShop) {
       const buys = Math.min(
         state.shop.length,
-        Math.max(0, Math.floor((state.gold - goldCost) / rules.minionCost)),
+        bodiesAffordable(state, state.gold - goldCost, rules),
       );
       const score =
         effect.stats * buys * rules.value.perStatPoint - goldCost * rules.goldPointValue;
