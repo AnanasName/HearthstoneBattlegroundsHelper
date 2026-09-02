@@ -105,8 +105,8 @@ describe('накопитель датасета', () => {
   it('журнал действий из финального состояния попадает в запись', () => {
     const { recorder, saved } = recorderWithSink();
     const actions = [
-      { turn: 1, type: 'buy', cardId: 'BGS_119', entityId: 329 },
-      { turn: 1, type: 'play', cardId: 'BGS_119', entityId: 329 },
+      { turn: 1, type: 'buy', cardId: 'BGS_119', entityId: 329, subOption: null },
+      { turn: 1, type: 'play', cardId: 'BGS_119', entityId: 329, subOption: 0 },
     ] as const;
 
     recorder.update(tavern(1, { gold: 3, goldTotal: 3 }));

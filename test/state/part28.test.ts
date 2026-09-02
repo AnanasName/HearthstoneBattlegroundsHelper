@@ -158,4 +158,23 @@ describe('part28: ветвь модального миньона и предел
     expect(at(29)).toBe(0); // 15-й ход таверны — конец таблицы
     expect(at(99)).toBe(0);
   });
+  it('журнал действий помнит ВЫБРАННУЮ ветвь модальной карты (SubOption)', () => {
+    // Ветвь — единственный след выбора в логе: у модального миньона ветви
+    // создаются в SETASIDE ещё при появлении карты в витрине, а канал
+    // выборов для него молчит вовсе (docs/power-log.md, part28).
+    const plays = finalState.actions.filter((a) => a.type === 'play');
+    const trapper = plays.find((a) => a.cardId === 'BG36_332');
+    expect(trapper?.subOption).toBe(0); // «Get a random Quilboar» — пришёл Roadboar
+
+    // «День самоцветов» разыгран за партию дважды, и ветви РАЗНЫЕ: если бы
+    // поле читалось не из своего блока, оба выбора вышли бы одинаковыми.
+    const gemDays = plays.filter((a) => a.cardId === 'BG31_893').map((a) => a.subOption);
+    expect(gemDays).toContain(0);
+    expect(gemDays).toContain(1);
+
+    // У действий без выбора — null, а не ноль: ноль это ПЕРВАЯ ветвь.
+    expect(finalState.actions.filter((a) => a.type === 'buy').every((a) => a.subOption === null)).toBe(
+      true,
+    );
+  });
 });

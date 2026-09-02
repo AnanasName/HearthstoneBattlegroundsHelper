@@ -3,7 +3,13 @@ import { join } from 'node:path';
 
 import { sameGameBuild } from '../data/builds.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from '../dataset/recorder.js';
-import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../state/types.js';
+import {
+  EMPTY_STATE,
+  type GameState,
+  type Hero,
+  type Minion,
+  type PlayerAction,
+} from '../state/types.js';
 
 /**
  * Загрузка датасета партий для фазы 6 — с дедупом и фильтром билда.
@@ -122,7 +128,20 @@ export function upgradeRecord(record: DatasetRecord): DatasetRecord {
   return {
     ...record,
     checkpoints: record.checkpoints.map((c) => ({ ...c, state: upgradeState(c.state) })),
+    actions: record.actions === undefined ? undefined : upgradeActions(record.actions),
   };
+}
+
+/** Действие старой записи: ветви выбора (part28, 02.09) в нём может не быть. */
+type LegacyAction = Omit<PlayerAction, 'subOption'> & Partial<Pick<PlayerAction, 'subOption'>>;
+
+/**
+ * Умолчание — `null`, «выбора не было»: ровно то, что записал бы редьюсер,
+ * не читай он поля `SubOption`. Ноль сюда ставить нельзя — ноль это ПЕРВАЯ
+ * ветвь, то есть настоящий выбор игрока.
+ */
+function upgradeActions(list: readonly LegacyAction[]): PlayerAction[] {
+  return list.map((a) => ({ subOption: null, ...a }));
 }
 
 /** Герой старой записи: поле part34 в нём может отсутствовать. */

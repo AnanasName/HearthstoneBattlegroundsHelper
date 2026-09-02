@@ -262,7 +262,15 @@ export function createReducer(players: Players): Reducer {
   ): void => {
     if (journaledBlocks.has(block)) return;
     journaledBlocks.add(block);
-    actions.push({ turn, type, cardId: cardId === '' ? null : cardId, entityId });
+    actions.push({
+      turn,
+      type,
+      cardId: cardId === '' ? null : cardId,
+      entityId,
+      // Ветвь берётся из ТОГО ЖЕ блока: поле `SubOption` стоит в строке
+      // BLOCK_START рядом с `Target=`, и разбирать карту для этого не надо.
+      subOption: block.subOption,
+    });
   };
 
   /** Карта-цель блока покупки или продажи — из `Target=[…]` его строки. */

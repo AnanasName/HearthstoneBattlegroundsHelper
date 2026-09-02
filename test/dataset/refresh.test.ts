@@ -96,7 +96,7 @@ const FRESH = recordOf(
   ],
   {
     savedAt: '2026-08-28T20:00:00.000Z',
-    actions: [{ turn: 1, type: 'buy', cardId: 'BG33_140', entityId: 201 }],
+    actions: [{ turn: 1, type: 'buy', cardId: 'BG33_140', entityId: 201, subOption: null }],
   },
 );
 
@@ -117,7 +117,7 @@ describe('таблица лобби в записи', () => {
 describe('досбор поверх лежащей записи', () => {
   it('старая схема пересобирается: точки и журнал свежие, паспорт записи прежний', () => {
     const stored = recordOf([legacyPoint(1), legacyPoint(3)], {
-      actions: [{ turn: 1, type: 'buy', cardId: 'OLD', entityId: null }],
+      actions: [{ turn: 1, type: 'buy', cardId: 'OLD', entityId: null, subOption: null }],
       contributor: 'alice',
       contributorRating: 7000,
       overlay: false,

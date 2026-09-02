@@ -59,6 +59,7 @@ const buy = (turn: number, entityId: number): PlayerAction => ({
   type: 'buy',
   cardId: null,
   entityId,
+  subOption: null,
 });
 
 describe('сборка инстансов имитации', () => {
@@ -73,7 +74,7 @@ describe('сборка инстансов имитации', () => {
       buy(3, 101), // показанный миньон
       buy(3, 900), // заклинание витрины — не кандидат
       buy(3, 555), // после обновления: в показанной витрине такого нет
-      { turn: 3, type: 'sell', cardId: 'CARD_101', entityId: 101 }, // не покупка
+      { turn: 3, type: 'sell', cardId: 'CARD_101', entityId: 101, subOption: null }, // не покупка
     ]);
 
     const built = buildInstances([game]);

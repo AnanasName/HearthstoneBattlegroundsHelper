@@ -69,6 +69,17 @@ export interface BlockContext {
    * `Target=0` — без цели, здесь null.
    */
   readonly target: EntityRef | null;
+  /**
+   * Какую ветвь модального «Choose One» выбрал игрок: 0 — первая, 1 —
+   * вторая. `SubOption=-1` (у подавляющего большинства блоков) значит
+   * «выбора не было» и читается здесь как `null`.
+   *
+   * Это ЕДИНСТВЕННЫЙ след такого выбора в логе: у модального миньона ветви
+   * создаются сущностями в `SETASIDE` ещё при появлении карты в витрине,
+   * а не при розыгрыше, и канал `DebugPrintEntityChoices` для него молчит
+   * (part28, docs/power-log.md).
+   */
+  readonly subOption: number | null;
   /** Отступ строки BLOCK_START — по нему блок и закрывается. */
   readonly indent: number;
 }
@@ -80,6 +91,7 @@ export interface PowerEvent {
 }
 
 const BLOCK_TYPE_RE = /^BLOCK_START BlockType=(\w+)/;
+const SUB_OPTION_RE = /\bSubOption=(-?\d+)/;
 
 function parseBlockStart(line: LogLine): BlockContext | null {
   const m = BLOCK_TYPE_RE.exec(line.content);
@@ -90,12 +102,17 @@ function parseBlockStart(line: LogLine): BlockContext | null {
 
   const entity = parseEntityFrom(line.content);
   const target = parseEntityFrom(line.content, 'Target=');
+  const sub = SUB_OPTION_RE.exec(line.content);
+  const subOption = sub?.[1] === undefined ? null : Number(sub[1]);
   return {
     blockType,
     entity,
     entityId: entity === null ? null : entityIdOf(entity),
     // `Target=0` разбирается в голый id 0 — это «без цели», не сущность.
     target: target !== null && entityIdOf(target) === 0 ? null : target,
+    // −1 значит «выбора не было»; нулём его подменять нельзя — ноль
+    // это ПЕРВАЯ ветвь, настоящий выбор игрока.
+    subOption: subOption === null || subOption < 0 ? null : subOption,
     indent: line.indent,
   };
 }
