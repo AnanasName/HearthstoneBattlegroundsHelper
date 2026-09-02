@@ -24,6 +24,12 @@ import {
   type MlGame,
 } from './evaluate.js';
 import { loadDataset } from './dataset.js';
+import {
+  filterGames,
+  formatProvenance,
+  parseDatasetFilter,
+  type DatasetFilter,
+} from './provenance.js';
 
 /**
  * Отчёт фазы 6: предсказание финального места против таблицы лидеров.
@@ -129,22 +135,24 @@ function featureSetFromArgs(argv: readonly string[]): FeatureSet {
   throw new Error(`неизвестный набор признаков: ${key} (own | relative | history)`);
 }
 
-function main(featureSet: FeatureSet): void {
+function main(featureSet: FeatureSet, filter: DatasetFilter): void {
   const data = loadDataset();
 
   console.log(`билд: ${String(data.build ?? 'неизвестен')}`);
+  for (const line of formatProvenance(data.games, filter)) console.log(line);
   for (const dup of data.duplicates) {
     console.log(`задвоено: оставлено ${dup.kept}, отброшено ${dup.dropped.join(', ')}`);
   }
   for (const f of data.droppedOtherBuild) console.log(`чужой билд, отброшено: ${f}`);
   for (const f of data.droppedUnusable) console.log(`без места или точек, отброшено: ${f}`);
 
-  let usable = data.games;
+  const selected = filterGames(data.games, filter);
+  let usable = selected;
   if (featureSet.requiresLobby) {
     // Относительные признаки на пустой таблице — не пропуск, а ложь;
     // партия без таблицы хотя бы в одной точке выпадает целиком.
-    usable = data.games.filter((g) => g.record.checkpoints.every((cp) => lobbyKnownInState(cp.state)));
-    for (const g of data.games) {
+    usable = selected.filter((g) => g.record.checkpoints.every((cp) => lobbyKnownInState(cp.state)));
+    for (const g of selected) {
       if (!usable.includes(g)) console.log(`без таблицы лобби, исключено: ${g.fileName}`);
     }
   }
@@ -325,4 +333,4 @@ function main(featureSet: FeatureSet): void {
   console.log(`  интерсепт: ${fmt(full.intercept)}`);
 }
 
-main(featureSetFromArgs(process.argv.slice(2)));
+main(featureSetFromArgs(process.argv.slice(2)), parseDatasetFilter(process.argv.slice(2)));

@@ -32,6 +32,12 @@
  */
 import { tavernTurnOf } from './rules.js';
 import { loadDataset } from '../../ml/dataset.js';
+import {
+  DEFAULT_FILTER,
+  filterGames,
+  parseDatasetFilter,
+  type DatasetFilter,
+} from '../../ml/provenance.js';
 
 interface Point {
   readonly tavernTurn: number;
@@ -52,12 +58,16 @@ function median(xs: readonly number[]): number {
   return (lo + hi) / 2;
 }
 
-export function collectPoints(): { readonly points: Point[]; readonly lengths: number[] } {
+export function collectPoints(
+  filter: DatasetFilter = DEFAULT_FILTER,
+): { readonly points: Point[]; readonly lengths: number[] } {
   const ds = loadDataset();
   const points: Point[] = [];
   const lengths: number[] = [];
 
-  for (const game of ds.games) {
+  // Умолчание — свои партии: таблица `remainingTavernTurns` замерена на них,
+  // и перезамер обязан сравнивать то же с тем же (`src/ml/provenance.ts`).
+  for (const game of filterGames(ds.games, filter)) {
     const checkpoints = game.record.checkpoints;
     if (checkpoints.length === 0) continue;
     const turns = checkpoints.map((c) => tavernTurnOf(c.turn));
@@ -77,7 +87,8 @@ export function collectPoints(): { readonly points: Point[]; readonly lengths: n
 }
 
 function main(): void {
-  const { points, lengths } = collectPoints();
+  const filter = parseDatasetFilter(process.argv.slice(2));
+  const { points, lengths } = collectPoints(filter);
   if (points.length === 0) {
     console.log('датасет пуст — замерять нечего (data/dataset/)');
     return;

@@ -6,6 +6,12 @@ import { createRng, mean, summarize } from '../advisors/tavern/statAnalysis.js';
 import { loadCardIndex } from '../data/cards.js';
 import { DATASET_DIR } from '../dataset/recorder.js';
 import { loadDataset } from './dataset.js';
+import {
+  filterGames,
+  formatProvenance,
+  parseDatasetFilter,
+  type DatasetFilter,
+} from './provenance.js';
 import { evaluateLogo, RIDGE_LAMBDA, signFlipBand, summarizeEvals, toMlGame } from './evaluate.js';
 import {
   baseCardOf,
@@ -94,10 +100,12 @@ function shift(now: number, before: number | undefined, asPoints: boolean): stri
   return ` (${asPoints ? pp(d) : `${d >= 0 ? '+' : ''}${num(d)}`} к прошлому)`;
 }
 
-function main(): void {
+function main(filter: DatasetFilter): void {
   const data = loadDataset();
   const cards = loadCardIndex();
-  const games = data.games.map((g) => toMlGame(g));
+  for (const line of formatProvenance(data.games, filter)) console.log(line);
+  const selected = filterGames(data.games, filter);
+  const games = selected.map((g) => toMlGame(g));
   const points = games.reduce((n, g) => n + g.rows.length, 0);
 
   // Состав по билдам печатается ВСЕГДА и первым. В день выхода патча
@@ -138,7 +146,7 @@ function main(): void {
   const history = readLog();
   const previous = history[history.length - 1];
   const knownBefore = new Set(previous?.gameFiles ?? []);
-  const fresh = data.games.filter((g) => !knownBefore.has(g.fileName));
+  const fresh = selected.filter((g) => !knownBefore.has(g.fileName));
 
   console.log('═══ датасет ═══');
   console.log(
@@ -175,7 +183,7 @@ function main(): void {
   );
 
   // Замер 2 — имитация покупок игрока.
-  const build = buildInstances(data.games);
+  const build = buildInstances(selected);
   const advisorByInstance = new Map<ImitationInstance, string | null>();
   for (const inst of build.instances) {
     const advice = adviseTavern(inst.state, { cards });
@@ -259,7 +267,7 @@ function main(): void {
     games: games.length,
     points,
     instances: build.instances.length,
-    gameFiles: data.games.map((g) => g.fileName),
+    gameFiles: selected.map((g) => g.fileName),
     placeMaeModel: place.maeModel,
     placeMaeCurrent: place.maeCurrent,
     placeMaeMean: place.maeMean,
@@ -275,4 +283,4 @@ function main(): void {
   console.log(`прогон записан: ${TRACK_LOG} (строк ${String(lines.length)})`);
 }
 
-main();
+main(parseDatasetFilter(process.argv.slice(2)));

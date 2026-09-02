@@ -16,6 +16,13 @@ import {
   type ImitationInstance,
 } from './imitation.js';
 import { loadDataset } from './dataset.js';
+import {
+  filterGames,
+  formatProvenance,
+  parseDatasetFilter,
+  provenanceRows,
+  type DatasetFilter,
+} from './provenance.js';
 
 /**
  * Отчёт замера 2: имитация покупок игрока против советника.
@@ -57,13 +64,26 @@ const meansOf = (
   tier: mean(evals.map((e) => e.hitTier)),
 });
 
-function main(): void {
+function main(filter: DatasetFilter): void {
   const data = loadDataset();
   const cards = loadCardIndex();
 
-  const build = buildInstances(data.games);
+  // Счёт по людям читается ДО чисел, и не для порядка: на своих партиях
+  // этот замер меряет «чей выбор ближе к лучшему по бою — игрока или
+  // советника», а на чужих тем же счётом выходит УРОВЕНЬ ИСПОЛНИТЕЛЯ.
+  // Среднее по нескольким людям — среднее по разным вопросам.
+  for (const line of formatProvenance(data.games, filter)) console.log(line);
+  const selected = filterGames(data.games, filter);
+  if (provenanceRows(selected).length > 1) {
+    console.log(
+      'ВНИМАНИЕ: в выборке партии РАЗНЫХ людей. Общее среднее этого замера' +
+        ' для них не определено — считать надо по каждому отдельно.',
+    );
+  }
+
+  const build = buildInstances(selected);
   console.log(
-    `партий: ${String(data.games.length)}, ходов с точкой решения: ${String(build.turnsSeen)}`,
+    `партий: ${String(selected.length)}, ходов с точкой решения: ${String(build.turnsSeen)}`,
   );
   console.log(
     `инстансов замера: ${String(build.instances.length)} ` +
@@ -244,4 +264,4 @@ function main(): void {
   }
 }
 
-main();
+main(parseDatasetFilter(process.argv.slice(2)));
