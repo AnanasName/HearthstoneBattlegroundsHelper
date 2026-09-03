@@ -398,7 +398,10 @@ function planSteps(
     // после вынужденного первого шага он снова становится верхним советом
     // и возвращается вторым (part24, ход 7).
     if (withoutLevelUp && rec.action === 'levelUp') return false;
-    if (rec.cost > state.gold) return false;
+    // Шаг с продажей платит за себя её золотым: тот же счёт, что
+    // и у `applyRecommendation`, где возврат приходит вместе с покупкой
+    // (part36, ход 13 — два золотых и покупка за три после продажи).
+    if (rec.cost - (rec.sellFirst === null ? 0 : rules.sellGold) > state.gold) return false;
     // Совет без ценности планом не считается: «ничего» и нулевые довески
     // заканчивают ход, а не наполняют план.
     if (rec.score <= 0) return false;

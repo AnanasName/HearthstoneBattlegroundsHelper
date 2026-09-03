@@ -98,6 +98,7 @@ describe('дополнение старой записи до текущей с�
     heroPowerCost: null,
     heroPowerUsedThisTurn: false,
     heroPowerUnplayable: false,
+    heroPowerLocked: false,
     heroPowerHasActivate: false,
     heroPowerScriptData: [],
   };

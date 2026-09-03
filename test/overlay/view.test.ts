@@ -31,6 +31,7 @@ const HERO: GameState['hero'] = {
   heroPowerCost: null,
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
+  heroPowerLocked: false,
   heroPowerHasActivate: false,
   heroPowerScriptData: [],
 };

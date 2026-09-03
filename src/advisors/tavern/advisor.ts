@@ -70,6 +70,20 @@ export interface Recommendation {
   /** Заклинание, к которому относится совет «разыграть». У миньонов пусто. */
   readonly spellCardId?: string | null;
   /**
+   * Что ИЩЕТ обновление витрины — цель, под которую его крутят.
+   *
+   * Отдельным полем по той же причине, что цель усиления (part12) и ветвь
+   * модального заклинания (part19): на экран идёт короткая строка действия,
+   * а у обновления в ней нет ни миньона, ни заклинания. Игрок видел «ОБНОВИТЬ»
+   * и справедливо возражал, что покупать всё равно не на что (part37, ход 21),
+   * — притом что правило крутило витрину под НАЗВАННУЮ цель заморозки
+   * и называло её в `reason`, которого оверлей не показывает.
+   *
+   * Пусто у обновления «витрина мусорная»: там цель — любая карта получше,
+   * и называть нечего.
+   */
+  readonly searchGoal?: string | null;
+  /**
    * Сколько золота действие ПРИНОСИТ — ВАЛОВЫМИ, как написано в тексте.
    *
    * У золотых заклинаний эффект известен числом («Gain 1 Gold»), и прятать
@@ -1681,7 +1695,20 @@ function handMinionVictim(
   };
 }
 
-/** Правило покупки: по рекомендации на каждого миньона витрины, что по карману. */
+/**
+ * Правило покупки: по рекомендации на каждого миньона витрины, что по карману.
+ *
+ * **На полном борде «по карману» считается ВМЕСТЕ с продажей** (part36,
+ * ход 13). Покупка туда всё равно идёт через продажу слабейшего, а продажа
+ * приносит золотой — и сравнивать цену витрины с остатком ДО неё значит
+ * отказываться от размена, который сам себя и оплачивает. На скриншоте
+ * после подъёма на тир 5 осталось 2 золота при витрине по три, и оверлей
+ * сказал «ОБНОВИТЬ за 1» и «НИЧЕГО»; игрок продал Water Droplet (5.0)
+ * и купил Fearless Foodie (18.5) — ровно то, что советник считал
+ * недоступным. Прибавка идёт ТОЛЬКО ветке с продажей: тройка сливается
+ * сама, вторая копия уходит в руку, магнит садится на носителя — там
+ * продавать некого, и лишнего золотого неоткуда взять.
+ */
 export function buyRules(
   state: GameState,
   deps: TavernAdvisorDeps,
@@ -1689,11 +1716,12 @@ export function buyRules(
 ): Recommendation[] {
   const full = state.board.length >= rules.boardSize;
   const victim = full ? weakestOwn(state, deps, rules) : null;
+  const budget = state.gold + (victim === null ? 0 : rules.sellGold);
 
   return state.shop
     // Цена у каждого миньона своя: скидки героев и даров видны тегом
     // на самом миньоне, и «не по карману» решается по ней, а не по трём.
-    .filter((m) => buyCostOf(m, rules) <= state.gold)
+    .filter((m) => buyCostOf(m, rules) <= budget)
     .flatMap((minion) => {
       const cost = buyCostOf(minion, rules);
       let value = minionValue(minion, state, deps, rules);
@@ -1744,6 +1772,10 @@ export function buyRules(
           notes.push('борд полон');
         }
       }
+
+      // Золотой продажи хватает только тому, кто продажу и делает: у прочих
+      // веток бюджет остаётся прежним, и «по карману» решается остатком.
+      if (cost > state.gold && sellFirst === null) return [];
 
       // Пометка про копии не дублирует ветку тройки на полном борде выше.
       if (value.completesTriple && !notes.some((n) => n.includes('тройку'))) {
@@ -2219,15 +2251,18 @@ export function sellRule(
   if (state.board.length < rules.boardSize) return null;
   if (state.shop.length === 0) return null;
 
+  const worst = weakestOwn(state, deps, rules);
+  if (worst === null) return null;
+
   const best = state.shop
     .map((m) => ({ minion: m, value: minionValue(m, state, deps, rules).total }))
     .reduce((a, b) => (b.value > a.value ? b : a));
-  // По карману ли лучший — по его собственной цене: скидка на него видна
-  // тегом на миньоне, и трёх золотых может не понадобиться.
-  if (buyCostOf(best.minion, rules) > state.gold) return null;
-
-  const worst = weakestOwn(state, deps, rules);
-  if (worst === null) return null;
+  // По карману ли лучший — по его собственной цене (скидка на него видна
+  // тегом на миньоне, и трёх золотых может не понадобиться) И с золотым
+  // ЭТОЙ ЖЕ продажи: она предшествует покупке, ради которой советуется.
+  // Прежде правило молчало при двух золотых, хотя после продажи их три
+  // (part36, ход 13: игрок так и сыграл — продал и купил).
+  if (buyCostOf(best.minion, rules) > state.gold + rules.sellGold) return null;
 
   const gain = best.value - worst.value;
   if (gain <= rules.sellMargin) return null;
@@ -2367,11 +2402,30 @@ export function sellForGoldRule(
  * но крутить ради неё — искать ставку, а не карту. Нет цели — обновление
  * молчит: бесплатное или нет, оно ничего не даст.
  */
+/**
+ * Цель обновления двумя частями: ЧТО ищем и ПОЧЕМУ.
+ *
+ * Разделено ради оверлея. Правило part27 требует, чтобы цель была названа,
+ * и она называлась — но только в `reason`, а на экран идёт короткая строка
+ * действия (`recommendationLine`), и у обновления в ней нет ни миньона,
+ * ни заклинания: игрок видел голое «ОБНОВИТЬ» и читал его как «покрути
+ * просто так» (part37, ход 21 — «предлагает обновить таверну, хотя я всё
+ * равно ничего не смогу купить»). Правило было право, а на экране от него
+ * не оставалось ничего.
+ *
+ * `what` идёт в строку действия, `why` остаётся в причине: короткая строка
+ * обязана отвечать «зачем крутить», а не пересказывать всю арифметику.
+ */
+interface FreezeGoal {
+  readonly what: string;
+  readonly why: string;
+}
+
 function rerollFreezeGoal(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
-): string | null {
+): FreezeGoal | null {
   // Пары считаются так же, как `copiesOwned`: незолотые копии на борде
   // и в руке, золотая с обычными в тройку не складывается.
   // Пара годится в цель, только если витрина МОЖЕТ предложить третью копию:
@@ -2400,7 +2454,7 @@ function rerollFreezeGoal(
     .filter((info): info is CardInfo => info !== null)
     .sort((a, b) => (b.techLevel ?? 0) - (a.techLevel ?? 0))[0];
   if (pair !== undefined) {
-    return `${nthCopyWord(needed, 'acc')} копию ${pair.name} — соберётся тройка`;
+    return { what: `${nthCopyWord(needed, 'acc')} копию ${pair.name}`, why: 'соберётся тройка' };
   }
 
   if (state.board.length >= rules.boardSize) return null;
@@ -2426,7 +2480,10 @@ function rerollFreezeGoal(
     .sort((a, b) => b[1] - a[1])[0];
   return tribe === undefined
     ? null
-    : `соплеменника (${tribe[0]} тира ${String(state.techLevel)}, своих ${String(tribe[1])})`;
+    : {
+        what: `соплеменника ${tribe[0]} тира ${String(state.techLevel)}`,
+        why: `своих ${String(tribe[1])}`,
+      };
 }
 
 /**
@@ -2453,8 +2510,7 @@ function goldHasOtherUse(state: GameState, rules: TavernRules): boolean {
     hero.heroPowerCost !== null &&
     hero.heroPowerCost > 0 &&
     hero.heroPowerCost <= gold &&
-    !hero.heroPowerUsedThisTurn &&
-    !hero.heroPowerUnplayable
+    heroPowerReady(hero)
   ) {
     return true;
   }
@@ -2589,10 +2645,11 @@ export function rerollRule(
     cost,
     requiresSlot: false,
     sellFirst: null,
+    searchGoal: freezeGoal?.what ?? null,
     reason:
       freezeGoal !== null
         ? `золота ${String(state.gold)} — купить нечего и после обновления, но ${price}: ` +
-          `искать под заморозку ${freezeGoal}`
+          `искать под заморозку ${freezeGoal.what} — ${freezeGoal.why}`
         : `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
           `${String(state.techLevel)} — покупать нечего, ${price}`,
   };
@@ -3088,6 +3145,29 @@ export function freezeRule(
 }
 
 /**
+ * Можно ли нажать силу героя ПРЯМО СЕЙЧАС — три запрета одним местом.
+ *
+ * Запретов три, и каждый читается из лога: сила уже нажата в этом ходу
+ * (блок PLAY на её сущности), сила временно неиграбельна
+ * (`LITERALLY_UNPLAYABLE`) и сила ещё не открыта (`LOCK_VISUAL` — замок
+ * «Unlocks at Tier N», part37).
+ *
+ * Одной функцией, а не тремя условиями в пяти правилах: два первых запрета
+ * и были размножены по пяти местам, и добавление третьего в четыре из пяти
+ * прошло бы молча — ровно тот способ, которым разъезжаются списки
+ * (`CURRENT_BUILD_PARTS`, docs/journal.md). Прочие условия у правил свои:
+ * `heroPowerHasActivate` (пассивную силу не «нажимают»), цена, место
+ * на борде.
+ */
+export function heroPowerReady(hero: {
+  readonly heroPowerUsedThisTurn: boolean;
+  readonly heroPowerUnplayable: boolean;
+  readonly heroPowerLocked: boolean;
+}): boolean {
+  return !hero.heroPowerUsedThisTurn && !hero.heroPowerUnplayable && !hero.heroPowerLocked;
+}
+
+/**
  * Правило силы героя.
  *
  * Советуется только сила, которая ДАЁТ МИНЬОНА, — это видно по тексту
@@ -3095,9 +3175,9 @@ export function freezeRule(
  * существа за 5 золота. Про урон, баффы и прочее совет не берётся судить.
  *
  * Ценность — как у среднего миньона витрины: сила приносит существо того же
- * разбора, а стоит дешевле покупки. Нажатая в этом ходу или заблокированная
- * сила не советуется: и то и другое читается из лога (блок PLAY на сущности
- * силы, тег LITERALLY_UNPLAYABLE).
+ * разбора, а стоит дешевле покупки. Нажатая в этом ходу, неиграбельная
+ * или ещё не открытая сила не советуется — все три случая читаются
+ * из лога (`heroPowerReady`).
  */
 /**
  * Ценность действия «даёт миньона» — силы героя или заклинания витрины.
@@ -3504,7 +3584,7 @@ export function heroPowerRule(
 
   const cost = hero.heroPowerCost;
   if (cost === null || cost <= 0) return null;
-  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (!heroPowerReady(hero)) return null;
   if (cost > state.gold) return null;
 
   const info = deps.cards.info(hero.heroPowerCardId);
@@ -3597,7 +3677,7 @@ export function freeHeroPowerRule(
   if (hero === null || hero.heroPowerCardId === null) return null;
   if (!hero.heroPowerHasActivate) return null;
   if ((hero.heroPowerCost ?? 0) > 0) return null;
-  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (!heroPowerReady(hero)) return null;
 
   const info = deps.cards.info(hero.heroPowerCardId);
   const text = info?.text ?? '';
@@ -3673,7 +3753,7 @@ export function heroPowerKeywordRule(
   const hero = state.hero;
   if (hero === null || hero.heroPowerCardId === null) return null;
   if (!hero.heroPowerHasActivate) return null;
-  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (!heroPowerReady(hero)) return null;
   const cost = hero.heroPowerCost ?? 0;
   if (cost > state.gold) return null;
   if (state.board.length === 0) return null;
@@ -3831,7 +3911,7 @@ export function heroPowerShotRule(
   if (hero === null || hero.heroPowerCardId === null) return null;
   if (!hero.heroPowerHasActivate) return null;
   if ((hero.heroPowerCost ?? 0) > 0) return null;
-  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (!heroPowerReady(hero)) return null;
   if (state.board.length >= rules.boardSize) return null;
   if (state.shop.length === 0) return null;
 
@@ -3911,7 +3991,7 @@ export function heroPowerSpellRule(
   const hero = state.hero;
   if (hero === null || hero.heroPowerCardId === null) return null;
   if (!hero.heroPowerHasActivate) return null;
-  if (hero.heroPowerUsedThisTurn || hero.heroPowerUnplayable) return null;
+  if (!heroPowerReady(hero)) return null;
 
   const cost = hero.heroPowerCost ?? 0;
   // Бесплатные силы живут в freeHeroPowerRule; здесь — платная экономика.
@@ -4946,11 +5026,31 @@ function spellTargetOn(
     }
   }
 
-  // Кандидат в продажу — тот же слабейший свой, которого назовёт покупка
-  // на полный борд. Усиление на нём уйдёт вместе с ним.
+  // Кандидатов в продажу ДВА, и оба свои правила уже называют.
+  //
+  // Первый — слабейший свой, которого назовёт покупка на полный борд
+  // (part17). Второй — карта, чья ценность РЕАЛИЗУЕТСЯ ПРОДАЖЕЙ: «When
+  // you sell this, …» (part18, `sellForGoldRule`); держать её телом —
+  // не получить обещанного никогда, это записано у самого правила.
+  // На part36 (ход 7) план вешал «Allied Buckler +1/+3» на Sellemental
+  // 3/3 — крупнейшего на борде — и через два хода сам же советовал его
+  // продать; игрок повесил щит на Tusked Camper и Sellemental продал.
+  // Копия под тройку исключением не считается ровно как в `sellForGoldRule`:
+  // её берут не телом и не продают.
+  const sellCandidates = new Set<number>();
   const victim = weakestOwn(state, deps, rules);
-  if (victim !== null) {
-    const keepers = pool.filter((m) => m.entityId !== victim.minion.entityId);
+  if (victim !== null) sellCandidates.add(victim.minion.entityId);
+  for (const m of state.board) {
+    const text = cards.info(m.cardId)?.text ?? '';
+    if (text === '' || copiesOwned(m, state) > 0) continue;
+    if (rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))) {
+      sellCandidates.add(m.entityId);
+    }
+  }
+  if (sellCandidates.size > 0) {
+    const keepers = pool.filter((m) => !sellCandidates.has(m.entityId));
+    // Борд целиком из кандидатов в продажу возвращает выбор им же:
+    // усилить кого-то всё равно надо, и «не берёмся» тут хуже крупнейшего.
     if (keepers.length > 0 && keepers.length < pool.length) {
       pool = keepers;
       notes.push('усиление навсегда — не на кандидата в продажу');
@@ -6426,10 +6526,11 @@ export function adviseTavern(
       cost: idleRerollCost,
       requiresSlot: false,
       sellFirst: null,
+      searchGoal: idleGoal?.what ?? null,
       reason:
         idleGoal !== null
           ? `золота ${String(state.gold)} — купить нечего и после обновления, но ${idlePrice}: ` +
-            `искать под заморозку ${idleGoal}`
+            `искать под заморозку ${idleGoal.what} — ${idleGoal.why}`
           : idleRerollCost === 0
             ? 'покупать нечего и некуда, а обновление бесплатно — искать лучшее'
             : `покупать нечего и некуда, а золота ${String(state.gold)} — ` +

@@ -94,7 +94,13 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
       : list.length === 1
         ? ` → ${branchLabel(list[0] as { name: string; label: string })}`
         : ` → ${list.map(branchLabel).join(' либо ')} (выбор за вами)`;
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}`;
+  // Цель обновления — здесь же и по той же причине: у обновления нет ни
+  // миньона, ни заклинания, и «ОБНОВИТЬ» в одиночку читается как «покрути
+  // просто так». Обновление под цель — это поиск карты ПОД ЗАМОРОЗКУ,
+  // то есть покупка следующего хода, и без этих слов возражение игрока
+  // «купить всё равно не на что» верно по всему, что он видит (part37).
+  const goal = r.searchGoal == null ? '' : ` — ищем ${r.searchGoal}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

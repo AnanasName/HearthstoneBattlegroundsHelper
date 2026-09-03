@@ -12,6 +12,7 @@ import {
   BOARD_VISUAL_STATE_TAVERN,
   EMPTY_GLOBAL_INFO,
   EMPTY_STATE,
+  raceOfSubsetTag,
   type ChoiceOption,
   type Enchantment,
   type GameState,
@@ -877,6 +878,7 @@ export function createReducer(players: Players): Reducer {
     heroPowerCost: number | null;
     heroPowerUsedThisTurn: boolean;
     heroPowerUnplayable: boolean;
+    heroPowerLocked: boolean;
     heroPowerHasActivate: boolean;
     heroPowerScriptData: readonly (number | null)[];
   }
@@ -890,6 +892,7 @@ export function createReducer(players: Players): Reducer {
       heroPowerCost: null,
       heroPowerUsedThisTurn: false,
       heroPowerUnplayable: false,
+      heroPowerLocked: false,
       heroPowerHasActivate: false,
       heroPowerScriptData: [],
     };
@@ -904,6 +907,11 @@ export function createReducer(players: Players): Reducer {
         heroPowerCost: e.tags.get('COST') ?? null,
         heroPowerUsedThisTurn,
         heroPowerUnplayable: flag(e, 'LITERALLY_UNPLAYABLE'),
+        // Замок «открывается на тире N» (part37, Алекстраза): ставится
+        // блоком TRIGGER сразу за созданием силы и снимается в ход,
+        // когда таверна дорастает до нужного тира. Тега
+        // `LITERALLY_UNPLAYABLE` у такой силы нет ни разу.
+        heroPowerLocked: flag(e, 'LOCK_VISUAL'),
         // part13, «Мана в минуту» Хроми: HAS_ACTIVATE_POWER=1, тега COST нет.
         // Пассивные силы тега не имеют, и «нажать» их советовать нельзя.
         heroPowerHasActivate: flag(e, 'HAS_ACTIVATE_POWER'),
@@ -1039,9 +1047,11 @@ export function createReducer(players: Players): Reducer {
       .map((e) => ({
         entityId: e.id,
         cardId: e.cardId,
+        // Суффикс тега — не всегда имя племени снапшота: `QUILLBOAR`
+        // и `ELEMENTALS` расходятся с `QUILBOAR` и `ELEMENTAL` (part36).
         subsetRaces: [...e.tags.entries()]
           .filter(([tag, v]) => tag.startsWith('BACON_SUBSET_') && v > 0)
-          .map(([tag]) => tag.slice('BACON_SUBSET_'.length)),
+          .map(([tag]) => raceOfSubsetTag(tag.slice('BACON_SUBSET_'.length))),
         cost: e.tags.get('COST') ?? null,
       }));
 

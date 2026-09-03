@@ -1120,6 +1120,54 @@ option 4 type=POWER mainEntity=[… id=408 zonePos=1 cardId=BG35_814 player=11] 
 
 Потенциально это самый прямой способ узнать содержимое магазина и что сейчас доступно.
 
+## Замок «Unlocks at Tier N» на силе героя: LOCK_VISUAL (part37)
+
+Часть сил открывается не сразу: у Алекстразы «Королева драконов»
+`TB_BaconShop_HP_064` — «Discover a Dragon. *(Unlocks at Tier 4.)*»,
+у E.T.C. «Sign a New Artist» `BG25_HERO_105p` — «Discover a Buddy.
+*(Unlocks at Tier 2.)*».
+
+**По тегам доступности такая сила неотличима от обычной.** При создании
+(part37, 21:16:15) на ней стоят `HAS_ACTIVATE_POWER=1` и `COST=1`, а тега
+`LITERALLY_UNPLAYABLE` не приходит НИ РАЗУ за партию. Замок — свой тег:
+
+```
+FULL_ENTITY - Creating ID=151 CardID=TB_BaconShop_HP_064
+    tag=COST value=1
+    tag=HAS_ACTIVATE_POWER value=1
+BLOCK_START BlockType=TRIGGER Entity=151 …
+    TAG_CHANGE Entity=151 tag=LOCK_VISUAL value=1      ← 21:16:15, замок
+BLOCK_END
+…
+BLOCK_START BlockType=TRIGGER Entity=[… id=151 …] …
+    TAG_CHANGE Entity=151 tag=LOCK_VISUAL value=0      ← 21:21:26, тир 4
+```
+
+Триггер срабатывает на КАЖДОМ подъёме тира (21:17:53 — тир 2, 21:19:45 —
+тир 3, 21:21:26 — тир 4), но пустым блоком; тег меняется только на нужном
+тире, и в тот же миг, что `PLAYER_TECH_LEVEL value=4` (строки 34642
+и 34681 одного времени).
+
+**Тег общий для «кнопок под замком»**, а не только для сил: та же пара
+стоит на кнопке тёмного дара `BG36_Button_DarkGift` во всех фикстурах
+(замок при создании, снятие на пятом ходу партии — там же приходит
+`LOCK_VISUAL_STATE`). Видно и чужие силы: у сил соперников в `SETASIDE`
+замок стоит своей причины. У сил, доступных сразу, тега нет вовсе
+(part13, Хроми) — умолчание «замка нет» честное.
+
+**Причину замка называет `DebugPrintOptions`**, и это отдельный канал:
+
+```
+option 13 type=POWER mainEntity=[entityName=Королева драконов id=151 …]
+    error=REQ_MINIMUM_TAVERN_TIER_LEVEL_TO_PLAY errorParam=
+```
+
+За партию таких строк 15 (part37) и 3 (part12) — они и есть дешёвый
+маркер «в этой партии сила была под замком». В состояние читается всё-таки
+`LOCK_VISUAL`: канал опций тесты не разбирают, а тег приходит обычным
+`TAG_CHANGE` в основном канале и отвечает на нужный вопрос — жать нельзя,
+— не разбирая, почему.
+
 ## Шум, который надо игнорировать
 
 - `PowerProcessor.DoTaskListForCard() - unhandled BlockType PLAY for sourceEntity […]` —

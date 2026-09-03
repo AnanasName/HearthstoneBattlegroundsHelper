@@ -85,6 +85,7 @@ const hero = (health: number, damage = 0, armor = 0): Hero => ({
   heroPowerCost: null,
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
+  heroPowerLocked: false,
   heroPowerHasActivate: false,
   heroPowerScriptData: [],
 });
@@ -730,7 +731,8 @@ describe('правило обновления витрины', () => {
     // своего тира.
     const murlocs = [minion(1, { cardId: 'MURLOC_1' }), minion(2, { cardId: 'MURLOC_2' })];
     const goal = rerollRule(state({ gold: 0, shop, rerollCost: 0, board: murlocs }), deps);
-    expect(goal?.reason).toContain('искать под заморозку соплеменника (MURLOC тира 2');
+    expect(goal?.reason).toContain('искать под заморозку соплеменника MURLOC тира 2');
+    expect(goal?.searchGoal).toBe('соплеменника MURLOC тира 2');
 
     // В ход подъёма заморозка ради племени молчит (part11) — и цели нет.
     expect(
@@ -1035,6 +1037,22 @@ describe('правило силы героя', () => {
       hero: s.hero === null ? null : { ...s.hero, heroPowerUnplayable: true },
     };
     expect(heroPowerRule(locked, powerDeps)).toBeNull();
+  });
+
+  it('сила под замком «Unlocks at Tier N» не советуется (part37)', () => {
+    // Замок — тег LOCK_VISUAL, и он единственный признак: HAS_ACTIVATE_POWER
+    // и COST у такой силы стоят с первого хода, LITERALLY_UNPLAYABLE
+    // не приходит ни разу. Пока признака не было, «Королева драконов»
+    // Алекстразы («Discover a Dragon. (Unlocks at Tier 4.)») девять ходов
+    // подряд стояла верхней строкой и первым шагом плана.
+    const s = withPower('POWER_SPY');
+    const locked = {
+      ...s,
+      hero: s.hero === null ? null : { ...s.hero, heroPowerLocked: true },
+    };
+    expect(heroPowerRule(locked, powerDeps)).toBeNull();
+    // Замок снят — совет возвращается тем же самым.
+    expect(heroPowerRule(s, powerDeps)?.action).toBe('heroPower');
   });
 
   it('про силу вне «даёт миньона» совет не берётся судить', () => {
@@ -2809,6 +2827,10 @@ describe('бесплатная сила героя', () => {
     expect(
       freeHeroPowerRule(state({ hero: chromie({ heroPowerUnplayable: true }) }), chromieDeps),
     ).toBeNull();
+    // Замок по тиру (part37) — тот же запрет и та же общая проверка.
+    expect(
+      freeHeroPowerRule(state({ hero: chromie({ heroPowerLocked: true }) }), chromieDeps),
+    ).toBeNull();
   });
 
   it('бесплатная сила вне «обновить витрину» — по-прежнему не берёмся судить', () => {
@@ -2945,6 +2967,7 @@ describe('сила героя, дающая своему миньону ключ
     expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerUsedThisTurn: true }), board: b }), lichDeps)).toBeNull();
     expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerHasActivate: false }), board: b }), lichDeps)).toBeNull();
     expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerUnplayable: true }), board: b }), lichDeps)).toBeNull();
+    expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerLocked: true }), board: b }), lichDeps)).toBeNull();
     expect(heroPowerKeywordRule(state({ hero: lich(), board: [] }), lichDeps)).toBeNull();
     expect(heroPowerKeywordRule(state({ hero: lich({ heroPowerCardId: 'BODY' }), board: b }), lichDeps)).toBeNull();
   });
@@ -3041,6 +3064,11 @@ describe('сила героя, ВЫСТРЕЛИВАЮЩАЯ миньоном в�
     const s = state({ hero: tavish({ heroPowerCardId: 'SMALL' }), gold: 0, shop });
     expect(heroPowerShotRule(s, tavishDeps)).toBeNull();
   });
+
+  it('сила под замком не стреляет (part37)', () => {
+    const s = state({ hero: tavish({ heroPowerLocked: true }), gold: 0, shop });
+    expect(heroPowerShotRule(s, tavishDeps)).toBeNull();
+  });
 });
 
 describe('сила героя, дающая заклинание таверны (part15, Холли\'дэй)', () => {
@@ -3080,6 +3108,9 @@ describe('сила героя, дающая заклинание таверны 
     ).toBeNull();
     expect(
       heroPowerSpellRule(state({ hero: holli({ heroPowerUnplayable: true }), gold: 1 }), holliDeps),
+    ).toBeNull();
+    expect(
+      heroPowerSpellRule(state({ hero: holli({ heroPowerLocked: true }), gold: 1 }), holliDeps),
     ).toBeNull();
     expect(heroPowerSpellRule(state({ hero: holli(), gold: 0 }), holliDeps)).toBeNull();
     expect(

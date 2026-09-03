@@ -273,6 +273,8 @@ describe('part27: заморозка после покупки, цель про�
     };
 
     const reroll = rerollRule(roomy, { cards });
-    expect(reroll?.reason).toContain('искать под заморозку соплеменника (PIRATE тира 5');
+    expect(reroll?.reason).toContain('искать под заморозку соплеменника PIRATE тира 5');
+    // Та же цель — в СТРОКЕ действия: причину оверлей не показывает (part37).
+    expect(reroll?.searchGoal).toBe('соплеменника PIRATE тира 5');
   });
 });

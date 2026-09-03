@@ -144,8 +144,9 @@ function upgradeActions(list: readonly LegacyAction[]): PlayerAction[] {
   return list.map((a) => ({ subOption: null, ...a }));
 }
 
-/** Герой старой записи: поле part34 в нём может отсутствовать. */
-type LegacyHero = Omit<Hero, 'heroPowerScriptData'> & Partial<Pick<Hero, 'heroPowerScriptData'>>;
+/** Герой старой записи: поля part34 и part37 в нём могут отсутствовать. */
+type LegacyHero = Omit<Hero, 'heroPowerScriptData' | 'heroPowerLocked'> &
+  Partial<Pick<Hero, 'heroPowerScriptData' | 'heroPowerLocked'>>;
 
 /** Миньон старой записи: живой цены покупки (part35) в нём может не быть. */
 type LegacyMinion = Omit<Minion, 'buyCost'> & Partial<Pick<Minion, 'buyCost'>>;
@@ -160,8 +161,12 @@ function upgradeMinions(list: readonly LegacyMinion[]): Minion[] {
 
 function upgradeState(state: GameState): GameState {
   const legacyHero: LegacyHero | null = state.hero;
+  // Умолчание замка — `false`, «сила не под замком»: тег `LOCK_VISUAL`
+  // редьюсер до part37 не читал вовсе, и записать он мог бы только это.
+  // Ошибиться умолчание может лишь в сторону прежнего поведения — того,
+  // с которым записи и собирались.
   const hero: Hero | null =
-    legacyHero === null ? null : { heroPowerScriptData: [], ...legacyHero };
+    legacyHero === null ? null : { heroPowerScriptData: [], heroPowerLocked: false, ...legacyHero };
   return {
     ...EMPTY_STATE,
     ...state,

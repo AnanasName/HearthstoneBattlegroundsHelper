@@ -106,6 +106,35 @@ export interface Minion {
   readonly buyCost: number | null;
 }
 
+/**
+ * Как ЛОГ называет племя в теге `BACON_SUBSET_<X>` — против того, как то же
+ * племя называет снапшот в поле `races`.
+ *
+ * Восемь имён из десяти совпадают (BEAST, DEMON, DRAGON, MECH, MURLOC,
+ * NAGA, PIRATE, UNDEAD), и потому расхождение остальных двух прожило
+ * от part9 до part36 незамеченным: игра пишет `QUILLBOAR` с двумя «l»
+ * и `ELEMENTALS` во множественном числе, а снапшот знает `QUILBOAR`
+ * и `ELEMENTAL`. Сравнение с бордом молча не совпадало никогда —
+ * не падение, а «своих таких нет» при пяти своих на столе (жалоба игрока
+ * по part36, ход 17: тринкет `BG36_MagicItem_214` с тегами
+ * `BACON_SUBSET_DRAGON` и `BACON_SUBSET_QUILLBOAR` при пяти квилбоарах).
+ *
+ * Таблица, а не «привести к единственному числу»: `UNDEAD` уже без «s»,
+ * а `MECH` короче любого правила словообразования. Незнакомое имя
+ * проходит как есть — новое племя патча лучше показать сырым тегом,
+ * чем потерять; ловится это тестом part36, который сверяет КАЖДЫЙ тег
+ * партии со списком племён снапшота.
+ */
+export const SUBSET_TAG_RACES: Readonly<Record<string, string>> = {
+  QUILLBOAR: 'QUILBOAR',
+  ELEMENTALS: 'ELEMENTAL',
+};
+
+/** Племя снапшота по имени из тега `BACON_SUBSET_<X>`. */
+export function raceOfSubsetTag(tag: string): string {
+  return SUBSET_TAG_RACES[tag] ?? tag;
+}
+
 /** Один вариант из открытого предложения тринкетов. */
 export interface TrinketOffer {
   readonly entityId: number;
@@ -115,8 +144,12 @@ export interface TrinketOffer {
    *
    * Надёжнее текста: у «Разноцветного компаса» племя стоит в тексте
    * плейсхолдером `{0}`, а тег `BACON_SUBSET_DRAGON=1` называет его прямо
-   * (part12). Имена совпадают со строками `races` снапшота — включая
-   * `MECH`, а не `MECHANICAL` (part9, Scraper Sticker).
+   * (part12).
+   *
+   * Хранятся именами ПЛЕМЁН СНАПШОТА, а не суффиксами тегов: словари
+   * расходятся на `QUILLBOAR` и `ELEMENTALS`, и приводит их редьюсер —
+   * `raceOfSubsetTag` (part36). Читателям, сравнивающим племя с бордом,
+   * знать про имена тегов незачем.
    */
   readonly subsetRaces: readonly string[];
   /**
@@ -247,6 +280,31 @@ export interface Hero {
   readonly heroPowerUsedThisTurn: boolean;
   /** Тег `LITERALLY_UNPLAYABLE`: сила есть, но жать её сейчас нельзя. */
   readonly heroPowerUnplayable: boolean;
+  /**
+   * Замок на силе — тег `LOCK_VISUAL` на её сущности.
+   *
+   * Часть сил открывается не сразу: у Алекстразы «Queen of Dragons»
+   * (`TB_BaconShop_HP_064`) в тексте прямо сказано «Discover a Dragon.
+   * *(Unlocks at Tier 4.)*», и до четвёртого тира игра её не даёт нажать.
+   * `HAS_ACTIVATE_POWER=1` и `COST=1` у неё стоят с первого хода,
+   * `LITERALLY_UNPLAYABLE` не приходит НИ РАЗУ — по этим трём тегам сила
+   * неотличима от доступной, и советник девять ходов подряд ставил её
+   * верхней строкой и вписывал в план хода (part37, жалоба игрока).
+   *
+   * Фактура part37: `LOCK_VISUAL=1` приходит блоком TRIGGER сразу
+   * за созданием силы (21:16:15), и ровно на подъёме до тира 4
+   * (21:21:26) тем же блоком приходит `LOCK_VISUAL=0`. Тег общий для
+   * «кнопок под замком»: та же пара стоит на кнопке тёмного дара
+   * (`BG36_Button_DarkGift`) во всех фикстурах и снимается на пятом ходу
+   * партии. У сил, доступных сразу, тега нет вовсе (part13, Хроми) —
+   * поэтому умолчание `false` честное.
+   *
+   * Причину замка тег не называет, и это к лучшему: в логе она приходит
+   * своим каналом (`DebugPrintOptions`, `error=
+   * REQ_MINIMUM_TAVERN_TIER_LEVEL_TO_PLAY`), но чинить надо не причину,
+   * а факт — жать нельзя.
+   */
+  readonly heroPowerLocked: boolean;
   /**
    * Активная ли сила — тег `HAS_ACTIVATE_POWER` на её сущности.
    *

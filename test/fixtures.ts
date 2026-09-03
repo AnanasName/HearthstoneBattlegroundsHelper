@@ -559,3 +559,63 @@ export function part35Segment(n: 1 | 2): string {
 export function fixtureBytes(part: 'part2' | 'part3'): Buffer {
   return readFileSync(join(FIXTURES_DIR, part, 'game.log'));
 }
+
+/**
+ * part36 — двадцать восьмая партия с оверлеем (03.09.2026, 00:25–00:53,
+ * Заплатка `TB_BaconShop_HERO_34`, квилбоары, **5-е место**), десятая
+ * на билде 250339. Три пункта игрока, все три — по скриншотам:
+ *
+ *  1. ход 7 (00:28:33–00:29:50, точка решения: тир 2, золото 6/6, hp 57,
+ *     борд Tusked Camper 2/3 · Sellemental 3/3 · Risen Rider 2/1): план
+ *     «ПОДНЯТЬ ТАВЕРНУ за 5 → КУПИТЬ Alliance Flag → Allied Buckler +1/+3
+ *     за 1 → **на Sellemental 3/3**». Игрок: «предлагает навесить
+ *     заклинание на существо, которое будет продано с большой долей
+ *     вероятности». Он и продал: 00:29:13 `SubOption=1` (Allied Buckler)
+ *     ушёл `Target=Клыкастый походник` (Tusked Camper), а Sellemental
+ *     продан на ходу 11;
+ *  2. ход 13 ПОСРЕДИ хода (00:33:56 подъём на тир 5 за 9 → золото 2/11,
+ *     hp 46, борд из семи, витрина Fearless Foodie 2/4 · Wrath Weaver 1/3
+ *     · Decoy Conjurer 3/4 · Fire Baller 4/3 · Roadboar 2/4 по три):
+ *     оверлей «ОБНОВИТЬ за 1» и «НИЧЕГО». Игрок: «вместо продажи слабого
+ *     существа и покупки более сильного советует обновить таверну». Что
+ *     он и сделал: 00:34:15 продал Water Droplet, 00:34:16 купил
+ *     Fearless Foodie;
+ *  3. ход 17 (предложение тринкетов, тир 5, золото 12, пять квилбоаров
+ *     на борду): «Insurrectionist's Blade» `BG36_MagicItem_214` с тегами
+ *     `BACON_SUBSET_DRAGON` и `BACON_SUBSET_QUILLBOAR` получил «для
+ *     племени DRAGON/QUILLBOAR, а своих таких нет». Игрок: «программа
+ *     решила, что она не подходит под мой стол с свинообразами».
+ */
+export function part36Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part36', 'game.log'), 'utf8');
+}
+
+/**
+ * part37 — двадцать девятая партия с оверлеем (03.09.2026, 21:16–21:41,
+ * Алекстраза `TB_BaconShop_HERO_56`, драконы, **2-е место**), одиннадцатая
+ * на билде 250339. Три пункта игрока, все три — по скриншотам:
+ *
+ *  1. ходы 1–9 (точка решения хода 1: тир 1, золото 3/3, hp 30+8, витрина
+ *     Suspicious Prisonguard 3/3 · Flittering Bat 1/4 · Tusked Camper 2/3):
+ *     верхний совет «СИЛА ГЕРОЯ Queen of Dragons за 1». Игрок: «предлагает
+ *     нажать силу героя, которая открывается только на 4 ходу» — на 4-м
+ *     ТИРЕ, и до него сила под замком `LOCK_VISUAL`, снятым 21:21:26
+ *     ровно на подъёме;
+ *  2. ход 9 ПОСЛЕ подъёма на тир 4 за 7 (золото 0/7, hp 30+1, борд
+ *     Flittering Bat 1/4 · Mama Mrrglton 4/2 · River Skipper 4/1 · Very
+ *     Hungry Winterfinner 2/6, витрина Sly Infiltrator 4/5 · Treasure
+ *     Parrot 5/5 · Handless Forsaken 2/1 · Glim Guardian 1/4 по три,
+ *     заклинание Chef's Choice за 2): «ЗАМОРОЗИТЬ Chef's Choice»,
+ *     «НИЧЕГО». Игрок: «почему предлагает заморозить заклинание? это точно
+ *     разумный ход?»;
+ *  3. ход 21 ПОСЛЕ подъёма на тир 5 за 5 (золото 0/10, hp 4, борд из семи
+ *     от 27/35 до 114/92, витрина Amber Guardian 25/32 (провок) · Harmless
+ *     Bonehead 23/31 · Tarecgosa 26/34 · Sly Infiltrator 26/35,
+ *     обновление бесплатно): «ОБНОВИТЬ», «НИЧЕГО». Игрок: «предлагает
+ *     обновить таверну, хотя я всё равно ничего не смогу купить, так как
+ *     у меня не так много золота». Цель у обновления была — третья копия
+ *     Hired Mount, — но жила в `reason`, которого оверлей не показывает.
+ */
+export function part37Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part37', 'game.log'), 'utf8');
+}

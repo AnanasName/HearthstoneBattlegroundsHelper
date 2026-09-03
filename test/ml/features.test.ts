@@ -22,6 +22,7 @@ const HERO: Hero = {
   heroPowerCost: null,
   heroPowerUsedThisTurn: false,
   heroPowerUnplayable: false,
+  heroPowerLocked: false,
   heroPowerHasActivate: false,
   heroPowerScriptData: [],
 };
