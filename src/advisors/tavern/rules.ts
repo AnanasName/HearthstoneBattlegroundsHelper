@@ -224,6 +224,28 @@ export interface TavernRules {
   readonly battlecryGetWords: readonly string[];
 
   /**
+   * Сколько карт обещает генератор — число сразу за глаголом добычи.
+   * Группа шаблона — счёт, СЛОВОМ или ЦИФРОЙ.
+   *
+   * Отдельным шаблоном, а не поиском числа по всему тексту, и это не вкус
+   * (part38, ход 5). Счёт искался только словом («two»/«three»/«four»),
+   * потому что таким его пишет Oozeling Gladiator, на котором правило
+   * прокрутки и родилось. Razorfen Geomancer `BG20_100` пишет ту же вещь
+   * цифрой — «Battlecry: Get 2 Blood Gems», — счёт падал на умолчание 1,
+   * и собственная ценность прокрутки выходила РОВНО ноль
+   * (1 × `heroPowerSpellValue` − 2 × `goldPointValue`), гаснув об условие
+   * `base <= 0`: целое правило молчало из-за одной цифры, и молчало тихо.
+   *
+   * Привязка к глаголу обязательна. Свободный поиск цифры прочитал бы
+   * «Get a random Tier 6 minion» (Highkeeper Ra) как ШЕСТЬ карт, а «Get
+   * a random Golden minion from Tier {0}» (Silent Deliverer) — как счёт
+   * из плейсхолдера. По пулу счёт назван у двоих из 22 генераторов:
+   * словом у Oozeling, цифрой у Razorfen; у остальных числа в тексте есть,
+   * но говорят они не о количестве карт.
+   */
+  readonly battlecryGetCountWords: readonly string[];
+
+  /**
    * Сколько добавляет каждая уже имеющаяся копия карты.
    *
    * Индекс — «сколько копий уже есть», но читается он не сам по себе,
@@ -1085,6 +1107,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // «Battlecry: Get two Slimy Shields…» (Oozeling, part16). Строго после
   // «Battlecry:» в том же предложении: триггеры и хрипы сюда не попадают.
   battlecryGetWords: ['battlecry:?[^.]*\\b(?:get|discover|add)s?\\b'],
+
+  // «Get two Slimy Shields…» (Oozeling) и «Get 2 Blood Gems» (Razorfen
+  // Geomancer, part38) — одно и то же обещание, записанное по-разному.
+  battlecryGetCountWords: ['\\b(?:get|discover|add)s?\\s+(\\d+|two|three|four)\\b'],
 
   // 0 копий — ничего, 1 копия — заметно, 2 копии — тройка, и это решает.
   copiesBonus: [0, 3, 12],

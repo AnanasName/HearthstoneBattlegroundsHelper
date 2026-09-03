@@ -2162,6 +2162,21 @@ export function spinRule(
   const bestBuy = bestBuyExcept(null);
   const numbers: Readonly<Record<string, number>> = { two: 2, three: 3, four: 4 };
 
+  /**
+   * Сколько карт обещает клич. Счёт написан либо словом, либо цифрой,
+   * и оба чтения обязательны: пропущенная цифра роняет счёт на единицу,
+   * а с ним и всё правило (part38 — см. `battlecryGetCountWords`).
+   */
+  const promisedCards = (text: string): number => {
+    for (const word of rules.battlecryGetCountWords) {
+      const raw = new RegExp(word, 'i').exec(text)?.[1]?.toLowerCase();
+      if (raw === undefined) continue;
+      const count = numbers[raw] ?? Number(raw);
+      if (Number.isFinite(count) && count > 0) return count;
+    }
+    return 1;
+  };
+
   // `base` — собственная ценность прокрутки, `score` — она же после бампа
   // порядка. Отбор кандидата идёт по BASE, и это не мелочь: бамп отвечает
   // на вопрос «идти ли прокрутке впереди лучшей покупки», а не «какая
@@ -2192,8 +2207,7 @@ export function spinRule(
     let base: number;
     let note: string;
     if (kind === 'battlecry') {
-      const countWord = /\b(two|three|four)\b/i.exec(text);
-      const count = countWord?.[1] === undefined ? 1 : (numbers[countWord[1].toLowerCase()] ?? 1);
+      const count = promisedCards(text);
       base = count * rules.heroPowerSpellValue - net * rules.goldPointValue;
       note = `клич даст ${String(count)} карт.`;
     } else {
