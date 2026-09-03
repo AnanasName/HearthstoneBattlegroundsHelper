@@ -619,3 +619,39 @@ export function part36Game(): string {
 export function part37Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part37', 'game.log'), 'utf8');
 }
+
+/**
+ * part38 — тридцатая партия с оверлеем (04.09.2026, 00:20:06 CREATE_GAME …
+ * 00:40, Генн Седогрив `BG35_HERO_001` с силой «Reliquary Research»
+ * `BG28_HERO_800p`, 3-е место), двенадцатая на билде 250339.
+ * Лог — Power.log каталога клиента как есть, одним файлом: перезапусков
+ * не было, режим `GameType=GT_BATTLEGROUNDS` (у игрока в тот вечер шли
+ * и рейтинговые партии — эта не из них).
+ *
+ * Два пункта игрока по двум скриншотам.
+ *
+ *  1. ход 5 (третий ход таверны; золото 5/5, hp 30+7, тир 2, подъём 6,
+ *     борд Glim Guardian 1/4, витрина Razorfen Geomancer 2/1 · Metallic
+ *     Hunter 4/2 · Surfing Sylvar 1/2 · Cord Puller 1/1 (щит) по три,
+ *     заклинание Leaf Through the Pages за 1). Оверлей: «ПЛАН ХОДА:
+ *     КУПИТЬ Metallic Hunter 4/2 за 3 → КУПИТЬ Leaf Through the Pages
+ *     за 1; остаётся 1 — сгорит». Игрок: «первый предложенный ход выглядит
+ *     странным. Кажется, что лучше было купить свинобраза, продать его
+ *     и купить ещё одно существо, как я и сделал» — и журнал партии
+ *     подтверждает дословно: `buy BG20_100 → play BG20_100 → sell BG20_100
+ *     → buy BG32_170 → play BG32_170 → play BG20_GEM → play BG20_GEM`.
+ *     Это ПРОКРУТКА (`spinRule`, part16), и она молчала: счёт обещанных
+ *     карт читался только СЛОВОМ («two/three/four»), а снапшот пишет
+ *     цифру — «Battlecry: Get 2 Blood Gems».
+ *
+ *  2. ход 21 (золото 0/10, hp 17, тир 5, борд полон, обновление
+ *     бесплатно, витрина Drone Duplicator 5/2 (щит) · Scarlet Survivor 3/3
+ *     · Mechagnome Investor 3/1 · Cursed Chaperone 22/25). Оверлей:
+ *     «ОБНОВИТЬ — ищем третью копию Hired Mount», «НИЧЕГО». Игрок: «снова
+ *     предлагает обновить без золота». Дефекта тут не нашлось, и партия
+ *     это подтвердила числами: на ходу 23 игрок сам прокрутил витрину,
+ *     купил третью копию `BG36_240` и собрал золотого Hired Mount 313/197.
+ */
+export function part38Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part38', 'game.log'), 'utf8');
+}
