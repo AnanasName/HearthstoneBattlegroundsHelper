@@ -518,6 +518,32 @@ export interface TavernRules {
    */
   readonly heroPowerSpellWords: readonly string[];
   /**
+   * Признак «сила даёт ЗОЛОТО броском кубика» — и число ГРАНЕЙ группой
+   * шаблона.
+   *
+   * Случай part39 (Змеиный Глаз `BG28_HERO_400`, «Удачный бросок»
+   * `BG28_HERO_400p` за 1: «Roll a 6-sided die. Gain that much Gold.
+   * *(Cannot be used again for that many turns!)*»). Советник не предлагал
+   * её НИ РАЗУ за партию, хотя игрок нажимал её всякий раз, как она
+   * открывалась, — и был прав: чистыми она даёт (6+1)/2 − 1 = 2.5 золота.
+   *
+   * Число граней читается ИЗ ТЕКСТА группой, а не подставляется константой:
+   * ожидание `(N+1)/2` — арифметика названного кубика, а не подобранный
+   * коэффициент (тот же приём, что счёт карт в part38 и число покупок
+   * в part34). Шаблон привязан к ГЛАГОЛУ броска: свободный поиск слова
+   * «Gold» прочитал бы «Minions and Refreshes cost 2 Gold» (Манашторм)
+   * как прибыток.
+   *
+   * Плоская форма «Gain N Gold» СЮДА НЕ ВНЕСЕНА намеренно. В пуле у неё
+   * ровно один кандидат — Piggy Bank `TB_BaconShop_HP_076`, — и у него
+   * сумма РАСТЁТ («Increases by 1 each turn»); живого числа мы не видели
+   * ни разу (во всех партиях, где карта встречается, она чужая), а класс
+   * «сила платит за ДЕЙСТВИЕ» («After you…») плоский шаблон проглотил бы
+   * целиком. Немой до своей фикстуры — тот же порядок, что у
+   * `heroPowerBuyRewardWords`.
+   */
+  readonly heroPowerGoldWords: readonly string[];
+  /**
    * Текст миньона, ВОЗВРАЩАЮЩЕГО здоровье героя, — «After your hero takes
    * damage, rewind it».
    *
@@ -1185,6 +1211,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   freeHeroPowerValue: 2,
 
   heroPowerSpellWords: ['(?:get|add)[^.]*tavern spell'],
+  // «Roll a 6-sided die.\nGain that much Gold.» — грани группой, между
+  // предложениями `\s+`: перенос строки ходит посреди фразы (урок part16).
+  heroPowerGoldWords: ['\\broll\\s+an?\\s+(\\d+)-sided\\s+die\\.?\\s*gain\\s+that\\s+much\\s+gold'],
   // Перенос строки в снапшоте ходит посреди предложения — пробел пишется
   // как `\s+`, иначе шаблон молча не совпадает (урок part16).
   healthRewindWords: ['after your hero takes damage,\\s*rewind it'],

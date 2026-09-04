@@ -4051,6 +4051,99 @@ export function heroPowerSpellRule(
 }
 
 /**
+ * Правило силы героя, ДАЮЩЕЙ ЗОЛОТО.
+ *
+ * Случай part39 (Змеиный Глаз, «Удачный бросок» `BG28_HERO_400p` за 1:
+ * «Roll a 6-sided die. Gain that much Gold»). Советник молчал про неё все
+ * десять точек решения партии, хотя игрок нажимал её всякий раз, как она
+ * открывалась, — и жалоба игрока по скриншоту хода 13 была ровно об этом.
+ * Дыра ЧИСТО ТЕКСТОВАЯ: пять прежних правил силы читают «даёт миньона»,
+ * «обновляет витрину», «даёт заклинание таверны», «дарит слово»
+ * и «выстреливает миньона», а разбор золота у заклинаний требует ЦИФРУ
+ * («gain \d+ gold») и «that much» не видит — тот же класс, что счёт словом
+ * против цифры в part38.
+ *
+ * КУЛДАУН СЛЕПОТОЙ НЕ ЯВЛЯЕТСЯ, и нового канала для него не нужно.
+ * У этой силы кулдаун равен выпавшему числу («Cannot be used again for that
+ * many turns»), и на перезарядке игра подменяет сущность силы: вместо
+ * `BG28_HERO_400p` (COST=1, HAS_ACTIVATE_POWER=1) стоит `BG28_HERO_400p2`
+ * с `LOCK_VISUAL=1`, без цены и без активности, а остаток ходов живёт
+ * в `TAG_SCRIPT_DATA_NUM_1` (5→4→3→2→1→0 по ходам таверны). Все три
+ * признака уже читаются: `heroPowerHasActivate` (part13) и `heroPowerReady`
+ * с замком `LOCK_VISUAL` (part37). Замерено на part39: сила по-настоящему
+ * доступна ровно в двух точках решения из десяти — ходы 11 и 13, — и обе
+ * это те, где игрок её нажал.
+ *
+ * ДВА ЧИСЛА ДЛЯ ДВУХ ВОПРОСОВ. В СПИСОК идёт ОЖИДАНИЕ: `(N+1)/2` золота
+ * по числу граней из текста, минус цена, по курсу `goldPointValue`.
+ * В ПЛАН идёт НИЖНЯЯ ГРАНЬ (`grantsGold: 1`), и это не осторожность,
+ * а факт: цепочку нельзя строить на 3.5 золота — суммы, которой у игрока
+ * не бывает никогда, — иначе вернётся симптом part24 «откроется покупка X»,
+ * а покупка не открывается. При цене 1 и поле 1 остаток не меняется,
+ * и план не обещает ничего, чего не гарантирует худший бросок.
+ *
+ * Оценка НИЖНЯЯ ещё и по курсу: `goldPointValue` выведен из «покупка за 3
+ * даёт миньона на ~9 очков», а на ходу 13 part39 верхняя покупка стоила
+ * 20.5 за три золота. Двигать курс под этот случай нельзя — он держит
+ * десяток мест и требует замера с предрегистрацией.
+ *
+ * Цены спешки по образцу тёмного дара (part31) здесь нет НАМЕРЕННО:
+ * у дара заряды конечны и предложение растёт по ходам, поэтому раннее
+ * нажатие вытесняет позднее. Тут ресурс — ходы, кулдаун РАВЕН броску,
+ * и скорость выходит одна и та же при любой грани: приберегать нечего,
+ * а ненажатая готовая сила просто теряет готовые ходы.
+ */
+export function heroPowerGoldRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if (!heroPowerReady(hero)) return null;
+
+  const cost = hero.heroPowerCost ?? 0;
+  if (cost > state.gold) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  let sides: number | null = null;
+  for (const word of rules.heroPowerGoldWords) {
+    const raw = new RegExp(word, 'i').exec(text)?.[1];
+    if (raw === undefined) continue;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      sides = parsed;
+      break;
+    }
+  }
+  if (sides === null) return null;
+
+  const expected = (sides + 1) / 2;
+  const score = (expected - cost) * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  const name = info?.name ?? hero.heroPowerCardId;
+  const net = expected - cost;
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    // В план идёт ХУДШИЙ бросок, а не среднее: см. «два числа» выше.
+    grantsGold: 1,
+    reason:
+      `${name}${cost > 0 ? ` за ${String(cost)}` : ''} — кубик 1–${String(sides)}, ` +
+      `в среднем ${expected.toFixed(1)} золота (чистыми ${net.toFixed(1)}); ` +
+      'после броска сила молчит столько ходов таверны, сколько выпало — ' +
+      'жать, пока открыта',
+  };
+}
+
+/**
  * Сколько статов принесёт «поглощение витрины» — или `null`, если текст
  * не про это.
  *
@@ -6511,6 +6604,7 @@ export function adviseTavern(
     freeHeroPowerRule(state, deps, rules),
     heroPowerKeywordRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),
+    heroPowerGoldRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),
     ...activationRules(state, deps, rules),
     darkGiftRule(state, deps, rules),

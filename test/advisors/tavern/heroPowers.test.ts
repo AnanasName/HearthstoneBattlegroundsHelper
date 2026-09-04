@@ -76,6 +76,7 @@ describe('покрытие сил героя правилами советник
     if (matches(id, R.heroPowerPlayStatsWords)) on.push('play');
     if (matches(id, R.heroPowerKeywordWords)) on.push('keyword');
     if (matches(id, R.heroPowerBuyRewardWords)) on.push('buy');
+    if (matches(id, R.heroPowerGoldWords)) on.push('gold');
     return on;
   };
 
@@ -107,11 +108,23 @@ describe('покрытие сил героя правилами советник
     // «After you buy 3 minions, get a Tavern Coin» (Verdant Spheres)
     // и «After you buy 12 cards, get Sulfuras» (BUY, INSECT!) он не ловит.
     expect(count('buy')).toBe(1);
+    // «Roll a 6-sided die. Gain that much Gold» — «Удачный бросок» Змеиного
+    // Глаза (part39), обе версии карты: `BG28_HERO_400p` (нажимаемая,
+    // COST=1) и `BG28_HERO_400p2` (та же сила на перезарядке, с живым
+    // остатком ходов в тексте). Золото упоминают 17 сил пула, но шаблон
+    // привязан к ГЛАГОЛУ броска и потому не ловит ни модификаторы цены
+    // («Minions and Refreshes cost 2 Gold»), ни предел («Increase your
+    // maximum Gold by 1»), ни класс «платит за ДЕЙСТВИЕ» («After you sell
+    // a minion, gain 1 Gold next turn»). Плоская форма «Gain 2 Gold»
+    // (Piggy Bank `TB_BaconShop_HP_076`) остаётся немой намеренно: сумма
+    // у неё РАСТЁТ («Increases by 1 each turn»), а живого числа мы
+    // не видели ни разу — карта во всех партиях чужая.
+    expect(count('gold')).toBe(2);
   });
 
-  it('из 174 сил пула советник не берёт ничего у 121', () => {
+  it('из 174 сил пула советник не берёт ничего у 119', () => {
     const mute = pool.filter((id) => channelsOf(id).length === 0);
-    expect(mute).toHaveLength(121);
+    expect(mute).toHaveLength(119);
 
     // Число большое, и прятать его незачем: сила героя определяет стиль
     // партии, а мы читаем меньше трети пула. Что из этого стоит вносить —
