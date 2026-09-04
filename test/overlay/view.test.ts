@@ -7,9 +7,11 @@ import type {
   TavernAdvice,
   ValueBreakdown,
 } from '../../src/advisors/tavern/advisor.js';
+import type { SpendPlan, SpendStep } from '../../src/advisors/tavern/spend.js';
 import { buildView, type ViewInput } from '../../src/overlay/view.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { EMPTY_STATE, type GameState } from '../../src/state/types.js';
+import { recommendationLine } from '../../src/ui/format.js';
 import { board, minion } from '../minions.js';
 
 /**
@@ -50,7 +52,11 @@ const state: GameState = {
 
 const tavern: TavernAdvice = {
   gold: 7,
-  targetTier: 4,
+  // На `turn: 9` кривая даёт РОВНО ТРИ: ход таверны здесь пятый, а тир 4
+  // таблица обещает с седьмого. Пока поля не читал никто, четвёрка была
+  // безвредна; блок темпа рисует её на экране, и фикстура утверждала бы
+  // отставание на тир, которого нет.
+  targetTier: 3,
   shopValues: [],
   trinkets: [],
   choice: [],
@@ -158,6 +164,27 @@ const input = (patch: Partial<ViewInput> = {}): ViewInput => ({
   ...patch,
 });
 
+/** Шаг плана: совет плюс золото до и после него. */
+function step(recommendation: Recommendation, goldBefore: number, goldAfter: number): SpendStep {
+  return {
+    recommendation,
+    goldBefore,
+    goldAfter,
+    opaque: false,
+    stateAfter: { ...state, gold: goldAfter },
+  };
+}
+
+/** План из двух шагов, тратящий всё золото; варианты — заплаткой. */
+function plan(patch: Partial<SpendPlan> = {}): SpendPlan {
+  return {
+    steps: [step(tavern.recommendations[0]!, 7, 4), step(tavern.recommendations[1]!, 4, 0)],
+    goldLeft: 0,
+    truncated: false,
+    ...patch,
+  };
+}
+
 describe('вид оверлея', () => {
   let cards: CardIndex;
 
@@ -186,42 +213,380 @@ describe('вид оверлея', () => {
     expect(view.actions[0]?.tone).toBe('good');
   });
 
-  it('план трат — первой строкой, советы остаются ниже', () => {
-    // Ход состоит из нескольких действий, и верхняя строка обязана описывать
-    // весь ход: иначе игрок читает «купить X» и оставляет золото гореть.
-    const after = (gold: number): GameState => ({ ...state, gold });
-    const plan = {
+  it('план трат — своим блоком; в списке советов место одно, как и было', () => {
+    // Ход состоит из нескольких действий, и описывать его целиком по-прежнему
+    // обязано то, что стоит выше советов. Изменилась ФОРМА этого решения,
+    // а не оно само: вместо одной плотной строки — блок по шагу в строку,
+    // где виден остаток золота после каждого шага. Место в списке план
+    // занимает прежнее — ровно одно: первый шаг почти всегда и есть верхний
+    // совет, и третья строка была бы платой за повтор.
+    const view = buildView(input({ spendPlan: plan() }), cards);
+
+    expect(view.plan?.gold).toBe(7);
+    expect(view.plan?.steps).toHaveLength(2);
+    expect(view.plan?.steps[0]?.no).toBe(1);
+    // Текст шага — тот же форматтер, что у совета: второе определение того,
+    // как назвать жертву и цель, разъехалось бы с первым молча.
+    expect(view.plan?.steps[0]?.text).toBe(
+      recommendationLine(tavern.recommendations[0]!, cards),
+    );
+    expect(view.plan?.steps[0]?.goldAfter).toBe(4);
+    // Потрачено всё — говорить не о чем.
+    expect(view.plan?.tail).toBeNull();
+    expect(view.plan?.restVerbs).toHaveLength(0);
+    expect(view.plan?.goldCaption).toBe('остаток');
+
+    expect(view.actions).toHaveLength(2);
+    expect(view.actions[0]?.text).toContain('КУПИТЬ');
+    // Зелёный акцент отдан блоку: два зелёных объекта на экране спорили бы
+    // за то, с чего начинать читать.
+    expect(view.actions[0]?.tone).toBe('normal');
+
+    // План из одного шага блоком не рисуется — это и есть верхняя строка.
+    const one = buildView(
+      input({ spendPlan: plan({ steps: [plan().steps[0]!] }) }),
+      cards,
+    );
+    expect(one.plan).toBeNull();
+    expect(one.actions[0]?.tone).toBe('good');
+  });
+
+  it('сгорающий остаток назван словами и помечен на последнем шаге', () => {
+    const burning = plan({
+      steps: [step(tavern.recommendations[0]!, 7, 4), step(tavern.recommendations[1]!, 4, 2)],
+      goldLeft: 2,
+    });
+    const view = buildView(input({ spendPlan: burning }), cards);
+
+    expect(view.plan?.tail?.text).toContain('остаётся 2 — сгорит');
+    expect(view.plan?.tail?.tone).toBe('warn');
+    expect(view.plan?.steps[1]?.goldTone).toBe('warn');
+    // Помечен только последний: остальные остатки по дороге не сгорают.
+    expect(view.plan?.steps[0]?.goldTone).toBe('muted');
+  });
+
+  it('оборванный план называет и обрыв, и остаток, но не обещает сгорания', () => {
+    // Витрина после обновления будет другая, и остаток потратит уже она —
+    // утверждать сгорание нельзя. Молчать о нём тоже нельзя: он посчитан.
+    const cut = plan({ goldLeft: 3, truncated: true });
+    const view = buildView(input({ spendPlan: cut }), cards);
+
+    expect(view.plan?.tail?.text).toContain('дальше по новой витрине');
+    expect(view.plan?.tail?.text).toContain('остаётся 3');
+    expect(view.plan?.tail?.text).not.toContain('сгорит');
+    expect(view.plan?.tail?.tone).toBe('muted');
+    expect(view.plan?.steps[1]?.goldTone).toBe('muted');
+  });
+
+  it('шаги сверх предела блока не пропадают: остаются глаголами', () => {
+    const many = plan({
       steps: [
+        step(tavern.recommendations[0]!, 12, 9),
+        step(tavern.recommendations[0]!, 9, 6),
+        step(tavern.recommendations[0]!, 6, 5),
+        step(tavern.recommendations[0]!, 5, 4),
+        step(tavern.recommendations[0]!, 4, 3),
+        step(tavern.recommendations[1]!, 3, 2),
+        step(tavern.recommendations[2]!, 2, 0),
+      ],
+    });
+    const view = buildView(input({ spendPlan: many }), cards);
+
+    expect(view.plan?.steps).toHaveLength(5);
+    expect(view.plan?.restVerbs).toEqual(['ПОДНЯТЬ ТАВЕРНУ', 'ОБНОВИТЬ']);
+  });
+
+  it('остаток при силе героя, дающей золото броском, подписан нижней гранью', () => {
+    // В план такая сила кладёт худший бросок (part39), а очки считает
+    // по среднему: столбик после неё — минимум, и подпись обязана это сказать,
+    // иначе игрок сверит с игрой и решит, что советник врёт.
+    const die: Recommendation = {
+      action: 'heroPower',
+      minion: null,
+      score: 7.5,
+      cost: 1,
+      requiresSlot: false,
+      sellFirst: null,
+      grantsGold: 1,
+      reason: 'бросок кубика на 6 граней',
+    };
+    const view = buildView(
+      input({ spendPlan: plan({ steps: [step(die, 5, 5), step(tavern.recommendations[0]!, 5, 2)] }) }),
+      cards,
+    );
+    expect(view.plan?.goldCaption).toBe('остаток не меньше');
+  });
+
+  it('темп: шкала кривой, ваша клетка и клетка кривой', () => {
+    const view = buildView(input(), cards);
+
+    // Шкала длиной с саму кривую, а не по нынешний тир: тег предела тира
+    // не встречается ни в одной фикстуре, и шкала, кончающаяся на клетке
+    // игрока, читалась бы как «вы на вершине».
+    expect(view.tempo?.cells).toHaveLength(6);
+    expect(view.tempo?.cells.filter((c) => c.you).map((c) => c.tier)).toEqual([3]);
+    expect(view.tempo?.cells.filter((c) => c.curve).map((c) => c.tier)).toEqual([3]);
+    expect(view.tempo?.cells.some((c) => c.locked)).toBe(false);
+
+    // Ход называется в той шкале, в которой считает кривая: наш `turn` 9 —
+    // это пятый ход ТАВЕРНЫ (урок part20).
+    expect(view.tempo?.tavernTurn).toBe(5);
+    expect(view.tempo?.tier).toBe(3);
+    expect(view.tempo?.curveTier).toBe(3);
+  });
+
+  it('темп: слова — дословная причина совета подъёма, своих формулировок нет', () => {
+    // Причин у правила четыре, а на четверти точек совета подъёма нет вовсе.
+    // Своя склейка на них была бы выдумкой, а расхождение подписи с советом
+    // в списке читалось бы как второй, скрытый вердикт.
+    const view = buildView(input(), cards);
+    expect(view.tempo?.note).toBe('по графику пора');
+    // Цена уже названа причиной — вторым числом её не повторяем.
+    expect(view.tempo?.upgrade).toBeNull();
+  });
+
+  it('темп: совета подъёма нет — слов нет, а цена берётся из лога', () => {
+    const noLevel: TavernAdvice = {
+      ...tavern,
+      recommendations: tavern.recommendations.filter((r) => r.action !== 'levelUp'),
+    };
+    const withCost: GameState = { ...state, tavernUpgradeCost: 5, tavernUpgradeTarget: 4 };
+    const view = buildView(input({ tavern: noLevel, state: withCost }), cards);
+
+    expect(view.tempo?.note).toBeNull();
+    expect(view.tempo?.upgrade).toEqual({ cost: 5, target: 4 });
+
+    // Кнопки не видно — ни нуля, ни «бесплатно» вместо неё не подставляется.
+    const blind = buildView(input({ tavern: noLevel }), cards);
+    expect(blind.tempo?.upgrade).toBeNull();
+  });
+
+  it('темп: известный предел тира гасит клетки выше себя', () => {
+    // Тега предела в фикстурах нет ни разу, но если он придёт — клетки выше
+    // должны гаснуть, а не исчезать: кривая просит тир, которого не будет.
+    const capped: GameState = { ...state, maxTechLevel: 5 };
+    const view = buildView(input({ state: capped }), cards);
+
+    expect(view.tempo?.cells).toHaveLength(6);
+    expect(view.tempo?.cells.filter((c) => c.locked).map((c) => c.tier)).toEqual([6]);
+  });
+
+  it('модальный выбор гасит и план, и темп', () => {
+    // Пока открыт выбор, игрок решает именно его; план вдобавок посчитан
+    // на состоянии, которого сейчас на экране нет.
+    const withTrinkets: TavernAdvice = {
+      ...tavern,
+      trinkets: [
         {
-          recommendation: tavern.recommendations[0]!,
-          goldBefore: 7,
-          goldAfter: 4,
-          opaque: false,
-          stateAfter: after(4),
-        },
-        {
-          recommendation: tavern.recommendations[1]!,
-          goldBefore: 4,
-          goldAfter: 0,
-          opaque: false,
-          stateAfter: after(0),
+          offer: { entityId: 7, cardId: 'T1', subsetRaces: ['MECH'], cost: 2 },
+          name: 'Компас',
+          tribeMinions: 2,
+          averagePlacement: 4.1,
+          reason: 'упоминает MECH — своих 2',
         },
       ],
-      goldLeft: 0,
-      truncated: false,
     };
-    const view = buildView(input({ spendPlan: plan }), cards);
+    const trinkets = buildView(input({ tavern: withTrinkets, spendPlan: plan() }), cards);
+    expect(trinkets.plan).toBeNull();
+    expect(trinkets.tempo).toBeNull();
 
-    expect(view.actions[0]?.text).toContain('ПЛАН ХОДА');
-    expect(view.actions[0]?.tone).toBe('good');
-    // Лимит строк прежний: план занимает место одного совета, а не добавляется
-    // сверх него.
-    expect(view.actions).toHaveLength(3);
-    expect(view.actions[1]?.text).toContain('КУПИТЬ');
+    const withChoice: TavernAdvice = {
+      ...tavern,
+      choice: [
+        {
+          option: { entityId: 1, cardId: 'A' },
+          name: 'Часовой',
+          value: null,
+          score: null,
+          reason: 'оценить не берёмся',
+        },
+      ],
+    };
+    const choice = buildView(input({ tavern: withChoice, spendPlan: plan() }), cards);
+    expect(choice.plan).toBeNull();
+    expect(choice.tempo).toBeNull();
+  });
 
-    // План из одного шага интерфейсу не нужен — это и есть верхняя строка.
-    const single = buildView(input({ spendPlan: { ...plan, steps: [plan.steps[0]!] } }), cards);
-    expect(single.actions[0]?.text).not.toContain('ПЛАН ХОДА');
+  it('вне таверны и на выборе героя блоков нет', () => {
+    const combat = buildView(input({ tavern: null, spendPlan: plan() }), cards);
+    expect(combat.plan).toBeNull();
+    expect(combat.tempo).toBeNull();
+
+    const withHero: TavernAdvice = {
+      ...tavern,
+      heroChoice: [
+        {
+          option: { entityId: 1, cardId: 'BG20_HERO_282' },
+          name: 'Джандис',
+          averagePosition: 3.9,
+          reason: 'среднее место 3.90 по статистике',
+        },
+      ],
+    };
+    const hero = buildView(input({ tavern: withHero, spendPlan: plan() }), cards);
+    expect(hero.plan).toBeNull();
+    expect(hero.tempo).toBeNull();
+  });
+
+  it('метки: шаги плана садятся на карты витрины и кнопки таверны', () => {
+    const view = buildView(input({ spendPlan: plan() }), cards);
+
+    const buy = view.marks.find((m) => m.row === 'shop');
+    expect(buy?.index).toBe(0);
+    expect(buy?.count).toBe(2);
+    expect(buy?.tone).toBe('buy');
+    expect(buy?.step).toBe(1);
+    expect(buy?.label).toContain('КУПИТЬ');
+
+    // Подъём — не карта: у него своя кнопка, и метка идёт на неё.
+    const level = view.marks.find((m) => m.button === 'levelUp');
+    expect(level?.step).toBe(2);
+    expect(level?.label).toContain('ПОДНЯТЬ');
+
+    // Жертва названа словами в строке действия, а на столе ей нужно кольцо.
+    const sell = view.marks.find((m) => m.tone === 'sell');
+    expect(sell?.row).toBe('board');
+    expect(sell?.index).toBe(1);
+    expect(sell?.step).toBeNull();
+  });
+
+  it('метки: карту руки разместить негде, и она метки не получает', () => {
+    // Рука лежит веером, её геометрия не замерена. Кольцо наугад показало бы
+    // на чужую карту — это хуже, чем отсутствие кольца.
+    const inHand: Recommendation = {
+      action: 'play',
+      minion: minion(999),
+      score: 9,
+      cost: 0,
+      requiresSlot: true,
+      sellFirst: null,
+      reason: 'разыграть из руки',
+    };
+    const view = buildView(
+      input({ spendPlan: plan({ steps: [step(inHand, 7, 7), step(tavern.recommendations[1]!, 7, 2)] }) }),
+      cards,
+    );
+    expect(view.marks.some((m) => m.row !== null)).toBe(false);
+    // Кнопка подъёма при этом помечена: шаг, который разместить МОЖНО,
+    // от соседства с неразмещаемым не страдает.
+    expect(view.marks.some((m) => m.button === 'levelUp')).toBe(true);
+  });
+
+  it('метки: одна карта помечается один раз', () => {
+    // Два кольца на одной карте спорят, какое из них главное, — тот же довод,
+    // по которому план занимает в списке одно место.
+    const twice = plan({
+      steps: [step(tavern.recommendations[0]!, 7, 4), step(tavern.recommendations[0]!, 4, 1)],
+    });
+    const view = buildView(input({ spendPlan: twice }), cards);
+    const shopMarks = view.marks.filter((m) => m.row === 'shop' && m.index === 0);
+    expect(shopMarks).toHaveLength(1);
+    expect(shopMarks[0]?.step).toBe(1);
+  });
+
+  it('метки: без плана помечается верхний совет и БЕЗ номера шага', () => {
+    // Номер шага у одного действия обещал бы цепочку, которой нет.
+    const view = buildView(input(), cards);
+    const buy = view.marks.find((m) => m.row === 'shop');
+    expect(buy?.index).toBe(0);
+    expect(buy?.step).toBeNull();
+  });
+
+  it('метки: у действия с целью оба кольца подписаны', () => {
+    // Активация с целью — худший случай: нажимают ОДНУ карту, а меняется
+    // другая. Голубое кольцо без слова читалось бы как «тут тоже что-то
+    // делать», и игрок нажал бы не то.
+    const activate: Recommendation = {
+      action: 'activate',
+      minion: minion(101),
+      targetMinion: minion(102),
+      score: 42.5,
+      cost: 1,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'сделает соседа 50/50',
+    };
+    const view = buildView(
+      input({ tavern: { ...tavern, recommendations: [activate] } }),
+      cards,
+    );
+
+    const actor = view.marks.find((m) => m.index === 0 && m.row === 'board');
+    expect(actor?.label).toContain('АКТИВИРОВАТЬ');
+    expect(actor?.tone).toBe('buy');
+
+    const target = view.marks.find((m) => m.tone === 'target');
+    expect(target?.row).toBe('board');
+    expect(target?.index).toBe(1);
+    expect(target?.label).toBe('ЦЕЛЬ');
+  });
+
+  it('метки: носитель магнита подписан своим словом, а не «цель»', () => {
+    // Магнит не «целится» — он садится НА носителя, и это разные действия:
+    // цель усиления получает статы, носитель магнита получает саму карту.
+    const magnet: Recommendation = {
+      action: 'buy',
+      minion: minion(201),
+      magnetizeTo: minion(101),
+      score: 12,
+      cost: 3,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'магнитный мех',
+    };
+    const view = buildView(input({ tavern: { ...tavern, recommendations: [magnet] } }), cards);
+    const carrier = view.marks.find((m) => m.tone === 'target');
+    expect(carrier?.label).toBe('НОСИТЕЛЬ');
+  });
+
+  it('метки: модальный экран гасит и кольца, и номера расстановки', () => {
+    const withChoice: TavernAdvice = {
+      ...tavern,
+      choice: [
+        {
+          option: { entityId: 1, cardId: 'A' },
+          name: 'Часовой',
+          value: null,
+          score: null,
+          reason: 'оценить не берёмся',
+        },
+      ],
+    };
+    const view = buildView(
+      input({
+        tavern: withChoice,
+        spendPlan: plan(),
+        position: { kind: 'advice', advice: advice(), target: single() },
+      }),
+      cards,
+    );
+    expect(view.marks).toHaveLength(0);
+    expect(view.order).toHaveLength(0);
+  });
+
+  it('номера расстановки появляются только когда совет что-то меняет', () => {
+    // Расстановка молчит большую часть партии; номера, повторяющие нынешний
+    // порядок, были бы шумом на каждом кадре.
+    const improving = buildView(
+      input({ position: { kind: 'advice', advice: advice(), target: single() } }),
+      cards,
+    );
+    // Фикстура советует обратный порядок: 101 уходит вторым, 102 первым.
+    expect(improving.order).toHaveLength(2);
+    expect(improving.order.map((o) => [o.index, o.order, o.moved])).toEqual([
+      [0, 2, true],
+      [1, 1, true],
+    ]);
+    // Прямоугольники разные и стоят слева направо по нынешнему месту.
+    expect(improving.order[0]!.rect.x).toBeLessThan(improving.order[1]!.rect.x);
+
+    const same = buildView(
+      input({
+        position: { kind: 'advice', advice: advice({ improves: false }), target: single() },
+      }),
+      cards,
+    );
+    expect(same.order).toHaveLength(0);
   });
 
   it('покупка на полном борде называет, кого продать', () => {
