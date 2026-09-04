@@ -256,21 +256,33 @@ export function noOpponentReason(opponent: ResolvedOpponent): string {
     : 'чужих бордов ещё не видели — считать не против кого';
 }
 
-/** Совет по расстановке словами: что переставить и чего это стоит. */
+/**
+ * Совет по расстановке словами: что переставить и чего это стоит.
+ *
+ * `paidSlot` — приписка про ПЛАТНЫЙ край борда (part39). Она нужна обеим
+ * половинам совета, и «менять нечего» нуждается в ней даже больше:
+ * молчание советник произносит по ближайшему бою, а край получает
+ * усиление КАЖДЫЙ ход, и игрок читает такое молчание как одобрение
+ * порядка целиком. Отдельным параметром, а не чтением состояния внутри:
+ * `format.ts` про `GameState` не знает, и заводить эту связь ради одной
+ * строки незачем.
+ */
 export function positionLine(
   advice: PositionAdvice,
   target: PositionTarget,
   cards: CardIndex,
+  paidSlot: string | null = null,
 ): string {
   const odds = `${winPercent(advice.report.current.estimate).toFixed(0)}% побед`;
   const spent = `${opponentSource(target)}, ${String(advice.elapsedMs)} мс`;
   const best = advice.top[0];
+  const paid = paidSlot === null ? '' : `; ${paidSlot}`;
 
   if (!advice.improves || best === undefined) {
-    return `менять нечего (${odds}, ${spent})`;
+    return `менять нечего (${odds}, ${spent})${paid}`;
   }
   return (
     `${best.board.map((m) => minionLabel(m, cards)).join(' → ')}` +
-    `  +${advice.gain.toFixed(1)} п.п. к ${odds} (${spent})`
+    `  +${advice.gain.toFixed(1)} п.п. к ${odds} (${spent})${paid}`
   );
 }

@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 
 import type { PositionAdvice } from '../advisors/position/advisor.js';
 import type { PositionTarget } from '../advisors/position/opponent.js';
+import { paidSlotNote } from '../advisors/position/paidSlot.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import { spendPlan } from '../advisors/tavern/spend.js';
 import { loadCardIndex, type CardIndex } from '../data/cards.js';
@@ -156,13 +157,16 @@ function printPosition(
   advice: PositionAdvice | null,
   target: PositionTarget,
   cards: CardIndex,
+  state: GameState | null,
 ): void {
   if (advice === null) {
     console.log('   расстановка: счёт брошен, положение изменилось');
     return;
   }
 
-  console.log(`   расстановка: ${positionLine(advice, target, cards)}`);
+  console.log(
+    `   расстановка: ${positionLine(advice, target, cards, state === null ? null : paidSlotNote(state, cards))}`,
+  );
 
   if (opponentStale(target)) {
     console.log('                картинка противника устарела, полагаться на числа нельзя');
@@ -209,8 +213,14 @@ async function main(): Promise<void> {
   const loadMs = await position.ready();
   console.log(`справочник: ${cards.size.toLocaleString('ru-RU')} карт; воркер готов за ${String(loadMs)} мс`);
 
+  // Последнее состояние держим отдельно: совет по расстановке приходит своим
+  // колбэком, без состояния, а приписка про платный край борда (part39)
+  // читается из тринкетов игрока.
+  let lastState: GameState | null = null;
+
   const handlers: LiveAdvisorHandlers = {
     onTavern: (advice, state) => {
+      lastState = state;
       printSituation(state, advice, cards);
     },
     onBuyCheck: (result, target) => {
@@ -219,7 +229,7 @@ async function main(): Promise<void> {
       if (result !== null) console.log(`   ⚔ ${buyCheckLine(result, target, cards)}`);
     },
     onPosition: (advice, target) => {
-      printPosition(advice, target, cards);
+      printPosition(advice, target, cards, lastState);
     },
     onNoOpponent: (opponent) => {
       console.log(`   расстановка: ${noOpponentReason(opponent)}`);

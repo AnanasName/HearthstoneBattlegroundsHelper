@@ -1,4 +1,5 @@
 import type { PositionAdvice } from '../advisors/position/advisor.js';
+import { paidSlotNote } from '../advisors/position/paidSlot.js';
 import type { PositionTarget, ResolvedOpponent } from '../advisors/position/opponent.js';
 import type { TavernAdvice } from '../advisors/tavern/advisor.js';
 import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
@@ -223,7 +224,12 @@ function positionView(input: ViewInput, cards: CardIndex): OverlayLine | null {
     return { text: noOpponentReason(position.opponent), tone: 'muted' };
   }
 
-  const text = positionLine(position.advice, position.target, cards);
+  const text = positionLine(
+    position.advice,
+    position.target,
+    cards,
+    paidSlotNote(input.state, cards),
+  );
   if (opponentStale(position.target)) {
     // Не «плохой совет», а совет по устаревшим данным: разница существенная,
     // и прятать её нельзя.
