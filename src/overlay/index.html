@@ -14,6 +14,10 @@
         --good: #7ee08a;
         --warn: #f0c674;
         --muted: #9aa0a6;
+        /* Подложка блока и его рельс: оттенком, а не рамкой — рамка на
+           прозрачном окне спорит с рамками самой игры. */
+        --panel: rgba(255, 255, 255, 0.05);
+        --rail: rgba(255, 255, 255, 0.16);
       }
 
       html,
@@ -27,13 +31,138 @@
         color: #eceff1;
       }
 
+      /*
+        Окно теперь во весь экран — метки рисуются поверх настоящих карт.
+        Панель советов стала блоком в правом верхнем углу, и её геометрия
+        живёт здесь: окно с ней больше не совпадает.
+      */
       #card {
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        width: 460px;
+        box-sizing: border-box;
         margin: 0;
         padding: 10px 12px;
         border-radius: 10px;
         background: rgba(16, 18, 22, 0.78);
         box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
         backdrop-filter: blur(2px);
+      }
+
+      /* Слой меток: во весь экран, поверх игры, ничего не перехватывает. */
+      #stage {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      /*
+        Кольцо вокруг карты. Контуров два — тёмный снаружи и внутри, цветной
+        между ними: поверх пёстрой картинки игры одноцветная обводка теряется
+        на светлых участках, и это видно на настоящих кадрах.
+      */
+      .ring {
+        position: absolute;
+        box-sizing: border-box;
+        border-radius: 50%;
+        border: 4px solid var(--c);
+        box-shadow:
+          0 0 0 2px rgba(0, 0, 0, 0.65),
+          inset 0 0 0 2px rgba(0, 0, 0, 0.55),
+          0 0 14px var(--c);
+      }
+      .ring.buy {
+        --c: #46e07a;
+      }
+      .ring.sell {
+        --c: #ff5a4d;
+      }
+      .ring.keep {
+        --c: #ffd60a;
+      }
+      .ring.target {
+        --c: #7ee0ff;
+      }
+
+      /* Подпись действия — тёмная плашка: слово обязано читаться на любом фоне. */
+      .tag {
+        position: absolute;
+        transform: translateX(-50%);
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(12, 14, 18, 0.88);
+        border: 1px solid var(--c);
+        color: #fff;
+        font-weight: 700;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .tag.buy {
+        --c: #46e07a;
+      }
+      .tag.sell {
+        --c: #ff5a4d;
+      }
+      .tag.keep {
+        --c: #ffd60a;
+      }
+      .tag.target {
+        --c: #7ee0ff;
+      }
+
+      /*
+        Номер шага плана — на самой карте: ход читается со стола.
+        Цвет номера следует смыслу шага, а не всегда «покупка»: зелёный кружок
+        на карте, которую советуют ПРОДАТЬ, читается ровно наоборот.
+      */
+      .stepno {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--c);
+        color: #06240f;
+        font-weight: 800;
+        font-size: 16px;
+        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6);
+      }
+      .stepno.buy {
+        --c: #46e07a;
+      }
+      .stepno.sell {
+        --c: #ff5a4d;
+      }
+      .stepno.keep {
+        --c: #ffd60a;
+      }
+      .stepno.target {
+        --c: #7ee0ff;
+      }
+
+      /* Номер места в расстановке — над своим миньоном. */
+      .orderno {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(12, 14, 18, 0.9);
+        border: 2px solid #7ee0ff;
+        color: #eaf7ff;
+        font-weight: 700;
+        font-size: 17px;
+      }
+      /* Двигать надо именно его — цвет и форма меняются вместе, не только цвет. */
+      .orderno.moved {
+        border-color: #ffd60a;
+        border-width: 3px;
+        color: #fff3c4;
       }
 
       #card.idle {
@@ -47,23 +176,19 @@
       }
 
       /*
-        Борд и витрина — контекст, им можно обрезаться в одну строку.
-        Советы и расстановка — то, ради чего оверлей существует: они
-        переносятся целиком, обрезанный совет игрок прочитать не смог
-        (part9, лавка аксессуаров — «оценить не берё…»).
+        Всё в панели переносится целиком и ничего не обрезается: обрезанный
+        совет игрок прочитать не смог (part9, лавка аксессуаров — «оценить
+        не берё…»). Обрезавшийся класс `.row` тут был ровно один — под борд
+        и витрину, — а их в панели больше нет: стол игрок видит сам.
       */
-      .row {
+      .line {
         margin: 2px 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      #actions .row,
-      #position .row {
         white-space: normal;
         overflow: visible;
-        text-overflow: clip;
+      }
+
+      #actions .line,
+      #position .line {
         padding-left: 12px;
         text-indent: -12px; /* висячий отступ: перенос виден как продолжение */
       }
@@ -89,54 +214,309 @@
 
       #position {
         margin-top: 6px;
+      }
+
+      #board {
+        margin-top: 6px;
+      }
+
+      /* ── План хода ───────────────────────────────────────────────────── */
+
+      #plan:not(:empty) {
+        margin-top: 8px;
+        padding: 5px 8px 6px 9px;
+        border-left: 3px solid var(--rail);
+        border-radius: 0 6px 6px 0;
+        background: var(--panel);
+      }
+
+      #plan .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--good);
+      }
+
+      #plan .head .cap {
+        color: var(--muted);
+        font-weight: 400;
+      }
+
+      /*
+        Сетка, а не висячий отступ: у шага три колонки, и остаток золота справа
+        обязан стоять на месте при переносе текста. Перенос происходит внутри
+        средней ячейки и на цифру не наезжает; ничего не обрезается.
+      */
+      .step {
+        display: grid;
+        grid-template-columns: 14px 1fr 34px;
+        column-gap: 6px;
+        align-items: baseline;
+        margin-top: 4px;
+      }
+
+      .step .no {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .step .what {
         white-space: normal;
+      }
+
+      /* Столбик остатка не должен дышать по ширине от кадра к кадру. */
+      .step .gold {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+      }
+
+      .step .gold.warn {
+        color: var(--warn);
+      }
+
+      #plan .rest,
+      #plan .tail {
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #plan .tail.warn {
+        color: var(--warn);
+      }
+
+      /* ── Темп таверны ────────────────────────────────────────────────── */
+
+      #tempo:not(:empty) {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #tempo .strip {
+        display: inline-flex;
+        gap: 3px;
+        margin: 0 6px;
+      }
+
+      /*
+        Рамка занята прозрачной у ВСЕХ клеток: иначе клетка «вы» шире прочих,
+        и шкала дёргается на подъёме тира. Кривая помечена внутренней тенью,
+        а не подчёркиванием: тень не меняет высоту клетки.
+
+        Метки нарочно РАЗНОЙ ПРИРОДЫ, а не разного цвета: положение игрока —
+        рамкой, кривая — тенью. Цветом или стрелкой одна из них стала бы
+        «правильной», а вердикта у кривой нет (см. `OverlayTempo`).
+      */
+      #tempo .tier {
+        min-width: 14px;
+        padding: 0 3px;
+        text-align: center;
+        border: 1px solid transparent;
+        border-radius: 3px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #tempo .tier.you {
+        border-color: var(--muted);
+        color: #eceff1;
+      }
+
+      #tempo .tier.curve {
+        box-shadow: inset 0 -2px 0 var(--muted);
+      }
+
+      #tempo .tier.locked {
+        color: #5f6368;
       }
     </style>
   </head>
   <body>
+    <!--
+      Порядок узлов — порядок важности, и это не вкус: окно фиксированной
+      высоты, прокрутки нет и быть не может (оно сквозное для мыши и не берёт
+      фокус), поэтому переполнение обрезается МОЛЧА. Значит терять оно обязано
+      снизу: сначала темп (фон без вердикта), потом витрину и борд — их игрок
+      видит в самой игре, — и лишь в последнюю очередь действенное.
+    -->
+    <div id="stage"></div>
+
+    <!--
+      Борда и витрины в панели больше нет НАМЕРЕННО: они были контекстом —
+      «что сейчас на столе», — а стол игрок теперь видит сам, и метки
+      показывают прямо на его картах. Строка списка дублировала бы экран.
+      Поля в виде остались: их читают тесты, и они описывают положение,
+      а не его показ.
+    -->
     <div id="card" class="idle">
       <div id="header">жду партию</div>
-      <div id="board"></div>
-      <div id="shop"></div>
+      <div id="plan"></div>
       <div id="actions"></div>
       <div id="position"></div>
+      <div id="tempo"></div>
     </div>
 
     <script>
       // Разметка ничего не решает: приходит готовый вид, она его рисует.
+      // Какая клетка чья, какой тон у числа, какая подпись у столбика и есть ли
+      // блок вообще — всё это поля вида, посчитанные в `view.ts` и покрытые
+      // тестами. Здесь не должно появиться ни одного условия про игру.
       const el = (id) => document.getElementById(id);
 
-      function row(text, cls) {
-        const div = document.createElement('div');
-        div.className = cls ? `row ${cls}` : 'row';
-        div.textContent = text;
-        return div;
+      // Тон `normal` — это отсутствие класса: правила для него нет, и выдавать
+      // класс без правила значило бы держать вид работающим по совпадению.
+      const toneClass = (tone) => (tone === 'normal' || !tone ? '' : tone);
+
+      function node(tag, text, cls) {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        // textContent, а не innerHTML: строки несут имена карт из снапшота,
+        // то есть данные, которых мы не писали.
+        n.textContent = text;
+        return n;
       }
 
-      function list(node, label, items) {
-        node.replaceChildren();
-        if (!items || items.length === 0) return;
-        node.appendChild(row(`${label} ${items.join('  ·  ')}`, 'muted'));
+      const line = (text, cls) => node('div', text, cls ? `line ${cls}` : 'line');
+
+      // Прямоугольник приходит долями окна — разметке остаётся перевести
+      // их в проценты. Ни одного числа про раскладку игры тут нет.
+      const box = (rect) => ({
+        left: rect.x * 100 + '%',
+        top: rect.y * 100 + '%',
+        width: rect.w * 100 + '%',
+        height: rect.h * 100 + '%',
+      });
+
+      function stageLayer(target, marks, order) {
+        target.replaceChildren();
+
+        for (const mark of marks || []) {
+          const r = mark.rect;
+          const ring = node('div', '', 'ring ' + mark.tone);
+          Object.assign(ring.style, box(r));
+          target.appendChild(ring);
+
+          if (mark.label) {
+            // Подпись у витрины и кнопок — СВЕРХУ, у борда снизу: иначе она
+            // садится ровно на номера расстановки соседнего ряда.
+            const above = mark.row !== 'board';
+            const tag = node('div', mark.label, 'tag ' + mark.tone);
+            Object.assign(tag.style, {
+              left: (r.x + r.w / 2) * 100 + '%',
+              top: above ? `calc(${(r.y * 100).toFixed(3)}% - 24px)` : (r.y + r.h) * 100 + '%',
+            });
+            target.appendChild(tag);
+          }
+
+          if (mark.step !== null) {
+            const no = node('div', String(mark.step), 'stepno ' + mark.tone);
+            Object.assign(no.style, { left: r.x * 100 + '%', top: (r.y + r.h * 0.2) * 100 + '%' });
+            target.appendChild(no);
+          }
+        }
+
+        for (const o of order || []) {
+          const no = node('div', String(o.order), 'orderno' + (o.moved ? ' moved' : ''));
+          Object.assign(no.style, {
+            left: (o.rect.x + o.rect.w / 2) * 100 + '%',
+            top: o.rect.y * 100 + '%',
+          });
+          target.appendChild(no);
+        }
+      }
+
+      function planBlock(target, plan) {
+        target.replaceChildren();
+        // Пустого блока не бывает: рамка без содержимого на прозрачном окне
+        // читается как неисправность и утверждает, что советник думал
+        // и не придумал.
+        if (!plan) return;
+
+        const head = node('div', '', 'head');
+        head.append(
+          node('span', `ПЛАН ХОДА · золото ${plan.gold}`),
+          node('span', plan.goldCaption, 'cap'),
+        );
+        target.appendChild(head);
+
+        for (const step of plan.steps) {
+          const box = node('div', '', 'step');
+          box.append(
+            node('span', `${step.no}`, 'no'),
+            node('span', step.text, 'what'),
+            node('span', `${step.goldAfter}`, `gold ${toneClass(step.goldTone)}`.trim()),
+          );
+          target.appendChild(box);
+        }
+
+        if (plan.restVerbs.length > 0) {
+          target.appendChild(
+            line(`…и ещё ${plan.restVerbs.length}: ${plan.restVerbs.join(', ')}`, 'rest'),
+          );
+        }
+        if (plan.tail) {
+          target.appendChild(line(plan.tail.text, `tail ${toneClass(plan.tail.tone)}`.trim()));
+        }
+      }
+
+      function tempoBlock(target, tempo) {
+        target.replaceChildren();
+        if (!tempo) return;
+
+        const head = node('div', '', 'line');
+        head.appendChild(node('span', tempo.label, 'label'));
+        const strip = node('span', '', 'strip');
+        for (const cell of tempo.cells) {
+          const marks = ['tier'];
+          if (cell.you) marks.push('you');
+          if (cell.curve) marks.push('curve');
+          if (cell.locked) marks.push('locked');
+          strip.appendChild(node('span', `${cell.tier}`, marks.join(' ')));
+        }
+        head.appendChild(strip);
+        target.appendChild(head);
+
+        // Метки дублируются словами: экран в оттенках серого обязан читаться
+        // целиком, а рамка и тень на 12px различимы не всякому.
+        const upgrade = tempo.upgrade
+          ? ` · подъём до ${tempo.upgrade.target} за ${tempo.upgrade.cost}`
+          : '';
+        target.appendChild(
+          line(
+            `ход таверны ${tempo.tavernTurn} · вы ${tempo.tier} · кривая ${tempo.curveTier}${upgrade}`,
+          ),
+        );
+        if (tempo.note) target.appendChild(line(tempo.note));
       }
 
       window.overlay.onView((view) => {
         el('card').className = view.active ? '' : 'idle';
         el('header').textContent = view.header;
 
-        list(el('board'), 'борд:', view.board);
-        list(el('shop'), 'витрина:', view.shop);
+        planBlock(el('plan'), view.plan);
 
         const actions = el('actions');
         actions.replaceChildren();
-        for (const line of view.actions || []) {
-          actions.appendChild(row(`▸ ${line.text}`, line.tone));
+        for (const item of view.actions || []) {
+          actions.appendChild(line(`▸ ${item.text}`, toneClass(item.tone)));
         }
 
         const position = el('position');
         position.replaceChildren();
         if (view.position) {
-          position.appendChild(row(`расстановка: ${view.position.text}`, view.position.tone));
+          position.appendChild(
+            line(`расстановка: ${view.position.text}`, toneClass(view.position.tone)),
+          );
         }
+
+        tempoBlock(el('tempo'), view.tempo);
+
+        // Метки поверх настоящих карт — последним: они рисуются в своём слое
+        // и на панель не влияют.
+        stageLayer(el('stage'), view.marks, view.order);
       });
     </script>
   </body>

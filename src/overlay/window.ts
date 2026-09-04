@@ -34,12 +34,15 @@ import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.
  * это стандартное требование ко всем оверлеям, а не наше ограничение.
  */
 
-const WIDTH = 460;
-// Советы теперь переносятся, а не обрезаются, и им нужно место в высоту:
-// четыре варианта лавки аксессуаров по две строки плюс шапка и расстановка.
-// Лишняя высота ничего не стоит — окно прозрачно и сквозное для мыши.
-const HEIGHT = 520;
-const MARGIN = 24;
+/*
+ * Размеров окна здесь больше нет: оно во весь экран, а панель советов стала
+ * блоком внутри него и живёт со своей геометрией в разметке.
+ *
+ * Прежний предел высоты (680 против 520, замер: худший кадр 592 пикселя)
+ * перестал быть пределом сам собой — на весь экран места больше. Порядок
+ * узлов в разметке при этом остаётся выстроенным по важности: обрезка снизу
+ * молчалива на любом экране, и терять она обязана темп, а не план.
+ */
 
 /**
  * Как спрятать оверлей.
@@ -64,14 +67,24 @@ export interface OverlayHandle {
   stop: () => Promise<void>;
 }
 
+/** Соотношение сторон экрана, на котором лежит оверлей. */
+function aspectOfDisplay(): number {
+  const { width, height } = screen.getPrimaryDisplay().bounds;
+  return height > 0 ? width / height : 16 / 9;
+}
+
 function createWindow(getLastView: () => OverlayView): BrowserWindow {
-  const area = screen.getPrimaryDisplay().workArea;
+  // Во весь экран, а не панелью в углу: метки рисуются поверх настоящих карт,
+  // и окно обязано накрывать стол целиком. Берётся `bounds`, а не `workArea`:
+  // игра идёт в окне без рамки на весь экран и панель задач собой закрывает,
+  // а `workArea` панель вычитает — метки уехали бы вверх на её высоту.
+  const area = screen.getPrimaryDisplay().bounds;
 
   const created = new BrowserWindow({
-    width: WIDTH,
-    height: HEIGHT,
-    x: area.x + area.width - WIDTH - MARGIN,
-    y: area.y + MARGIN,
+    width: area.width,
+    height: area.height,
+    x: area.x,
+    y: area.y,
     transparent: true,
     frame: false,
     resizable: false,
@@ -166,7 +179,19 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
     if (latest === null) return;
     send(
       buildView(
-        { state: latest, tavern, thinking, position: last, buyCheck, warning, spendPlan: plan },
+        {
+          state: latest,
+          tavern,
+          thinking,
+          position: last,
+          buyCheck,
+          warning,
+          spendPlan: plan,
+          // Окно накрывает экран целиком, поэтому его соотношение сторон
+          // и есть игровое: по нему метки переводятся из долей высоты,
+          // которыми замерена раскладка, в доли ширины.
+          aspect: aspectOfDisplay(),
+        },
         cards,
       ),
     );
@@ -222,7 +247,12 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
         // вывод к терминалу не подключён вовсе, и console.error никто
         // не увидит — ошибка выглядела бы как молчание советника.
         thinking = false;
-        send({ ...lastView, header: `сбой советника: ${error.message}` });
+        // Борд, витрина и прошлые советы сбой переживают — это описание
+        // положения, оно не портится от того, что счёт упал. План и темп
+        // гасятся: это прескриптивные блоки, и «купи, продай, подними»,
+        // пережившее сбой, — ровно тот случай, ради которого отметка о счёте
+        // идёт впереди прошлого ответа.
+        send({ ...lastView, plan: null, tempo: null, header: `сбой советника: ${error.message}` });
       },
       onNotice: (notice) => {
         // Новая партия — предупреждение прошлой гаснет: оно пересчитается.
