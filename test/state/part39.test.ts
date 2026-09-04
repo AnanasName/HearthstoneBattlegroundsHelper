@@ -12,6 +12,7 @@ import {
   spinRule,
   type Recommendation,
 } from '../../src/advisors/tavern/advisor.js';
+import { paidSlotNote } from '../../src/advisors/position/paidSlot.js';
 import { DEFAULT_TAVERN_RULES } from '../../src/advisors/tavern/rules.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { readTavernTurns } from '../../src/advisors/tavern/turns.js';
@@ -206,9 +207,17 @@ describe('part39: своя ценность прокрутки и сила ге�
     expect(rec.reason).toMatch(/в среднем 3\.5/);
   });
 
-  it('ход 13: сила героя доходит до плана хода', () => {
+  it('ход 13: сила героя идёт ПЕРВЫМ шагом плана — как игрок её и жал', () => {
     const actions = spendPlan(at(13), deps()).steps.map((s) => s.recommendation.action);
     expect(actions).toContain('heroPower');
+    // Своих очков у нажатия мало (7.5 против 20.5 у верхней покупки),
+    // в тройку ближайших соперников оно не попадает, и жадная цепочка
+    // ставила его ПОСЛЕ покупок — туда, где принесённое золото уже некуда
+    // девать. Решение игрока 04.09: шаг, ДОБАВЛЯЮЩИЙ золото, пробуется
+    // началом альтернативы всегда, и при РАВЕНСТВЕ цепочек выигрывает он —
+    // потому что настоящей суммы броска до нажатия не знает никто, и всё,
+    // что стоит после, посчитано на заниженном золоте.
+    expect(actions[0]).toBe('heroPower');
   });
 
   it('на перезарядке сила не советуется — гарды part13 и part37 работают без нового канала', () => {
@@ -238,6 +247,24 @@ describe('part39: своя ценность прокрутки и сила ге�
   });
 
   // ── Пункт 4: тринкет делает левый слот платным, и это не читается ──────
+
+  it('приписка про платный край появляется с ходом 11 — когда тринкет взят', () => {
+    // До взятия — молчание: выдумывать платный слот там, где его нет,
+    // хуже, чем молчать.
+    for (const turn of [1, 3, 5, 7, 9]) {
+      expect(paidSlotNote(at(turn), cards)).toBeNull();
+    }
+    // С хода 11 (16:47:49, CHANGE_ENTITY на слоте тринкета) и до конца.
+    for (const turn of [11, 13, 15, 17, 19]) {
+      const note = paidSlotNote(at(turn), cards);
+      expect(note).toMatch(/левый край/);
+      expect(note).toMatch(/Emergency Gearblade/);
+      // Честность приписки и есть её смысл: игрок должен видеть, что
+      // советник этого не считает, — иначе «менять нечего» читается
+      // как одобрение порядка целиком.
+      expect(note).toMatch(/расстановка этого не считает/);
+    }
+  });
 
   it('тринкет игрока делает ЛЕВЫЙ слот платным, но текст тринкета не читает ни одно правило', () => {
     const mine = end.playerId === null ? [] : (end.trinketsByPlayer[end.playerId] ?? []);
