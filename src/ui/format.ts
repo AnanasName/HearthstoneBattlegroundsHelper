@@ -185,6 +185,28 @@ export function spendPlanLine(plan: SpendPlan, cards: CardIndex): string {
   return `ПЛАН ХОДА: ${steps.join(' → ')}${tail}`;
 }
 
+/**
+ * Чем кончился ход — словами, для блока плана в оверлее.
+ *
+ * У строки `spendPlanLine` хвост взаимоисключающий: при обрыве она про остаток
+ * молчит вовсе. Это записанное решение с доводом — что купить дальше, решит
+ * новая витрина, а не мы, — и оно остаётся: у строки место одно, и выбирать
+ * ей приходится. У блока места два, и там молчание об остатке уже не экономия,
+ * а потеря: `goldLeft` посчитан, и обещанные после обновления покупки из него
+ * вычтены.
+ *
+ * Слово «сгорит» при обрыве не ставится ни при каком остатке: витрина будет
+ * другая, и утверждать сгорание там мы не вправе.
+ */
+export function spendPlanOutcome(plan: SpendPlan): string | null {
+  if (plan.truncated) {
+    return plan.goldLeft > 0
+      ? `дальше по новой витрине; остаётся ${String(plan.goldLeft)}`
+      : 'дальше по новой витрине';
+  }
+  return plan.goldLeft > 0 ? `остаётся ${String(plan.goldLeft)} — сгорит` : null;
+}
+
 /** План розыгрыша одной строкой: тела по порядку, магниты с целью. */
 export function planLine(steps: readonly PlanStep[], cards: CardIndex): string {
   const parts = steps.map((s) => {
