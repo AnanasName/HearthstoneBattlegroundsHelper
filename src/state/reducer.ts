@@ -204,6 +204,7 @@ export function createReducer(players: Players): Reducer {
   let nextOpponentPlayerId: number | null = null;
   let currentOpponentPlayerId: number | null = null;
   let wonLastCombat: boolean | null = null;
+  let altTavern = false;
   let maxTechLevel: number | null = null;
 
   /**
@@ -521,6 +522,13 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'BACON_WON_LAST_COMBAT':
         if (subject.kind === 'self' && n !== null) wonLastCombat = n > 0;
+        return;
+      case 'BACON_ALT_TAVERN_IN_PROGRESS':
+        // Тег партии, а не игрока: приходит на `GameEntity` блоком TRIGGER
+        // «Альтернативной истории» и снимается в ноль на выходе. Читается
+        // ради одного — на время альт-таверны игра подменяет пул золота,
+        // и рост `RESOURCES_USED` там тратой СВОЕГО золота не является.
+        if (subject.kind === 'game' && n !== null) altTavern = n > 0;
         return;
       case 'BACON_MAX_PLAYER_TECH_LEVEL':
         // Тег висит на героях всех участников лобби, а предел тира — свойство
@@ -1149,6 +1157,7 @@ export function createReducer(players: Players): Reducer {
       nextOpponentPlayerId,
       currentOpponentPlayerId,
       wonLastCombat,
+      altTavern,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
       lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
       lobby,

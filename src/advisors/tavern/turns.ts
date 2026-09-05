@@ -59,6 +59,31 @@ export interface TavernTurn {
  * блока, а трата вне блоков (тринкет за золото, part32) — перед самим
  * событием. Снимков это добавляет по одному на верхний блок хода до первой
  * траты — единицы против тысяч на `ZONE`.
+ *
+ * ## «Золото тронуто» — это РОСТ счётчика, а не его величина
+ *
+ * `RESOURCES_USED` умеет УМЕНЬШАТЬСЯ: продажа возвращает золото, и пока
+ * потрачено меньше вырученного, счётчик идёт назад — до нуля включительно
+ * (part34). Правило «последнее состояние, где потрачено ноль» на этом
+ * ломается тихо: игрок купил, продал, разыграл, продал ещё — счётчик
+ * вернулся в ноль, и точка решения переезжает в СЕРЕДИНУ хода. Видно это
+ * по невозможным числам: на part39 (ход 1) точка показывала золото 7
+ * при максимуме 3, на десятке ходов — борд из шести миньонов вместо семи
+ * и витрину из трёх карт вместо пяти. Замер охвата: 18 точек из 486
+ * на 39 партиях (3.7%), в датасете — 49 из 510.
+ *
+ * Поэтому трата ловится ростом счётчика ВНУТРИ одного хода. Три оговорки,
+ * каждая из фактуры:
+ *
+ *  - на первом событии нового хода счётчик ещё несёт значение прошлого
+ *    (part39, ход 3: «потрачено 3» при золоте 1/4) — это база, а не трата;
+ *  - `TEMP_RESOURCES` тратится первым и в `goldSpent` тоже входит, поэтому
+ *    сравнивать надо именно накопленное число, а не остаток золота;
+ *  - в АЛЬТЕРНАТИВНОЙ ТАВЕРНЕ игра подменяет пул (`RESOURCES` 10 → 0 → 2)
+ *    и тратит подменённые монеты — рост счётчика там не про наше золото
+ *    (`altTavern`, part25 и part41). Без этой проверки терялись две
+ *    законные точки: весь ход после альт-таверны считался бы «уже
+ *    потраченным».
  */
 export function readTavernTurns(text: string): TavernTurn[] {
   const reducer = createReducer(readPlayers(text));
@@ -69,6 +94,10 @@ export function readTavernTurns(text: string): TavernTurn[] {
   let topBlock: BlockContext | null = null;
   /** Состояние перед действием, которое может оказаться тратой. */
   let beforeAction: GameState | null = null;
+  /** В этом ходу золото уже тратили: возврат счётчика точку не воскрешает. */
+  let spentThisTurn = false;
+  let prevSpent = 0;
+  let prevTurn = -1;
 
   const commit = (): void => {
     if (pending !== null && pending.state.shop.length > 0) turns.push(pending);
@@ -84,7 +113,7 @@ export function readTavernTurns(text: string): TavernTurn[] {
     // до первого снимка хода тратить ещё нечего, после первой траты
     // снимок уже взят.
     const outer = event.blocks[0] ?? null;
-    if (pending !== null && pending.state.goldSpent === 0) {
+    if (pending !== null && !spentThisTurn && pending.state.goldSpent === 0) {
       if (outer !== null ? outer !== topBlock : content.includes('RESOURCES')) {
         beforeAction = reducer.snapshot();
       }
@@ -101,10 +130,21 @@ export function readTavernTurns(text: string): TavernTurn[] {
       continue;
     }
     if (pending !== null && pending.turn !== state.turn) commit();
+
+    if (state.turn !== prevTurn) {
+      // Новый ход: что в счётчике сейчас — база прошлого хода, не трата.
+      prevTurn = state.turn;
+      prevSpent = state.goldSpent;
+      spentThisTurn = false;
+    }
+    const grew = state.goldSpent > prevSpent && !state.altTavern;
+    prevSpent = state.goldSpent;
+
     // Золото тронуто — решение уже принято. Точка решения — состояние
     // перед действием, со всем, что случилось после прошлого снимка.
-    if (state.goldSpent > 0) {
+    if (grew || spentThisTurn) {
       if (
+        !spentThisTurn &&
         beforeAction !== null &&
         pending !== null &&
         pending.turn === state.turn &&
@@ -113,8 +153,10 @@ export function readTavernTurns(text: string): TavernTurn[] {
       ) {
         pending = { turn: state.turn, state: beforeAction };
       }
+      spentThisTurn = true;
       continue;
     }
+    if (state.goldSpent > 0) continue;
     if (state.goldTotal === 0) continue;
 
     pending = { turn: state.turn, state };

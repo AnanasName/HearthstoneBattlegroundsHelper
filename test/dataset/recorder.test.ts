@@ -159,6 +159,68 @@ describe('точки партии на сейчас', () => {
     expect(points.snapshot()).toHaveLength(1);
     expect(points.snapshot()[0]?.state.goldSpent).toBe(0);
   });
+
+  /**
+   * Возврат счётчика точку НЕ воскрешает. `RESOURCES_USED` уменьшается
+   * при продаже и доходит до нуля (part34), и правило «последнее состояние,
+   * где потрачено ноль» на этом уезжало в середину хода: на part39 (ход 1)
+   * точка показывала золото 7 при максимуме 3, на десятке ходов — борд
+   * из шести миньонов вместо семи. Признак траты — РОСТ счётчика.
+   */
+  it('продажа вернула счётчик к нулю — точка остаётся ДО первой траты', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(5, { shop: board([301, 302]) }));
+    points.update(tavern(5, { gold: 2, goldSpent: 3, shop: board([301, 302]) }));
+    // Продал двоих: счётчик пошёл назад и вернулся в ноль, золото выросло
+    // выше собственного максимума — временным.
+    points.update(tavern(5, { gold: 7, goldSpent: 0, shop: board([301]) }));
+
+    const snapshot = points.snapshot();
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]?.state.gold).toBe(5);
+    expect(snapshot[0]?.state.shop).toHaveLength(2);
+  });
+
+  /**
+   * На первом событии нового хода счётчик ещё несёт значение прошлого
+   * (part39, ход 3: «потрачено 3» при золоте 1/4). Это база, а не трата:
+   * иначе весь ход считался бы потраченным и точки у него не было бы.
+   */
+  it('счётчик прошлого хода на границе — база, а не трата', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(5));
+    points.update(tavern(5, { gold: 0, goldSpent: 5 }));
+    // Новый ход начинается со СТАРЫМ значением счётчика.
+    points.update(tavern(7, { gold: 1, goldSpent: 5 }));
+    points.update(tavern(7, { gold: 6, goldSpent: 0 }));
+
+    expect(points.snapshot().map((p) => p.turn)).toEqual([5, 7]);
+  });
+
+  /**
+   * Альтернативная таверна («Альтернативная история») подменяет пул золота:
+   * `RESOURCES` уходит в ноль, потом в число своих монет, игрок тратит их —
+   * счётчик растёт, — и на выходе пул возвращается. Своё золото хода при
+   * этом целое, и точка обязана остаться. Встречается редко и потому
+   * особенно опасна: две партии из 39 (part25, part41), и без этой проверки
+   * терялась законная точка каждого такого хода.
+   */
+  it('траты в альтернативной таверне точку не съедают', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(15, { gold: 10, goldTotal: 10 }));
+    points.update(tavern(15, { gold: 0, goldTotal: 0, altTavern: true }));
+    points.update(tavern(15, { gold: 2, goldTotal: 2, altTavern: true }));
+    points.update(tavern(15, { gold: 0, goldTotal: 2, goldSpent: 2, altTavern: true }));
+    points.update(tavern(15, { gold: 10, goldTotal: 10, goldSpent: 0 }));
+    points.update(tavern(15, { gold: 10, goldTotal: 10, shop: board([301, 302, 303]) }));
+
+    const snapshot = points.snapshot();
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]?.state.shop).toHaveLength(3);
+  });
 });
 
 describe('отпечаток партии', () => {

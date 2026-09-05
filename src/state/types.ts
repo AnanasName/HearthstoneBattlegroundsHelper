@@ -548,6 +548,21 @@ export interface GameState {
   /** Выигран ли прошлый бой — тег `BACON_WON_LAST_COMBAT`. */
   readonly wonLastCombat: boolean | null;
   /**
+   * Идёт ли АЛЬТЕРНАТИВНАЯ ТАВЕРНА — тег `BACON_ALT_TAVERN_IN_PROGRESS`
+   * на `GameEntity` («Альтернативная история»).
+   *
+   * Важно не тем, что мы её советуем (не советуем вовсе), а тем, что она
+   * ПОДМЕНЯЕТ ПУЛ ЗОЛОТА: игра ставит `RESOURCES` в ноль, потом в число
+   * монет альт-таверны (`BACON_ALT_TAVERN_COIN`), игрок тратит их —
+   * `RESOURCES_USED` растёт, — и после выхода `RESOURCES` возвращается
+   * к обычному максимуму хода. Для всякого, кто считает «золото тронуто»,
+   * это ложная трата: своё золото хода целое. Встречается редко и потому
+   * особенно опасно — в 39 фикстурах ровно две партии (part25 и part41,
+   * по два входа), то есть правило, написанное без неё, ломается раз
+   * в двадцать партий и молча.
+   */
+  readonly altTavern: boolean;
+  /**
    * Последний увиденный борд каждого противника, по его `PlayerID`.
    *
    * Требование ТЗ к `GameState`. Заполняется по итогам боёв: борд противника
@@ -707,6 +722,7 @@ export const EMPTY_STATE: GameState = {
   nextOpponentPlayerId: null,
   currentOpponentPlayerId: null,
   wonLastCombat: null,
+  altTavern: false,
   lastSeenBoards: {},
   lastSeenBoardTurns: {},
   lobby: {},

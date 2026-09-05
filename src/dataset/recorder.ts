@@ -139,10 +139,25 @@ function saveToDisk(dir: string): (fileName: string, record: DatasetRecord) => v
   };
 }
 
-/** Точки решения из потока состояний — та же логика, что `readTavernTurns`. */
+/**
+ * Точки решения из потока состояний — та же логика, что `readTavernTurns`.
+ *
+ * «Золото тронуто» здесь определяется тем же способом и по той же фактуре:
+ * ростом счётчика внутри хода, а не его величиной. `RESOURCES_USED`
+ * уменьшается при продаже и возвращается к нулю (part34), и без памяти
+ * о трате точка переезжала в середину хода; на первом событии нового хода
+ * счётчик ещё несёт значение прошлого, поэтому оно берётся базой;
+ * в альтернативной таверне игра подменяет пул золота, и рост счётчика там
+ * не про наше золото (`altTavern`). Правило обязано совпадать
+ * с `readTavernTurns` дословно: живой и пакетный пути дают одно состояние,
+ * и это закреплено тестом.
+ */
 export class DecisionPoints {
   #pending: DatasetCheckpoint | null = null;
   #turns: DatasetCheckpoint[] = [];
+  #spentThisTurn = false;
+  #prevSpent = 0;
+  #prevTurn = -1;
 
   /** Точка засчитывается только с показанной витриной: пустая — не решение. */
   #worthy(point: DatasetCheckpoint | null): point is DatasetCheckpoint {
@@ -160,8 +175,18 @@ export class DecisionPoints {
       return;
     }
     if (this.#pending !== null && this.#pending.turn !== state.turn) this.#commit();
+
+    if (state.turn !== this.#prevTurn) {
+      this.#prevTurn = state.turn;
+      this.#prevSpent = state.goldSpent;
+      this.#spentThisTurn = false;
+    }
+    const grew = state.goldSpent > this.#prevSpent && !state.altTavern;
+    this.#prevSpent = state.goldSpent;
+    if (grew) this.#spentThisTurn = true;
+
     // Золото тронуто — решение уже принято, дальше состояние не наше.
-    if (state.goldSpent > 0 || state.goldTotal === 0) return;
+    if (this.#spentThisTurn || state.goldSpent > 0 || state.goldTotal === 0) return;
     this.#pending = { turn: state.turn, state };
   }
 
@@ -195,6 +220,9 @@ export class DecisionPoints {
   reset(): void {
     this.#pending = null;
     this.#turns = [];
+    this.#spentThisTurn = false;
+    this.#prevSpent = 0;
+    this.#prevTurn = -1;
   }
 }
 
