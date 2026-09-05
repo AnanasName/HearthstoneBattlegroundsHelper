@@ -6,6 +6,7 @@ import { DATASET_DIR, gameSignature, type DatasetRecord } from '../dataset/recor
 import {
   EMPTY_STATE,
   type GameState,
+  type HandSpell,
   type Hero,
   type Minion,
   type PlayerAction,
@@ -159,6 +160,21 @@ function upgradeMinions(list: readonly LegacyMinion[]): Minion[] {
   return list.map((m) => ({ buyCost: null, ...m }));
 }
 
+/** Заклинание старой записи: позиции в зоне (part41) в нём может не быть. */
+type LegacySpell = Omit<HandSpell, 'zonePos'> & Partial<Pick<HandSpell, 'zonePos'>>;
+
+/**
+ * Умолчание — ноль, «позиции не знаем». Игра нумерует места с единицы,
+ * поэтому ноль ни с какой настоящей позицией не спутать; порядок внутри
+ * списка при этом сохраняется — записывался он уже отсортированным.
+ *
+ * Выдумывать позицию по номеру в списке нельзя: ряд витрины общий
+ * с миньонами, и «третье заклинание» вовсе не значит «третья карта ряда».
+ */
+function upgradeSpells(list: readonly LegacySpell[]): HandSpell[] {
+  return list.map((s) => ({ zonePos: 0, ...s }));
+}
+
 function upgradeState(state: GameState): GameState {
   const legacyHero: LegacyHero | null = state.hero;
   // Умолчание замка — `false`, «сила не под замком»: тег `LOCK_VISUAL`
@@ -174,6 +190,8 @@ function upgradeState(state: GameState): GameState {
     board: upgradeMinions(state.board),
     hand: upgradeMinions(state.hand),
     shop: upgradeMinions(state.shop),
+    handSpells: upgradeSpells(state.handSpells),
+    shopSpells: upgradeSpells(state.shopSpells),
     opponentBoard: upgradeMinions(state.opponentBoard),
     lastSeenBoards: Object.fromEntries(
       Object.entries(state.lastSeenBoards).map(([id, b]) => [id, upgradeMinions(b)]),

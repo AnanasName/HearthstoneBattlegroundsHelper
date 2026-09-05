@@ -1328,7 +1328,7 @@ describe('правило заморозки', () => {
       { id: 'FILLER', name: 'Наполнитель', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
     ]);
     const lassoDeps = { cards: lassoCards };
-    const lasso = { entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false, costsHealth: false };
+    const lasso = { entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], zonePos: 0, unplayable: false, costsHealth: false };
     const shop = [
       minion(10, { cardId: 'BODY', techLevel: 2, attack: 4, health: 4 }),
       minion(11, { cardId: 'BODY', techLevel: 2, attack: 3, health: 5 }),
@@ -1478,7 +1478,7 @@ describe('покупка заклинаний витрины (part11)', () => {
     cardId: string,
     cost: number,
     scriptData: (number | null)[] = [null, null, null, null],
-  ) => ({ entityId: 800, cardId, cost, scriptData, unplayable: false, costsHealth: false });
+  ) => ({ entityId: 800, cardId, cost, scriptData, zonePos: 0, unplayable: false, costsHealth: false });
 
   it('бафф по карману советуется с целью', () => {
     const s = state({
@@ -1527,7 +1527,7 @@ describe('покупка заклинаний витрины (part11)', () => {
         minion(10, { cardId: 'BODY', techLevel: 2, attack: 4, health: 4 }),
         minion(11, { cardId: 'BODY', techLevel: 2, attack: 3, health: 5 }),
       ],
-      shopSpells: [{ entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], unplayable: false, costsHealth: false }],
+      shopSpells: [{ entityId: 800, cardId: 'LASSO', cost: 2, scriptData: [], zonePos: 0, unplayable: false, costsHealth: false }],
     });
     const rec = shopSpellRules(s, { cards: lassoCards })[0];
     expect(rec?.action).toBe('buy');
@@ -1661,6 +1661,7 @@ describe('заклинания руки', () => {
     cardId,
     cost: 0,
     scriptData: [null, null],
+    zonePos: 0,
     unplayable: false, costsHealth: false,
     ...patch,
   });
@@ -1927,7 +1928,7 @@ describe('заклинания руки', () => {
   it('заблокированное и не по карману заклинание не советуется', () => {
     const locked = state({
       board: [minion(1, { cardId: 'MINION_X' })],
-      handSpells: [handSpell('BUFF', { scriptData: [4, 2], unplayable: true, costsHealth: false })],
+      handSpells: [handSpell('BUFF', { scriptData: [4, 2], zonePos: 0, unplayable: true, costsHealth: false })],
     });
     expect(spellRules(locked, spellDeps)).toHaveLength(0);
 
@@ -2762,7 +2763,7 @@ describe('заклинание-жертва: «Destroy a friendly …»', () => 
     { id: 'UND_BIG', name: 'Крупная нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 3 },
     { id: 'UND_SMALL', name: 'Мелкая нежить', races: ['UNDEAD'], isBaconPool: true, techLevel: 1 },
   ]);
-  const butcher = { entityId: 50, cardId: 'BUTCHER', cost: 2, scriptData: [6, 2], unplayable: false, costsHealth: false };
+  const butcher = { entityId: 50, cardId: 'BUTCHER', cost: 2, scriptData: [6, 2], zonePos: 0, unplayable: false, costsHealth: false };
 
   it('целится в наименьшего своего подходящего племени (part13, ход 21)', () => {
     const s = state({
@@ -3387,7 +3388,7 @@ describe('заклинание-замена: «Destroy … to get …»', () => 
   });
 
   it('советуется на наименьшую нежить, а без нежити молчит', () => {
-    const spell = { entityId: 50, cardId: 'JAILER_T', cost: 0, scriptData: [], unplayable: false, costsHealth: false };
+    const spell = { entityId: 50, cardId: 'JAILER_T', cost: 0, scriptData: [], zonePos: 0, unplayable: false, costsHealth: false };
     const s = state({
       gold: 0,
       board: [
@@ -3598,6 +3599,7 @@ describe('кэш ожидания по пулу тиров', () => {
       cardId: 'BUFF',
       cost: 0,
       scriptData: [1, 1],
+      zonePos: 0,
       unplayable: false, costsHealth: false,
     };
 
@@ -3655,6 +3657,7 @@ describe('дневной заряд магнита-хранителя', () => {
     cardId: 'CRAFTERt',
     cost: 0,
     scriptData: [] as readonly (number | null)[],
+    zonePos: 0,
     unplayable: false, costsHealth: false,
   });
 
@@ -3701,6 +3704,7 @@ describe('дневной заряд магнита-хранителя', () => {
       cardId: 'BUFF',
       cost: 0,
       scriptData: [] as readonly (number | null)[],
+      zonePos: 0,
       unplayable: false, costsHealth: false,
     });
 
@@ -3979,7 +3983,7 @@ describe('заклинание витрины «даёт миньона» на �
     { id: 'SPROUT', name: 'Новый росток', type: 'Battleground_spell', text: 'Discover a Tier 1 minion.' },
   ]);
   const sproutDeps = { cards: sproutCards };
-  const sprout = { entityId: 900, cardId: 'SPROUT', cost: 3, scriptData: [], unplayable: false, costsHealth: false };
+  const sprout = { entityId: 900, cardId: 'SPROUT', cost: 3, scriptData: [], zonePos: 0, unplayable: false, costsHealth: false };
   const strong = Array.from({ length: 7 }, (_, i) =>
     shopMinion(10 + i, 'MURLOC_5', { attack: 20, health: 20 }),
   );
@@ -4171,7 +4175,7 @@ describe('заклинание руки, обновляющее витрину �
     },
   ]);
   const mosaicDeps = { cards: mosaicCards };
-  const mosaic = (cost = 0) => ({ entityId: 700, cardId: MOSAIC, cost, scriptData: [null, null, null, null], unplayable: false, costsHealth: false });
+  const mosaic = (cost = 0) => ({ entityId: 700, cardId: MOSAIC, cost, scriptData: [null, null, null, null], zonePos: 0, unplayable: false, costsHealth: false });
 
   it('шаблон читает цену после обновления сквозь разметку и переносы строк', () => {
     const s = state({ gold: 2, shop: [shopMinion(9, 'DRAGON_1')] });

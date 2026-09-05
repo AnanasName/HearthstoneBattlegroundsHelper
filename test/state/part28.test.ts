@@ -138,7 +138,7 @@ describe('part28: ветвь модального миньона и предел
       goldTotal: 4,
       board: [minion(1)],
       shopSpells: [
-        { entityId: 90, cardId: 'BG28_805', cost: 2, scriptData: [], unplayable: false, costsHealth: false },
+        { entityId: 90, cardId: 'BG28_805', cost: 2, scriptData: [], zonePos: 0, unplayable: false, costsHealth: false },
       ],
     };
     const advice = shopSpellRules(state, { cards }, DEFAULT_TAVERN_RULES);

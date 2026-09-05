@@ -1007,6 +1007,10 @@ export function createReducer(players: Players): Reducer {
       .map((e) => ({
         entityId: e.id,
         cardId: e.cardId,
+        // Позиция в зоне — та же, по которой уже отсортирован список.
+        // Наружу она идёт затем, что ряд ВИТРИНЫ на экране общий с миньонами
+        // (part41): порядок в нём восстанавливается только по этому числу.
+        zonePos: e.zonePos,
         cost: e.tags.get('COST') ?? 0,
         scriptData: [1, 2, 3, 4].map((i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null),
         unplayable: flag(e, 'LITERALLY_UNPLAYABLE'),

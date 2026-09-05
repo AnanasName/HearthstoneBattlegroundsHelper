@@ -384,6 +384,7 @@ describe('золото заклинания доезжает до следующ
     cardId: 'COIN',
     cost: 2,
     scriptData: [] as readonly (number | null)[],
+    zonePos: 0,
     unplayable: false, costsHealth: false,
   };
   const withCoin = (): GameState =>
