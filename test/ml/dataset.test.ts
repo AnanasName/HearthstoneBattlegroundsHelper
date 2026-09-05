@@ -134,6 +134,10 @@ describe('дополнение старой записи до текущей с�
     // а не `undefined`, который `buyCostOf` превратил бы в NaN.
     expect(state?.shop).toHaveLength(2);
     expect(state?.shop.every((m) => m.buyCost === null)).toBe(true);
+    // Альтернативная таверна (05.09): у записей до неё поля нет вовсе,
+    // и умолчание — «не идёт». Ошибиться оно может только в сторону
+    // прежнего поведения, с которым записи и собирались.
+    expect(state?.altTavern).toBe(false);
     // Остальное — как было: дополнение не переписывает записанное.
     expect(state?.gold).toBe(3);
     expect(state?.hero?.heroPowerCardId).toBe('TB_BaconShop_HP_048');
