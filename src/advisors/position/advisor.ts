@@ -3,6 +3,7 @@ import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mappe
 import type { BattleSimulator } from '../battle/simulator.js';
 import type { GameState, Minion } from '../../state/types.js';
 import { resolveTarget, type PositionTarget } from './opponent.js';
+import { cardRallyCarriers, preferRallySwing, rallySwingNote } from './rallySwing.js';
 import { withSeededRandom } from './rng.js';
 import {
   EMPTY_ESTIMATE,
@@ -52,6 +53,16 @@ export interface PositionAdvice {
   readonly gain: number;
   /** Насколько выше именно доля побед, в п.п. Для подписи в интерфейсе. */
   readonly winGain: number;
+  /**
+   * Приписка про «раж», платящий картой, — или `null`.
+   *
+   * Считается ЗДЕСЬ, а не в оверлее, по той же причине, по которой тут
+   * считаются баффы соседей: тексты карт для боя живут в снапшоте
+   * симулятора, и второй разбор тех же текстов по нашему справочнику
+   * разошёлся бы с первым молча. Совет уходит из воркера структурой, строка
+   * доезжает вместе с ним.
+   */
+  readonly rallyNote: string | null;
   readonly report: SearchReport;
   readonly elapsedMs: number;
 }
@@ -172,10 +183,21 @@ export function advisePosition(
   const report = searchArrangement(first.playerBoard, evaluate, overrides);
 
   const objective = overrides.objective ?? DEFAULT_SEARCH_OPTIONS.objective;
-  const best = report.top[0];
+
+  // Раж, платящий картой, — единственный эффект расстановки, невидимый нашей
+  // мерке (`rallySwing.ts`): бой кладёт карту в руку и возвращает ноль урона.
+  // Поэтому среди расстановок, которые мерка признала НЕОТЛИЧИМЫМИ, берётся
+  // та, где носитель левее и потому успевает ударить. Различимые советы
+  // не меняются ни одним пунктом — на них остаётся приписка в строке.
+  const top = preferRallySwing(
+    report.top,
+    cardRallyCarriers(first.playerBoard, simulator.cards),
+    objective,
+  );
+  const best = top[0];
 
   return {
-    top: report.top,
+    top,
     current: report.current,
     improves:
       best !== undefined &&
@@ -190,6 +212,13 @@ export function advisePosition(
           100,
     winGain:
       best === undefined ? 0 : (winRate(best.estimate) - winRate(report.current.estimate)) * 100,
+    // Приписка нужна ровно тогда, когда совет двигает носителя ража вправо:
+    // тай-брейк выше спасает только неразличимые случаи, а различимые
+    // остаются — и молча платить картой за полпункта нельзя.
+    rallyNote:
+      best === undefined
+        ? null
+        : rallySwingNote(report.current.board, best.board, simulator.cards),
     report,
     elapsedMs: Date.now() - started,
   };
