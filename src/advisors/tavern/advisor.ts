@@ -3707,14 +3707,20 @@ export function heroPowerRule(
         }
       : (namedTierPool(text, state, deps, rules) ?? undefined);
   const { score, average, discounted } = givesMinionValue(state, deps, rules, cost, true, source);
+
+  // Цена СПЕШКИ у силы с ЛЕСТНИЧНОЙ ценой — см. `heroPowerHurryCost`.
+  const hurry = heroPowerHurryCost(text, source ?? null, average, state, deps, rules);
+  const hurried = score - hurry.cost;
+  if (hurry.cost > 0 && hurried <= 0) return null;
+
   // Найденный миньон приходит в руку — на полном борде жертва вычитается,
   // как у заклинания витрины (part31).
-  if (victim !== null && score - victim.value <= rules.sellMargin) return null;
+  if (victim !== null && hurried - victim.value <= rules.sellMargin) return null;
 
   return {
     action: 'heroPower',
     minion: null,
-    score: score - (victim?.value ?? 0),
+    score: hurried - (victim?.value ?? 0),
     cost,
     requiresSlot: false,
     // Жертва называется полем только там, где без продажи силу НЕ НАЖАТЬ:
@@ -3727,7 +3733,76 @@ export function heroPowerRule(
       (discounted && cost < rules.minionCost
         ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки`
         : '') +
+      (hurry.note === null ? '' : `; ${hurry.note}`) +
       (victim === null ? '' : `; ${victim.note}`),
+  };
+}
+
+/**
+ * Цена СПЕШКИ у силы, дорожающей от нажатий (part42, «Ведущая
+ * исследовательница»: «Discover a minion from your Tier. Costs (1) more
+ * after each use», цена в логе идёт 1 → 2 → 3 → 4 ровно по нажатиям).
+ *
+ * Жалоба игрока: «невыгодно нажимать рано, она дорожает с каждым
+ * использованием, а на ранних ходах нет карт, которые помогут понять, через
+ * кого играть». Советник же ставил её ВЕРХНЕЙ строкой с хода 3 и почти
+ * каждый ход, тогда как игрок нажал все три раза в конце партии — на 10-м,
+ * 12-м и 13-м ходах таверны.
+ *
+ * Арифметика тут своя, и она проще, чем у тёмного дара. У дара заряды
+ * конечны, и нажатие ВЫТЕСНЯЕТ поздний ход. Здесь вытеснять нечего:
+ * от ожидания цена не растёт вовсе — она растёт ТОЛЬКО от нажатий, — то есть
+ * отложить нажатие стоит РОВНО НОЛЬ золота. А отложив, за ту же ступеньку
+ * лестницы получаешь тело более высокого тира: по нашей же шкале Discover
+ * своего тира стоит 6.5 очка на первом тире и 21 на шестом. Значит цена
+ * спешки — это прирост тира, который мы отдаём, нажимая сейчас.
+ *
+ * Насколько далеко смотреть, решает горизонт партии: ходов таверны впереди
+ * — замер `remainingTurns` (part28), а тир на последнем из них — кривая
+ * `levelling`. Оценка получается ВЕРХНЕЙ, и это сказано вслух: она молчаливо
+ * считает, что ждать можно до конца партии без потерь. Потеря там есть,
+ * и она ровно одна — ТЕМП: тело, взятое сейчас, воюет в большем числе боёв.
+ * Темпа наша мерка не считает (та же оговорка записана у дара, part31),
+ * поэтому совет обязан назвать и горизонт, и цену словами — иначе игроку
+ * нечему возразить.
+ *
+ * Условие узкое: цена спешки считается, только когда тело зависит от НАШЕГО
+ * тира (источник — пул своего тира). Сила с фиксированным тиром от ожидания
+ * не выигрывает ничего, и придерживать её незачем.
+ */
+function heroPowerHurryCost(
+  text: string,
+  source: readonly Minion[] | TierPoolSource | { readonly tier: number } | null,
+  body: number,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { readonly cost: number; readonly note: string | null } {
+  const growth = firstMatch(rules.heroPowerCostGrowthWords, text);
+  if (growth === null) return { cost: 0, note: null };
+  if (source === null || !('tier' in source)) return { cost: 0, note: null };
+
+  const ahead = remainingTurns(state, rules);
+  const lastTavernTurn = Math.round(tavernTurnOf(state.turn) + ahead);
+  const topTier = Math.max(source.tier, targetTier(2 * lastTavernTurn - 1, rules));
+  const later = topTier > source.tier ? averagePoolValue([topTier], state, deps, rules) : null;
+  if (later === null) {
+    return {
+      cost: 0,
+      note:
+        `цена растёт на ${growth} за нажатие, но выше тира ${String(source.tier)} ` +
+        `таверна уже не поднимется — жать`,
+    };
+  }
+
+  const cost = Math.max(0, later - body);
+  return {
+    cost,
+    note:
+      `но ступеньку лучше приберечь: цена растёт на ${growth} за нажатие, ` +
+      `а ждать ничего не стоит — впереди ещё ${ahead.toFixed(1)} ходов таверны, ` +
+      `и на тире ${String(topTier)} та же сила даст ${later.toFixed(1)} ` +
+      `вместо ${body.toFixed(1)} — спешка стоит ${cost.toFixed(1)}`,
   };
 }
 

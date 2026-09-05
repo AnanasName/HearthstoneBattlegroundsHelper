@@ -583,6 +583,22 @@ export interface TavernRules {
    */
   readonly heroPowerGoldWords: readonly string[];
   /**
+   * Текст силы героя, ЦЕНА КОТОРОЙ РАСТЁТ ОТ НАЖАТИЙ, — «Costs (1) more
+   * after each use» (Lead Explorer, part42). Группа 1 — прирост цены.
+   *
+   * Это не редкость, а класс из ОДНОЙ карты: среди 174 сил пула таких слов
+   * нет больше ни у кого (у «Piggy Bank» сумма растёт по ХОДАМ, а не
+   * по нажатиям, и это другой вопрос). Правило от этого общим быть
+   * не перестаёт — читается текст, а не идентификатор, — но обещать
+   * покрытие сверх одной карты было бы неправдой.
+   *
+   * Живая цена при этом читается тегом `COST` и в шаблоне не нуждается:
+   * лог part42 показывает лестницу 1 → 2 → 3 → 4 ровно по нажатиям.
+   * Шаблон нужен для другого — чтобы ЗНАТЬ, что цена лестничная, и
+   * посчитать цену спешки.
+   */
+  readonly heroPowerCostGrowthWords: readonly string[];
+  /**
    * Текст миньона, ВОЗВРАЩАЮЩЕГО здоровье героя, — «After your hero takes
    * damage, rewind it».
    *
@@ -1234,7 +1250,14 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   namedTierWords: {
     numbered: '\\btier\\s+(\\d)\\b',
-    ownTier: ['\\bof your (?:current\\s+)?tier\\b'],
+    // Предлог у «своего тира» игра пишет ДВУМЯ способами: «a minion of your
+    // Tier» (Search Through Time) и «a minion from your Tier» (Lead Explorer,
+    // part42). Пока стоял один «of», сила Ведущей исследовательницы мерилась
+    // средним ПО ВИТРИНЕ — на пятом тире это 14 очков вместо 18.5 у пула
+    // своего тира, — и тир, названный в тексте прямым словом, терялся молча.
+    // Второй предлог добавляет ровно две карты выборки: саму силу
+    // и «Timewarped On the House» (`BG34_Treasure_903`).
+    ownTier: ['\\b(?:of|from) your (?:current\\s+)?tier\\b'],
   },
 
   // «Your Demons each consume a random minion in the Tavern to gain its
@@ -1290,6 +1313,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // «Roll a 6-sided die.\nGain that much Gold.» — грани группой, между
   // предложениями `\s+`: перенос строки ходит посреди фразы (урок part16).
   heroPowerGoldWords: ['\\broll\\s+an?\\s+(\\d+)-sided\\s+die\\.?\\s*gain\\s+that\\s+much\\s+gold'],
+  heroPowerCostGrowthWords: ['\\bcosts?\\s*\\((\\d+)\\)\\s*more\\s+after\\s+each\\s+use\\b'],
   // Перенос строки в снапшоте ходит посреди предложения — пробел пишется
   // как `\s+`, иначе шаблон молча не совпадает (урок part16).
   healthRewindWords: ['after your hero takes damage,\\s*rewind it'],
