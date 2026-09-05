@@ -125,6 +125,7 @@ npm run spike:battle                перезамер производител�
 npm run spike:position              перезамер всего, на чём стоит фаза 3
 npm run spike:field                 перезамер расстановки против поля бордов
 npm run spike:buff                  замер «+3/+1 против +1/+3» на фикстурах
+npm run spike:bufftarget            КОМУ усиление: крупнейшему телу или вихрю
 npm run spike:level                 подъём: частота совета и согласие с игроком
 npm run spike:taunt                 вредит ли провокация носителю ралли
 npm run spike:hand                  что даёт розыгрыш карты, живущей в руке

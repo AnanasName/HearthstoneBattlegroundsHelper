@@ -81,12 +81,39 @@ describe('part14: заклинание-замена и активации мин
   });
 
   it('нажатая активация видна в состоянии и повторно не советуется (жалоба 3, фактура)', () => {
-    // Надзиратель (id 1854) активирован в 18:28:22, ход 7; срез до смены
-    // хода — нажатие в состоянии, после смены хода счётчик чист.
-    const inTurn = reduceTo('D 18:28:33.9673078');
-    expect(inTurn.activatedEntityIds).toContain(1854);
+    // «Творец обманок» (Decoy Conjurer, id 1142) даёт ОБА события на одной
+    // сущности и с разницей в пять секунд — лучшей фактуры для этой границы
+    // в фикстурах нет:
+    //   18:26:40.69  BLOCK_START PLAY … zone=HAND  — розыгрыш из руки,
+    //   18:26:45.39  BLOCK_START PLAY … zone=PLAY  — активация
+    //                («Activate ({0}): Steal the highest-Attack minion»).
+    //
+    // Между ними миньон стоит на борде, но НЕ нажат: советовать активацию
+    // в тот же ход, когда его выставили, — обычное дело, и запрет тут был бы
+    // прямой потерей хода (part40, ход 17: Тираэль за 1 делает соседа 50/50).
+    const played = reduceTo('D 18:26:45.1294092');
+    expect(played.board.some((m) => m.entityId === 1142)).toBe(true);
+    expect(played.activatedEntityIds).not.toContain(1142);
 
-    const nextTurn = reduceTo('D 18:30:49.0785289');
-    expect(nextTurn.activatedEntityIds).not.toContain(1854);
+    const activated = reduceTo('D 18:26:46.4905917');
+    expect(activated.activatedEntityIds).toContain(1142);
+
+    // Смена хода счётчик чистит.
+    const nextTurn = reduceTo('D 18:27:42.2915767');
+    expect(nextTurn.activatedEntityIds).not.toContain(1142);
+  });
+
+  it('разыгранный из руки миньон не числится активированным (part40, регрессия)', () => {
+    // Прежде зона нажатой сущности читалась из ТАБЛИЦЫ сущностей, а не из
+    // дескриптора строки BLOCK_START. Внутри блока PLAY карта успевает
+    // сменить зону (`ZONE value=PLAY` идёт строкой ниже), а стек блоков висит
+    // на КАЖДОМ событии блока — и любой разыгранный из руки миньон попадал
+    // в «уже активирован в этом ходу». Здесь это «Подозрительный надзиратель»
+    // (id 1854, `Activate ({2}): Give another minion +{0}/+{1}`): за партию
+    // у него РОВНО ОДИН блок PLAY, и тот с `zone=HAND` — то есть его
+    // разыграли и ни разу не нажали.
+    const state = reduceTo('D 18:28:33.9673078');
+    expect(state.board.some((m) => m.entityId === 1854)).toBe(true);
+    expect(state.activatedEntityIds).not.toContain(1854);
   });
 });

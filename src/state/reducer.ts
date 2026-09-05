@@ -688,15 +688,31 @@ export function createReducer(players: Players): Reducer {
       if (block.blockType !== 'PLAY' || block.entityId === null) continue;
       const pressed = entities.get(block.entityId);
       if (pressed === undefined || pressed.controller !== players.selfPlayerId) continue;
+      // Зона нажатой сущности — из дескриптора строки BLOCK_START, а не из
+      // таблицы сущностей: внутри блока карта успевает сменить зону, а стек
+      // блоков висит на КАЖДОМ его событии. Розыгрыш из руки читал зону так
+      // всегда, активация — нет, и разъехалось это молча (part40, ход 17):
+      // у Тираэля BLOCK_START стоит с `zone=HAND`, а строкой ниже приходит
+      // `ZONE value=PLAY`, после чего все остальные события того же блока
+      // видели миньона уже на борде — то есть КАЖДЫЙ разыгранный из руки
+      // миньон попадал в «уже активирован в этом ходу» и советоваться
+      // к активации в свой же ход не мог. Настоящая активация отличается
+      // дескриптором честно: `zone=PLAY` (и у Тираэля в 20:08:59 там же
+      // стоит `Target=` — цель, которой ставят статы).
+      const zoneAtPress =
+        block.entity !== null && block.entity.kind === 'descriptor'
+          ? block.entity.descriptor.zone
+          : pressed.zone;
       if (pressed.cardType === 'HERO_POWER') {
         heroPowerUsedThisTurn = true;
         journal(block, 'heroPower', pressed.cardId, pressed.id);
       } else if (pressed.cardId === DARK_GIFT_BUTTON) {
         darkGiftUsedThisTurn = true;
         journal(block, 'darkGift', pressed.cardId, pressed.id);
-      } else if (pressed.cardType === 'MINION' && pressed.zone === 'PLAY') {
-        // Активация: блок PLAY на миньоне, уже СТОЯЩЕМ на борде, — розыгрыш
-        // из руки отличается зоной сущности (part14, Suspicious Prisonguard).
+      } else if (pressed.cardType === 'MINION' && zoneAtPress === 'PLAY') {
+        // Активация: блок PLAY на миньоне, уже СТОЯВШЕМ на борде В МОМЕНТ
+        // НАЖАТИЯ, — розыгрыш из руки отличается зоной сущности (part14,
+        // Suspicious Prisonguard), и зону надо брать на открытии блока.
         activatedEntityIds.add(pressed.id);
         journal(block, 'activate', pressed.cardId, pressed.id);
       } else if (pressed.cardId === DRAG_BUY || pressed.cardId === DRAG_BUY_SPELL) {
@@ -712,12 +728,7 @@ export function createReducer(players: Players): Reducer {
       } else if (pressed.cardId === LOCK_ALL_BUTTON) {
         journal(block, 'freeze', null, null);
       } else {
-        // Розыгрыш из руки: зона берётся из дескриптора строки BLOCK_START —
-        // к следующим событиям блока карта уже успевает сменить зону.
-        const zoneAtPress =
-          block.entity !== null && block.entity.kind === 'descriptor'
-            ? block.entity.descriptor.zone
-            : pressed.zone;
+        // Розыгрыш из руки — та же зона на открытии блока, что и у активации.
         if (zoneAtPress === 'HAND') journal(block, 'play', pressed.cardId, pressed.id);
       }
     }

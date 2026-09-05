@@ -47,7 +47,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "spike:bufftarget": "tsx src/advisors/tavern/spikeBuffTarget.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

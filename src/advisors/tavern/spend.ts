@@ -14,13 +14,21 @@ import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
  */
 function withHeroPowerBuyCounted(state: GameState, rec: Recommendation): GameState['hero'] {
   const hero = state.hero;
-  if (hero === null || rec.heroPowerBuyLeft === undefined) return hero;
-  const scriptData = [...hero.heroPowerScriptData];
+  if (hero === null) return hero;
+  // Скидка от покупки своего племени (Патчес, part40): «After you buy
+  // a Pirate, your next Hero Power costs (1) less». Живую цену редьюсер
+  // читает тегом, но скидку от СВОЕГО ЖЕ шага плану взять было неоткуда —
+  // цепочка «купить пирата → нажать силу» считала силу по цене ДО покупки
+  // и переоценивала ход на всю величину скидки.
+  const discounted =
+    rec.heroPowerCostAfter === undefined ? hero : { ...hero, heroPowerCost: rec.heroPowerCostAfter };
+  if (rec.heroPowerBuyLeft === undefined) return discounted;
+  const scriptData = [...discounted.heroPowerScriptData];
   // Запись по индексу, а не отображением: на пустом массиве `map` не сделал
   // бы ничего — ровно там, где «тега нет» читается как «счётчик полный»
   // (урок заряда магнита-хранителя, 18.08).
   scriptData[0] = rec.heroPowerBuyLeft;
-  return { ...hero, heroPowerScriptData: scriptData };
+  return { ...discounted, heroPowerScriptData: scriptData };
 }
 
 /**
@@ -298,8 +306,16 @@ export function applyRecommendation(
       const gift = rec.targetMinion;
       const keyword = rec.grantsKeyword;
       const grants = gift != null && keyword !== undefined;
+      // Продажа, ОПЛАЧИВАЮЩАЯ нажатие на полном борде (part40, ход 13):
+      // без неё шаг стоил бы золота, которого нет, а жертва осталась бы
+      // на борде — ровно та дыра, из-за которой прибавку от продажи
+      // в part39 не стали распространять на подъём.
+      const sold = rec.sellFirst;
+      const sellBoard = sold === null ? state.board : withoutEntity(state.board, sold.entityId);
+      const refund = sold === null ? 0 : rules.sellGold;
       return {
         state: paid({
+          gold: state.gold - rec.cost + refund,
           hero: hero === null ? null : { ...hero, heroPowerUsedThisTurn: true },
           // Сила с ЦЕЛЬЮ в витрине забирает карту насовсем («Lock and Load»
           // Тавиша, part29: миньон уходит в REMOVEDFROMGAME). Без этого
@@ -307,8 +323,8 @@ export function applyRecommendation(
           // что выстрелили.
           shop: rec.minion === null ? state.shop : withoutEntity(state.shop, rec.minion.entityId),
           board: grants
-            ? state.board.map((m) => (m.entityId === gift.entityId ? withKeyword(m, keyword) : m))
-            : state.board,
+            ? sellBoard.map((m) => (m.entityId === gift.entityId ? withKeyword(m, keyword) : m))
+            : sellBoard,
         }),
         opaque: !grants,
         terminal: false,

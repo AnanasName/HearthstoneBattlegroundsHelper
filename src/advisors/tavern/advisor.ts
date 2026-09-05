@@ -142,6 +142,17 @@ export interface Recommendation {
    */
   readonly heroPowerBuyLeft?: number;
   /**
+   * Цена силы героя ПОСЛЕ этой покупки — у сил, дешевеющих от покупок своего
+   * племени («After you buy a Pirate, your next Hero Power costs (1) less»,
+   * Патчес, part40).
+   *
+   * Того же рода поле, что `heroPowerBuyLeft`, и по той же причине: живую
+   * цену тегом `COST` читает редьюсер, но скидку, которую приносит СОБСТВЕННЫЙ
+   * шаг плана, взять неоткуда — `applyRecommendation` карт не видит. Считается
+   * там, где справочник есть, и едет к плану полем.
+   */
+  readonly heroPowerCostAfter?: number;
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется у подъёма таверны и у прокрутки — у обоих по одной причине:
@@ -731,6 +742,34 @@ export function heroPowerBuyReward(
   const remaining = hero.heroPowerScriptData[0] ?? parsed.count;
   if (remaining <= 0) return null;
   return { ...parsed, remaining };
+}
+
+/**
+ * Насколько подешевеет сила героя от покупки миньона названного племени.
+ *
+ * `null` — сила так не работает (подавляющее большинство). Число ЖИВОЙ цены
+ * тут не участвует: скидку применяет план на своём гипотетическом состоянии,
+ * а список советов и так читает цену тегом `COST`.
+ */
+export function heroPowerBuyDiscount(
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly race: string; readonly amount: number } | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  const text = cards.info(hero.heroPowerCardId)?.text ?? '';
+  if (text === '') return null;
+  for (const word of rules.heroPowerBuyDiscountWords) {
+    const m = new RegExp(word, 'i').exec(text);
+    if (m?.[1] === undefined || m[2] === undefined) continue;
+    const race = Object.entries(rules.tribeTextWords).find(([, w]) =>
+      new RegExp(`^(?:${w})$`, 'i').test(m[1] ?? ''),
+    )?.[0];
+    if (race === undefined) return null;
+    return { race, amount: Number(m[2]) };
+  }
+  return null;
 }
 
 function parseHeroPowerBuyReward(
@@ -1700,13 +1739,14 @@ function handMinionVictim(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
-): { readonly value: number; readonly note: string } | null {
+): { readonly value: number; readonly note: string; readonly minion: Minion } | null {
   if (state.board.length < rules.boardSize) return null;
   const victim = weakestOwn(state, deps, rules);
   if (victim === null) return null;
   const name = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
   return {
     value: victim.value,
+    minion: victim.minion,
     note: `борд полон — место через продажу ${name} (${victim.value.toFixed(1)})`,
   };
 }
@@ -1733,6 +1773,10 @@ export function buyRules(
   const full = state.board.length >= rules.boardSize;
   const victim = full ? weakestOwn(state, deps, rules) : null;
   const budget = state.gold + (victim === null ? 0 : rules.sellGold);
+  // Скидка на силу от покупки своего племени (Патчес, part40): считается
+  // здесь, где есть справочник, и едет в план полем `heroPowerCostAfter`.
+  const powerDiscount = heroPowerBuyDiscount(state, deps.cards, rules);
+  const powerCost = state.hero?.heroPowerCost ?? null;
 
   return state.shop
     // Цена у каждого миньона своя: скидки героев и даров видны тегом
@@ -1852,6 +1896,18 @@ export function buyRules(
           sellFirst,
           magnetizeTo: host,
           ...(value.heroPowerBuyLeft === null ? {} : { heroPowerBuyLeft: value.heroPowerBuyLeft }),
+          // Пол — ЕДИНИЦА, и это не подобранное число, а край наблюдений.
+          // В логе part40 цена силы принимает ровно три значения: 3 (десять
+          // раз), 2 (десять) и 1 (дважды); НУЛЯ нет ни разу. Считать ниже
+          // виденного значило бы гадать — и гадать в сторону, где наше же
+          // правило силы уходит в молчание (`cost <= 0` возвращает null),
+          // то есть правка создала бы новую тихую дыру вместо совета.
+          // Появится фикстура с нулём — пол снимется вместе с ней.
+          ...(powerDiscount !== null &&
+          powerCost !== null &&
+          (deps.cards.info(minion.cardId)?.races ?? []).includes(powerDiscount.race)
+            ? { heroPowerCostAfter: Math.max(1, powerCost - powerDiscount.amount) }
+            : {}),
           reason:
             `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
             `тир ${tier === null ? '?' : String(tier)}, ценность ${value.total.toFixed(1)}` +
@@ -3618,7 +3674,17 @@ export function heroPowerRule(
   const cost = hero.heroPowerCost;
   if (cost === null || cost <= 0) return null;
   if (!heroPowerReady(hero)) return null;
-  if (cost > state.gold) return null;
+
+  // Найденный миньон приходит в руку, и на полном борде место ему освобождает
+  // ПРОДАЖА — та самая, что приносит золотой. Значит «по карману» считается
+  // вместе с ней, ровно как у покупки (part36, ход 13). Случай part40 (ход 13):
+  // золото 1, борд полон, сила стоит 2 — оверлей сказал «НИЧЕГО», а игрок
+  // продал Southsea Busker и нажал силу, получив золотого Aureate Laureate.
+  // Прибавка идёт ТОЛЬКО там, где продажа и так подразумевается: `victim`
+  // не пуст лишь на полном борде, и продавать «просто ради монеты» правило
+  // по-прежнему не предлагает.
+  const victim = handMinionVictim(state, deps, rules);
+  if (cost > state.gold + (victim === null ? 0 : rules.sellGold)) return null;
 
   const info = deps.cards.info(hero.heroPowerCardId);
   const text = info?.text ?? '';
@@ -3643,7 +3709,6 @@ export function heroPowerRule(
   const { score, average, discounted } = givesMinionValue(state, deps, rules, cost, true, source);
   // Найденный миньон приходит в руку — на полном борде жертва вычитается,
   // как у заклинания витрины (part31).
-  const victim = handMinionVictim(state, deps, rules);
   if (victim !== null && score - victim.value <= rules.sellMargin) return null;
 
   return {
@@ -3652,7 +3717,10 @@ export function heroPowerRule(
     score: score - (victim?.value ?? 0),
     cost,
     requiresSlot: false,
-    sellFirst: null,
+    // Жертва называется полем только там, где без продажи силу НЕ НАЖАТЬ:
+    // иначе совет читался бы как «продай, потом жми», хотя золота хватает
+    // и так, а место игрок освободит сам, когда карта придёт в руку.
+    sellFirst: victim !== null && cost > state.gold ? victim.minion : null,
     reason:
       `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} даёт миньона — ` +
       `${minionSourceNote(source ?? null, average)}` +
@@ -4178,6 +4246,36 @@ function consumeGain(
 }
 
 /**
+ * Абсолютные статы «задать статы» — или `null`, если текст не про это.
+ *
+ * Числа читаются так же, как везде: плейсхолдер `{N}` — индекс
+ * в `TAG_SCRIPT_DATA_NUM` САМОГО миньона, литерал — числом (part40, Тираэль:
+ * `scriptData = [1, 50, 50]`, то есть цена 1 и статы 50/50).
+ */
+export function setStatsOf(
+  minion: Minion,
+  effectText: string,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly attack: number; readonly health: number; readonly total: number } | null {
+  for (const word of rules.setStatsWords) {
+    const m = new RegExp(word, 'i').exec(effectText);
+    if (m === null) continue;
+    const read = (placeholder: string | undefined, literal: string | undefined): number | null => {
+      if (placeholder !== undefined) return minion.scriptData[Number(placeholder)] ?? null;
+      if (literal !== undefined) return Number(literal);
+      return null;
+    };
+    const attack = read(m[1], m[2]);
+    const health = read(m[3], m[4]);
+    // Тег ещё не пришёл — числа нет, и выдумывать его нельзя: «неизвестно»
+    // честнее нуля (тот же довод, что у счётчиков globalInfo).
+    if (attack === null || health === null) return null;
+    return { attack, health, total: attack + health };
+  }
+  return null;
+}
+
+/**
  * Правило активаций миньонов.
  *
  * «Activate (N): …» — способность своего миньона на борде за золото.
@@ -4223,6 +4321,22 @@ export function activationRules(
     }
     const givesMinion = /\b(?:get|summon|discover)\b/i.test(effectText);
 
+    // «Задать статы» — не прибавка, и числа тут АБСОЛЮТНЫЕ (part40, Тираэль:
+    // «Set another minion's stats to {1}/{2}» = 50/50 за 1 золото). Цель
+    // выбирается по наибольшей ПРИБАВКЕ, потому что «задать» умеет
+    // и уменьшить; неположительная прибавка гасит совет.
+    const setStats = setStatsOf(minion, effectText, rules);
+    const setBest =
+      setStats === null
+        ? null
+        : state.board
+            .filter((m) => m.entityId !== minion.entityId)
+            .map((m) => ({ minion: m, gain: setStats.total - ((m.attack ?? 0) + (m.health ?? 0)) }))
+            .reduce<{ minion: Minion; gain: number } | null>(
+              (a, b) => (a === null || b.gain > a.gain ? b : a),
+              null,
+            );
+
     const name = info?.name ?? minion.cardId;
     let score = 0;
     let what = '';
@@ -4236,6 +4350,12 @@ export function activationRules(
       what =
         `${String(consumed.eaters)} своих съедят витрину — ` +
         `около +${String(Math.round(consumed.stats))} статов всего`;
+    } else if (setStats !== null && setBest !== null && setBest.gain > 0) {
+      score = setBest.gain * rules.value.perStatPoint - cost * rules.goldPointValue;
+      what =
+        `сделает ${deps.cards.info(setBest.minion.cardId)?.name ?? setBest.minion.cardId} ` +
+        `${String(setStats.attack)}/${String(setStats.health)} — ` +
+        `+${String(setBest.gain)} статов`;
     } else if (stats > 0) {
       score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
       what = `+${String(stats)} статов`;
@@ -4247,14 +4367,18 @@ export function activationRules(
     if (score <= 0) return [];
 
     // Цель баффа — крупнейший свой, кроме самого активирующего:
-    // «Give another minion…».
+    // «Give another minion…». У «задать статы» цель уже выбрана прибавкой,
+    // и она ОБРАТНАЯ (наименьший свой получает больше всех) — своим полем,
+    // а не общим правилом «крупнейший».
     const others = state.board.filter((m) => m.entityId !== minion.entityId);
     const target =
-      stats > 0 && others.length > 0
-        ? others.reduce((a, b) =>
-            (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
-          )
-        : null;
+      setBest !== null && setBest.gain > 0
+        ? setBest.minion
+        : stats > 0 && others.length > 0
+          ? others.reduce((a, b) =>
+              (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+            )
+          : null;
 
     return [
       {
@@ -5150,6 +5274,21 @@ function spellTargetOn(
       pool = bodies;
       notes.push('провокация зовёт удары, миньоны-эффекты не подставляются');
     }
+  }
+
+  // Ветвь-кандидат «вихрь» сужает пул ДО фильтра кандидатов в продажу,
+  // и это не мелочь порядка, а весь её смысл. `weakestOwn` считает статами,
+  // и на part40 (ход 11) слабейшим своим у него выходит ровно Crackling
+  // Cyclone 2/1 — носитель щита и ВИХРЯ, которого замер против фактического
+  // борда назвал лучшей целью (43.2 % против 22.5 % у крупнейшего тела).
+  // Поставь эту ветвь ПОСЛЕ фильтра — и она не достанет до спорного случая
+  // вовсе, а замер тихо ответит не на тот вопрос. Всё остальное — фильтр
+  // продажи ниже и выбор магнита — работает как работало: сужение пула
+  // ветвью не отменяет ни одной последующей проверки.
+  const windfuryPool = pool.filter((m) => m.windfury);
+  if (rules.buffTargetPreference === 'windfury' && windfuryPool.length > 0) {
+    pool = windfuryPool;
+    notes.push('вихрь бьёт дважды');
   }
 
   // Кандидатов в продажу ДВА, и оба свои правила уже называют.
