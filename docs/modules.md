@@ -34,6 +34,8 @@
 | `src/advisors/position/search.ts` | поиск с накоплением симуляций у выживших |
 | `src/advisors/position/opponent.ts` | против кого считать и насколько картинка стара |
 | `src/advisors/position/advisor.ts` | публичный вход советника расстановки |
+| `src/advisors/position/paidSlot.ts` | платный край борда от тринкета: приписка к совету |
+| `src/advisors/position/rallySwing.ts` | раж, платящий картой: тай-брейк среди неразличимых и приписка |
 | `src/advisors/position/rng.ts` | детерминированный ГПСЧ, подмена `Math.random` |
 | `src/advisors/position/spike.ts` | замеры фазы 3, воспроизводимые |
 | `src/advisors/position/spikeField.ts` | замеры цели-поля: молчание, цена K бордов, качество |
@@ -83,6 +85,7 @@
 | `src/live/replay.ts` | проигрывание записи через живой путь |
 | `src/ui/format.ts` | как советы выглядят словами, общее на CLI и оверлей |
 | `src/ui/watch.ts` | живой режим в терминале |
+| `src/overlay/layout.ts` | где на экране лежат карты игры: индекс слота → прямоугольник |
 | `src/overlay/view.ts` | что показывать в оверлее, без DOM и Electron |
 | `src/overlay/window.ts` | окно поверх игры, включается и выключается из трея |
 | `src/ui/demo-phase1.ts` | печать состояния по ходам |
