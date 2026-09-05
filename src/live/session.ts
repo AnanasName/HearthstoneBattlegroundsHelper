@@ -43,6 +43,19 @@ export interface LiveSessionDeps {
     update: (state: GameState) => void;
     reset: () => void;
   };
+  /**
+   * Прогноз места (фаза 6): тот же поток состояний, что у датасета.
+   *
+   * Отдельной зависимостью, а не внутри советника: прогноз читает ИСТОРИЮ
+   * точек решения партии, а советник зовётся по смене положения дел
+   * и промежуточных состояний не видит. Правило точки у него общее
+   * с рекордером (`DecisionPoints`), значит и поток обязан быть тем же —
+   * каждое обновление и сброс на новой партии.
+   */
+  readonly forecast?: {
+    update: (state: GameState) => void;
+    reset: () => void;
+  };
 }
 
 export interface LiveSessionHandlers extends LiveAdvisorHandlers {
@@ -78,6 +91,7 @@ export function startLiveSession(
         advisor.update(state);
         if (state === null) return;
         deps.dataset?.update(state);
+        deps.forecast?.update(state);
         const warning = freshness.update(state);
         if (warning !== null) onFreshness?.(warning);
       },
@@ -86,6 +100,7 @@ export function startLiveSession(
         if (notice.kind === 'newGame') {
           freshness.reset();
           deps.dataset?.reset();
+          deps.forecast?.reset();
         }
         onNotice?.(notice);
       },

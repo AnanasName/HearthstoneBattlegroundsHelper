@@ -144,10 +144,13 @@ export class DecisionPoints {
   #pending: DatasetCheckpoint | null = null;
   #turns: DatasetCheckpoint[] = [];
 
+  /** Точка засчитывается только с показанной витриной: пустая — не решение. */
+  #worthy(point: DatasetCheckpoint | null): point is DatasetCheckpoint {
+    return point !== null && point.state.shop.length > 0;
+  }
+
   #commit(): void {
-    if (this.#pending !== null && this.#pending.state.shop.length > 0) {
-      this.#turns.push(this.#pending);
-    }
+    if (this.#worthy(this.#pending)) this.#turns.push(this.#pending);
     this.#pending = null;
   }
 
@@ -167,6 +170,26 @@ export class DecisionPoints {
     const turns = this.#turns;
     this.#turns = [];
     return turns;
+  }
+
+  /**
+   * Точки партии на СЕЙЧАС, не вымывая накопленное: закрытые ходы плюс
+   * незакрытый текущий.
+   *
+   * Нужно прогнозу места (`src/ml/forecast.ts`): признаки замера 4 читают
+   * историю партии, то есть точки до текущей, а `drain()` для этого
+   * не годится — он опустошает накопитель и отдаёт результат один раз,
+   * на конце партии. Своего второго накопителя у прогноза быть не должно:
+   * правило «что считается точкой решения» и так живёт в одном месте,
+   * и разъехалось бы оно молча — прогноз считался бы на одних точках,
+   * а датасет писался бы по другим.
+   *
+   * Незакрытая точка входит намеренно: прогноз спрашивают ПОСРЕДИ хода,
+   * и без неё он отвечал бы про прошлый ход. Признаки её читают те же,
+   * что запишет датасет: `#pending` — то самое состояние до траты золота.
+   */
+  snapshot(): readonly DatasetCheckpoint[] {
+    return this.#worthy(this.#pending) ? [...this.#turns, this.#pending] : this.#turns;
   }
 
   reset(): void {

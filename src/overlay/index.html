@@ -349,6 +349,27 @@
       #tempo .tier.locked {
         color: #5f6368;
       }
+
+      /* ── Прогноз места ───────────────────────────────────────────────── */
+
+      /*
+        Самый нижний блок и самый тихий: он ничего не советует, а обрезка
+        окна съедает нижнее первым — терять надо именно его.
+
+        Число и его ошибка набраны ОДНИМ размером и одним цветом: прогноз,
+        промахивающийся на 1.7 места, набранный крупно и ярко, читался бы
+        как знание. Выделения нет вовсе — ни цвета, ни веса.
+      */
+      #forecast:not(:empty) {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #forecast .value {
+        font-variant-numeric: tabular-nums;
+        color: #eceff1;
+      }
     </style>
   </head>
   <body>
@@ -356,8 +377,9 @@
       Порядок узлов — порядок важности, и это не вкус: окно фиксированной
       высоты, прокрутки нет и быть не может (оно сквозное для мыши и не берёт
       фокус), поэтому переполнение обрезается МОЛЧА. Значит терять оно обязано
-      снизу: сначала темп (фон без вердикта), потом витрину и борд — их игрок
-      видит в самой игре, — и лишь в последнюю очередь действенное.
+      снизу: сначала прогноз места (он ничего не советует вовсе) и темп (фон
+      без вердикта), потом витрину и борд — их игрок видит в самой игре, —
+      и лишь в последнюю очередь действенное.
     -->
     <div id="stage"></div>
 
@@ -374,6 +396,7 @@
       <div id="actions"></div>
       <div id="position"></div>
       <div id="tempo"></div>
+      <div id="forecast"></div>
     </div>
 
     <script>
@@ -509,6 +532,24 @@
         if (tempo.note) target.appendChild(line(tempo.note));
       }
 
+      function forecastBlock(target, forecast) {
+        target.replaceChildren();
+        if (!forecast) return;
+
+        // Ошибка идёт В ТОЙ ЖЕ строке и тем же тоном, что число: подпись,
+        // которую можно потерять при обрезке отдельно от прогноза, обещала бы
+        // точность, которой у него нет.
+        const row = node('div', '', 'line');
+        row.appendChild(node('span', 'ожидаемое место ', 'label'));
+        row.appendChild(
+          node('span', `${forecast.place.toFixed(1)} ± ${forecast.error.toFixed(1)}`, 'value'),
+        );
+        row.appendChild(
+          node('span', ` · ${forecast.label} · по ${forecast.games} партиям`, 'label'),
+        );
+        target.appendChild(row);
+      }
+
       window.overlay.onView((view) => {
         el('card').className = view.active ? '' : 'idle';
         el('header').textContent = view.header;
@@ -530,6 +571,7 @@
         }
 
         tempoBlock(el('tempo'), view.tempo);
+        forecastBlock(el('forecast'), view.forecast);
 
         // Метки поверх настоящих карт — последним: они рисуются в своём слое
         // и на панель не влияют.

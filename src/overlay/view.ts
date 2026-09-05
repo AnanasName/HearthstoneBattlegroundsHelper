@@ -10,6 +10,7 @@ import {
 import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
 import type { SpendPlan } from '../advisors/tavern/spend.js';
 import type { CardIndex } from '../data/cards.js';
+import type { PlaceForecast } from '../ml/forecast.js';
 import type { GameState } from '../state/types.js';
 import { buttonRect, slotRect, type Rect, type SlotRow, type TavernButton } from './layout.js';
 import {
@@ -220,6 +221,31 @@ export interface OverlayOrderMark {
   readonly moved: boolean;
 }
 
+/**
+ * Прогноз финального места — единственная строка оверлея, которая не советует.
+ *
+ * Право на неё дано замером, а не желанием: критерий фазы 6 был написан
+ * 18.08.2026 до всяких данных и взят 05.09.2026 на 43 партиях (docs/ml.md,
+ * «Перезамер 05.09»). Поэтому и содержимое строки — то, что замерено:
+ * само число, ТИПИЧНАЯ ОШИБКА этого числа и размер выборки, по которой
+ * обучено. Без ошибки рядом прогноз читается как знание, а он на своей
+ * же выборке промахивается почти на два места.
+ *
+ * Ни советов, ни вердиктов отсюда не следует: «ожидается 5-е место»
+ * не значит «поднимай таверну» (предрегистрация, п. 5 «чего не докажет»).
+ * Поэтому блок стоит последним и ничего не окрашивает.
+ */
+export interface OverlayForecast {
+  /** Ожидаемое место, 1..8. */
+  readonly place: number;
+  /** Типичная ошибка (MAE прогноза по кросс-валидации той же выборки). */
+  readonly error: number;
+  /** По скольким партиям обучена модель. */
+  readonly games: number;
+  /** Подпись блока — та же роль, что `label` у темпа. */
+  readonly label: string;
+}
+
 export interface OverlayView {
   /** Есть ли что показывать вообще. */
   readonly active: boolean;
@@ -234,6 +260,8 @@ export interface OverlayView {
   readonly plan: OverlayPlan | null;
   /** Темп таверны; `null` — вне таверны и на модальных экранах. */
   readonly tempo: OverlayTempo | null;
+  /** Прогноз места; `null` — модели нет, стола не видно или не таверна. */
+  readonly forecast: OverlayForecast | null;
   /** Кольца и подписи поверх настоящих карт игры. */
   readonly marks: readonly OverlayMark[];
   /** Номера советуемой расстановки над своими миньонами. */
@@ -249,6 +277,7 @@ export const EMPTY_VIEW: OverlayView = {
   position: null,
   plan: null,
   tempo: null,
+  forecast: null,
   marks: [],
   order: [],
 };
@@ -302,6 +331,14 @@ export interface ViewInput {
   /** Предупреждение продукта (снапшот отстал от патча); держится всю партию. */
   readonly warning?: string | null;
   /**
+   * Прогноз места, посчитанный снаружи (`src/ml/forecast.ts`).
+   *
+   * Полем, а не расчётом внутри вида: модель читает ИСТОРИЮ точек решения
+   * партии, а вид знает одно состояние — «сейчас». Накопитель истории живёт
+   * там же, где рекордер датасета, и по тому же правилу точки.
+   */
+  readonly forecast?: PlaceForecast | null;
+  /**
    * Отношение ширины окна игры к высоте — под метки на картах.
    *
    * Длины раскладки замерены ВЫСОТОЙ (игра масштабирует стол по ней),
@@ -342,6 +379,9 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
       // ещё нечем и некуда. Стола с картами тоже нет — помечать нечего.
       plan: null,
       tempo: null,
+      // Прогноз молчит и здесь: точек решения ещё нет, а модель считает
+      // по ним — на экране выбора героя ей нечего читать.
+      forecast: null,
       marks: [],
       order: [],
     };
@@ -370,6 +410,7 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
     position: positionView(input, cards),
     plan: modal ? null : planView(input, cards),
     tempo: modal ? null : tempoView(input),
+    forecast: forecastView(input),
     // Пока открыт модальный экран, стол игре не принадлежит: карты витрины
     // и борда за ним, и кольцо на них показывало бы в никуда. А вот сам
     // модальный экран пометить можно — у лавки аксессуаров ряд свой.
@@ -850,6 +891,29 @@ function tempoView(input: ViewInput, rules: TavernRules = DEFAULT_TAVERN_RULES):
     note,
     upgrade,
     label: 'темп — кривая сообщества, не замер',
+  };
+}
+
+/**
+ * Блок прогноза: число, его ошибка и выборка — или молчание.
+ *
+ * Когда молчать, решает сам прогнозист (`src/ml/forecast.ts`): нет модели,
+ * нет таблицы лобби, нет ни одной точки решения, идёт бой. Вид эти условия
+ * не повторяет — второе определение того же правила разъехалось бы молча,
+ * и оверлей с терминалом стали бы показывать разное.
+ *
+ * На МОДАЛЬНОМ экране, в отличие от плана и темпа, блок остаётся: он
+ * не про золото и не про витрину, которых за модалкой нет, а про партию
+ * целиком — выбор тринкета его не устаревает.
+ */
+function forecastView(input: ViewInput): OverlayForecast | null {
+  const forecast = input.forecast ?? null;
+  if (forecast === null) return null;
+  return {
+    place: forecast.place,
+    error: forecast.error,
+    games: forecast.games,
+    label: 'прогноз, не совет',
   };
 }
 

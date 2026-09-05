@@ -9,6 +9,7 @@ import type {
 import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
 import type { SpendPlan } from '../advisors/tavern/spend.js';
 import type { CardIndex } from '../data/cards.js';
+import type { PlaceForecast } from '../ml/forecast.js';
 import type { GameState, Minion } from '../state/types.js';
 
 /**
@@ -151,6 +152,22 @@ export function buyCheckLine(
 /** Вариант открытого выбора одной строкой. */
 export function choiceLine(c: ChoiceAdvice): string {
   return `${c.name} — ${c.reason}`;
+}
+
+/**
+ * Прогноз места одной строкой — для терминала и для тестов подачи.
+ *
+ * Три вещи вместе и в одной строке: число, его типичная ошибка и выборка,
+ * по которой обучено. Порознь они врут: 3.4 без «± 1.7» читается как знание,
+ * а «± 1.7» без выборки не даёт возразить. Слова «прогноз, не совет» стоят
+ * тут не для вежливости — из этого числа НЕ выводится ни одно действие,
+ * так записано в предрегистрации замера (docs/ml.md).
+ */
+export function forecastLine(forecast: PlaceForecast): string {
+  return (
+    `ожидаемое место ${forecast.place.toFixed(1)} ± ${forecast.error.toFixed(1)}` +
+    ` — прогноз, не совет; по ${String(forecast.games)} партиям`
+  );
 }
 
 /**

@@ -7,6 +7,7 @@ import { loadCardIndex } from '../data/cards.js';
 import { DATASET_DIR, DatasetRecorder } from '../dataset/recorder.js';
 import { PositionWorker } from '../live/position/client.js';
 import { startLiveSession, type LiveSession } from '../live/session.js';
+import { PlaceForecaster } from '../ml/forecast.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import { waitingForLogText } from '../ui/setup.js';
@@ -162,6 +163,10 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
   const cards = loadCardIndex();
   const worker = new PositionWorker();
 
+  // Прогноз места: снапшот модели читается один раз при старте окна
+  // (`data/ml/place-model.json`), истории партии он набирает сам.
+  const forecaster = new PlaceForecaster();
+
   let latest: GameState | null = null;
   let tavern: ViewInput['tavern'] = null;
   let thinking = false;
@@ -187,6 +192,10 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
           buyCheck,
           warning,
           spendPlan: plan,
+          // Прогноз спрашивается на КАЖДОЙ отрисовке, а не запоминается
+          // в переменной: он меняется от состояния, а не от совета, и его
+          // накопитель обновляется чаще, чем зовётся советник.
+          forecast: forecaster.current(),
           // Окно накрывает экран целиком, поэтому его соотношение сторон
           // и есть игровое: по нему метки переводятся из долей высоты,
           // которыми замерена раскладка, в доли ширины.
@@ -203,6 +212,7 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
       position: worker,
       buys: worker,
       dataset: new DatasetRecorder({ dir: DATASET_DIR }),
+      forecast: forecaster,
     },
     {
       onFreshness: (text) => {

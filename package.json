@@ -40,6 +40,7 @@
     "ml:eval3": "tsx src/ml/report.ts --features=relative",
     "ml:eval4": "tsx src/ml/report.ts --features=history",
     "ml:imitation": "tsx src/ml/imitationReport.ts",
+    "ml:fit": "tsx src/ml/fit.ts",
     "ml:track": "tsx src/ml/track.ts",
     "measure:cardstats": "tsx src/advisors/tavern/measureCardStats.ts",
     "analyze:cardstats": "tsx src/advisors/tavern/analyzeCardStats.ts",

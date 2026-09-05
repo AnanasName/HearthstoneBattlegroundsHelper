@@ -1106,6 +1106,87 @@ describe('вид оверлея', () => {
   });
 });
 
+/**
+ * Блок прогноза места — единственная строка вида, которая не советует.
+ * Число приходит полем снаружи (`PlaceForecaster`), а вид отвечает
+ * за подачу: рядом с числом обязаны стоять его ошибка и выборка, иначе
+ * прогноз читается как знание (docs/ml.md, «Перезамер 05.09.2026»).
+ */
+describe('прогноз места', () => {
+  let cards: CardIndex;
+
+  beforeAll(() => {
+    cards = loadCardIndex();
+  }, 60_000);
+
+  it('показывается с ошибкой, выборкой и подписью «не совет»', () => {
+    const view = buildView(
+      input({ forecast: { place: 3.42, error: 1.689, games: 43 } }),
+      cards,
+    );
+
+    expect(view.forecast?.place).toBeCloseTo(3.42, 2);
+    expect(view.forecast?.error).toBeCloseTo(1.689, 3);
+    expect(view.forecast?.games).toBe(43);
+    expect(view.forecast?.label).toContain('не совет');
+  });
+
+  it('без прогноза блока нет вовсе', () => {
+    expect(buildView(input(), cards).forecast).toBeNull();
+    expect(buildView(input({ forecast: null }), cards).forecast).toBeNull();
+  });
+
+  /**
+   * Модальный экран гасит план и темп — они про золото и витрину, которых
+   * за модалкой нет. Прогноз остаётся: он про партию целиком, и выбор
+   * тринкета его не устаревает.
+   */
+  it('переживает модальный экран, в отличие от плана и темпа', () => {
+    const withTrinkets: TavernAdvice = {
+      ...tavern,
+      trinkets: [
+        {
+          offer: { entityId: 77, cardId: 'BG30_MagicItem_701', subsetRaces: [], cost: 3 },
+          name: 'Хрустальный шар',
+          tribeMinions: 0,
+          averagePlacement: null,
+          reason: 'своих таких нет',
+        },
+      ],
+    };
+
+    const view = buildView(
+      input({ tavern: withTrinkets, forecast: { place: 4.1, error: 1.7, games: 43 } }),
+      cards,
+    );
+
+    expect(view.plan).toBeNull();
+    expect(view.tempo).toBeNull();
+    expect(view.forecast?.place).toBeCloseTo(4.1, 2);
+  });
+
+  it('на экране выбора героя молчит: точек решения ещё нет', () => {
+    const withHero: TavernAdvice = {
+      ...tavern,
+      heroChoice: [
+        {
+          option: { entityId: 98, cardId: 'BG34_HERO_001' },
+          name: 'Исказительница Хроми',
+          averagePosition: 3.86,
+          reason: 'по статистике среднее место 3.86',
+        },
+      ],
+    };
+
+    const view = buildView(
+      input({ tavern: withHero, forecast: { place: 4.1, error: 1.7, games: 43 } }),
+      cards,
+    );
+
+    expect(view.forecast).toBeNull();
+  });
+});
+
 describe('экран выбора героя', () => {
   it('открытый выбор героя показывает ранжирование, лучший помечен', () => {
     const cards2 = loadCardIndex();

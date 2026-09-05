@@ -26,11 +26,13 @@ import { LiveAdvisor, type LiveAdvisorHandlers } from '../live/advisor.js';
 import { PositionWorker } from '../live/position/client.js';
 import { replayLog } from '../live/replay.js';
 import { startLiveSession } from '../live/session.js';
+import { PlaceForecaster } from '../ml/forecast.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import {
   buyCheckLine,
   choiceLine,
+  forecastLine,
   minionLabel,
   noOpponentReason,
   opponentStale,
@@ -221,10 +223,17 @@ async function main(): Promise<void> {
   // читается из тринкетов игрока.
   let lastState: GameState | null = null;
 
+  // Прогноз места (фаза 6): свой накопитель точек решения, тот же
+  // и в проигрывании записи, и в живой игре — иначе строка была бы
+  // только в игре, и проверить её без Hearthstone было бы нечем.
+  const forecaster = new PlaceForecaster();
+
   const handlers: LiveAdvisorHandlers = {
     onTavern: (advice, state) => {
       lastState = state;
       printSituation(state, advice, cards);
+      const forecast = forecaster.current();
+      if (forecast !== null) console.log(`   ◇ ${forecastLine(forecast)}`);
     },
     onBuyCheck: (result, target) => {
       // Брошенный досчёт молчит: он бросается на каждом действии игрока,
@@ -251,7 +260,9 @@ async function main(): Promise<void> {
       readFileSync(args.replay, 'utf8'),
       {
         onUpdate: (feed) => {
-          advisor.update(feed.snapshot());
+          const state = feed.snapshot();
+          if (state !== null) forecaster.update(state);
+          advisor.update(state);
         },
         onDone: (feed) => {
           const state = feed.snapshot();
@@ -280,6 +291,7 @@ async function main(): Promise<void> {
       // Каждая живая партия копится в датасет фазы 6 — сыгранное
       // и не записанное потеряно навсегда.
       dataset: new DatasetRecorder({ dir: DATASET_DIR }),
+      forecast: forecaster,
     },
     {
       ...handlers,

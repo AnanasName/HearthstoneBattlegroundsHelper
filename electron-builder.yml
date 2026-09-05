@@ -29,6 +29,13 @@ extraResources:
     to: data/bgstats
     filter:
       - '*.json'
+  # Веса прогноза места (фаза 6). Данные, а не код: у исполнителя датасета
+  # нет вовсе, и модель, обучающаяся при старте, молчала бы у всех, кроме
+  # нас (src/ml/placeModel.ts).
+  - from: data/ml
+    to: data/ml
+    filter:
+      - '*.json'
 asar: false
 win:
   target:

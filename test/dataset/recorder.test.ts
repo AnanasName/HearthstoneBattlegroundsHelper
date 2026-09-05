@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { DatasetRecorder, gameSignature, type DatasetRecord } from '../../src/dataset/recorder.js';
+import {
+  DatasetRecorder,
+  DecisionPoints,
+  gameSignature,
+  type DatasetRecord,
+} from '../../src/dataset/recorder.js';
 import { EMPTY_STATE, type GameState, type Hero } from '../../src/state/types.js';
 import { board } from '../minions.js';
 
@@ -114,6 +119,45 @@ describe('накопитель датасета', () => {
     recorder.update({ ...tavern(1), phase: 'gameOver', finalPlace: 2, actions });
 
     expect(saved[0]?.actions).toEqual(actions);
+  });
+});
+
+/**
+ * Чтение накопленного без вымывания — то, чем живёт прогноз места
+ * (`src/ml/forecast.ts`). Правило точки у прогноза и датасета обязано быть
+ * ОДНО: разъедься оно, и модель считала бы по одним точкам, а училась
+ * бы на других.
+ */
+describe('точки партии на сейчас', () => {
+  it('отдаёт закрытые ходы и незакрытый текущий, не вымывая накопленное', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(1));
+    points.update(tavern(3));
+
+    expect(points.snapshot().map((p) => p.turn)).toEqual([1, 3]);
+    // Второе чтение отдаёт то же — в отличие от drain().
+    expect(points.snapshot().map((p) => p.turn)).toEqual([1, 3]);
+    expect(points.drain().map((p) => p.turn)).toEqual([1, 3]);
+    expect(points.snapshot()).toEqual([]);
+  });
+
+  it('точка с пустой витриной не считается — то же правило, что при записи', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(1, { shop: [] }));
+
+    expect(points.snapshot()).toEqual([]);
+  });
+
+  it('после траты золота держит состояние ДО траты', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(5));
+    points.update(tavern(5, { gold: 2, goldSpent: 3 }));
+
+    expect(points.snapshot()).toHaveLength(1);
+    expect(points.snapshot()[0]?.state.goldSpent).toBe(0);
   });
 });
 
