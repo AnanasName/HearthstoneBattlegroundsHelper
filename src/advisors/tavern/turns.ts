@@ -1,7 +1,7 @@
 import { readPowerEvents, type BlockContext } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
-import type { GameState } from '../../state/types.js';
+import { isBattlegroundsGame, type GameState } from '../../state/types.js';
 
 /**
  * Точки решения в таверне — состояния, в которых советник имеет смысл.
@@ -125,7 +125,10 @@ export function readTavernTurns(text: string): TavernTurn[] {
 
     const state = reducer.snapshot();
 
-    if (state.phase !== 'tavern' || state.turn === 0 || state.hero === null) {
+    // Чужой режим партии точек решения не даёт: в обычном Hearthstone фаза
+    // читается `tavern`, мана — золотом, а чужие карты — витриной (замер
+    // на живом логе 05.09: шесть `GT_RANKED` давали шесть «точек»).
+    if (!isBattlegroundsGame(state) || state.phase !== 'tavern' || state.turn === 0 || state.hero === null) {
       commit();
       continue;
     }

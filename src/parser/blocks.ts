@@ -49,10 +49,11 @@ export const SOURCE_SEND_CHOICES = 'GameState.SendChoices';
 
 /**
  * Канал метаданных партии: `BuildNumber=248348`, `GameType=…` — приходит
- * одним заходом сразу после CREATE_GAME. Пропускается только строка
- * с номером билда: по ней приложение узнаёт, не отстал ли снапшот карт
- * от патча (part16: BuildNumber виден на 239-й строке каждой партии).
- * Тот же канал несёт имена игроков — их читает `readPlayers` отдельно.
+ * одним заходом сразу после CREATE_GAME. Пропускаются две строки: номер
+ * билда (по нему приложение узнаёт, не отстал ли снапшот карт от патча;
+ * part16: виден на 239-й строке каждой партии) и РЕЖИМ партии, по которому
+ * отсекается чужая игра. Тот же канал несёт имена игроков — их читает
+ * `readPlayers` отдельно.
  */
 export const SOURCE_GAME_INFO = 'GameState.DebugPrintGame';
 
@@ -140,10 +141,15 @@ export class PowerEventAssembler {
       return { line, blocks: [] };
     }
 
-    // Из канала метаданных пропускается только номер билда — остальное там
-    // либо читается отдельно (имена игроков), либо не нужно вовсе.
+    // Из канала метаданных пропускаются номер билда и РЕЖИМ партии;
+    // остальное там либо читается отдельно (имена игроков), либо не нужно.
+    // Режим добавлен 06.09: без него обычная партия Hearthstone попадала
+    // в датасет как партия Battlegrounds — её мана читается золотом,
+    // а чужие карты витриной (замер на живом логе из шести `GT_RANKED`).
     if (line.source === SOURCE_GAME_INFO) {
-      return line.content.startsWith('BuildNumber=') ? { line, blocks: [] } : null;
+      const meta =
+        line.content.startsWith('BuildNumber=') || line.content.startsWith('GameType=');
+      return meta ? { line, blocks: [] } : null;
     }
 
     if (line.source !== SOURCE_OF_TRUTH) return null;

@@ -548,6 +548,22 @@ export interface GameState {
   /** Выигран ли прошлый бой — тег `BACON_WON_LAST_COMBAT`. */
   readonly wonLastCombat: boolean | null;
   /**
+   * РЕЖИМ партии — строка `GameType=…` канала `DebugPrintGame` сразу после
+   * CREATE_GAME (`GT_BATTLEGROUNDS`, `GT_RANKED`, `GT_CASUAL`…).
+   *
+   * Нужен потому, что в ОБЫЧНОЙ партии Hearthstone наши признаки таверны
+   * складываются сами собой, и складываются ЛОЖНО: фаза читается как
+   * `tavern`, мана — как золото (5/5, 6/6 … 10/10 — мановая кривая),
+   * а чужие карты попадают в «витрину». Замерено на живом логе игрока
+   * (сессия 05.09 19:16, шесть `GT_RANKED` и ни одной BG): пакетный путь
+   * дал ШЕСТЬ точек решения, а живой рекордер записал бы такую партию
+   * в датасет как настоящую — с тиром 1, пустым лобби и местом `null`.
+   *
+   * `null` — режим ещё не объявлен (начало лога) или строка не встретилась:
+   * тогда прежнее поведение сохраняется, и решает уже сам состав состояния.
+   */
+  readonly gameType: string | null;
+  /**
    * Идёт ли АЛЬТЕРНАТИВНАЯ ТАВЕРНА — тег `BACON_ALT_TAVERN_IN_PROGRESS`
    * на `GameEntity` («Альтернативная история»).
    *
@@ -698,6 +714,23 @@ export interface GameState {
   readonly actions: readonly PlayerAction[];
 }
 
+/**
+ * Режим партии Battlegrounds — значение `GameType` канала `DebugPrintGame`.
+ * Живёт здесь, а не у приёма архивов, потому что читателей теперь двое:
+ * `dataset/import.ts` (чужие сессии) и точка решения (`gameType` состояния).
+ */
+export const BATTLEGROUNDS_GAME_TYPE = 'GT_BATTLEGROUNDS';
+
+/**
+ * Партия ли это Battlegrounds. Неизвестный режим (`null`) считается СВОИМ:
+ * строки `GameType` нет у сегмента переподключения (part1, part35, part41),
+ * и выбрасывать такие партии значило бы терять доигранные партии ради
+ * страховки от чужого режима, который в них и так не встречается.
+ */
+export function isBattlegroundsGame(state: Pick<GameState, 'gameType'>): boolean {
+  return state.gameType === null || state.gameType === BATTLEGROUNDS_GAME_TYPE;
+}
+
 export const EMPTY_STATE: GameState = {
   phase: 'tavern',
   turn: 0,
@@ -722,6 +755,7 @@ export const EMPTY_STATE: GameState = {
   nextOpponentPlayerId: null,
   currentOpponentPlayerId: null,
   wonLastCombat: null,
+  gameType: null,
   altTavern: false,
   lastSeenBoards: {},
   lastSeenBoardTurns: {},

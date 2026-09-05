@@ -10,6 +10,7 @@ import { readTar } from '../collector/tar.js';
 import { SOURCE_OF_TRUTH } from '../parser/blocks.js';
 import { parseLogLine, splitLogLines } from '../parser/logLine.js';
 import { reduceLog } from '../state/reducer.js';
+import { BATTLEGROUNDS_GAME_TYPE as BG_GAME_TYPE } from '../state/types.js';
 import { gameSignature, type DatasetRecord } from './recorder.js';
 
 /**
@@ -80,7 +81,7 @@ export type SkipReason = 'не Battlegrounds' | 'обрыв' | 'нет точе�
  * У сегмента переподключения строки может не быть — тогда режим
  * неизвестен, и партия идёт в разбор как есть.
  */
-export const BATTLEGROUNDS_GAME_TYPE = 'GT_BATTLEGROUNDS';
+export { BATTLEGROUNDS_GAME_TYPE } from '../state/types.js';
 
 export function gameTypeOf(text: string): string | null {
   const m = /GameState\.DebugPrintGame\(\) - GameType=(\w+)/.exec(text);
@@ -203,7 +204,7 @@ interface ParsedGame {
 function parseGame(session: string, index: number, text: string, overlay: boolean | null, now: Date): ParsedGame {
   const base = { session, index, overlay };
   const gameType = gameTypeOf(text);
-  if (gameType !== null && gameType !== BATTLEGROUNDS_GAME_TYPE) {
+  if (gameType !== null && gameType !== BG_GAME_TYPE) {
     return { ...base, record: null, battleTag: null, skip: { reason: 'не Battlegrounds', detail: gameType } };
   }
   let record: DatasetRecord;

@@ -128,6 +128,56 @@ describe('накопитель датасета', () => {
  * ОДНО: разъедься оно, и модель считала бы по одним точкам, а училась
  * бы на других.
  */
+/**
+ * Чужой режим партии. Фактура — живой лог игрока от 05.09 (сессия 19:16,
+ * шесть `GT_RANKED` и ни одной Battlegrounds): пакетный путь давал по ней
+ * ШЕСТЬ точек решения, а рекордер записывал партию в датасет. Признаки
+ * таверны обычный Hearthstone складывает сам — фаза читается `tavern`,
+ * мана идёт золотом (5/5, 6/6 … 10/10 — мановая кривая), а чужие карты
+ * попадают в витрину, — поэтому отличить режимы можно только тегом.
+ */
+describe('партия чужого режима', () => {
+  it('рейтинговая партия точек решения не даёт', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(5, { gameType: 'GT_RANKED' }));
+    points.update(tavern(7, { gameType: 'GT_RANKED' }));
+
+    expect(points.snapshot()).toEqual([]);
+    expect(points.drain()).toEqual([]);
+  });
+
+  it('и в датасет не пишется даже на конце партии', () => {
+    const { recorder, saved } = recorderWithSink();
+
+    recorder.update(tavern(5, { gameType: 'GT_RANKED' }));
+    recorder.update({ ...tavern(6, { gameType: 'GT_RANKED' }), phase: 'gameOver' });
+
+    expect(saved).toEqual([]);
+  });
+
+  /**
+   * Неизвестный режим считается СВОИМ: строки `GameType` нет у сегмента
+   * переподключения (part1, part35, part41), и выбрасывать такие партии
+   * значило бы терять доигранные ради страховки от чужого режима.
+   */
+  it('без строки режима партия читается как своя', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(5));
+
+    expect(points.snapshot()).toHaveLength(1);
+  });
+
+  it('Battlegrounds пишется как прежде', () => {
+    const points = new DecisionPoints();
+
+    points.update(tavern(5, { gameType: 'GT_BATTLEGROUNDS' }));
+
+    expect(points.snapshot()).toHaveLength(1);
+  });
+});
+
 describe('точки партии на сейчас', () => {
   it('отдаёт закрытые ходы и незакрытый текущий, не вымывая накопленное', () => {
     const points = new DecisionPoints();

@@ -15,7 +15,7 @@ import {
   type BuyCheckResult,
 } from '../advisors/tavern/simulated.js';
 import type { CardIndex } from '../data/cards.js';
-import type { GameState, Minion } from '../state/types.js';
+import { isBattlegroundsGame, type GameState, type Minion } from '../state/types.js';
 
 /**
  * Когда звать советников и когда бросать начатое.
@@ -193,6 +193,13 @@ export class LiveAdvisor {
   /** Положение дел изменилось. Звать можно хоть на каждое событие. */
   update(state: GameState | null): void {
     if (state === null) return;
+
+    // Чужой режим партии советов не получает вовсе. Без этой строки оверлей
+    // жил своей жизнью поверх обычного Hearthstone: признаки таверны там
+    // складываются сами (мана читается золотом, чужие карты витриной),
+    // и советник честно предлагал «купить» карту соперника. Замер — живой
+    // лог 05.09 из шести `GT_RANKED`: шесть точек решения на пустом месте.
+    if (!isBattlegroundsGame(state)) return;
 
     const key = situationKey(state);
     if (key === this.#key) return;

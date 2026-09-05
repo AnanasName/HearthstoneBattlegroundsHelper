@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { DATASET_DIR } from '../app/paths.js';
-import type { GameState, PlayerAction } from '../state/types.js';
+import { isBattlegroundsGame, type GameState, type PlayerAction } from '../state/types.js';
 
 /**
  * Накопление датасета собственных партий — сырьё фазы 6 (ML).
@@ -170,6 +170,16 @@ export class DecisionPoints {
   }
 
   update(state: GameState): void {
+    // Партия ЧУЖОГО режима точек решения не имеет вовсе. Проверка стоит
+    // здесь, а не у записи датасета, потому что признаки таверны обычная
+    // партия Hearthstone складывает сама и ЛОЖНО: фаза читается `tavern`,
+    // мана — золотом (5/5, 6/6 … 10/10), чужие карты — витриной. Замерено
+    // на живом логе (05.09, сессия из шести `GT_RANKED`): без этой строки
+    // пакетный путь давал шесть точек, а рекордер писал партию в датасет.
+    if (!isBattlegroundsGame(state)) {
+      this.#commit();
+      return;
+    }
     if (state.phase !== 'tavern' || state.turn === 0 || state.hero === null) {
       this.#commit();
       return;

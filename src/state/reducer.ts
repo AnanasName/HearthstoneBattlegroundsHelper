@@ -205,6 +205,7 @@ export function createReducer(players: Players): Reducer {
   let currentOpponentPlayerId: number | null = null;
   let wonLastCombat: boolean | null = null;
   let altTavern = false;
+  let gameType: string | null = null;
   let maxTechLevel: number | null = null;
 
   /**
@@ -671,6 +672,16 @@ export function createReducer(players: Players): Reducer {
     if (content.startsWith('BuildNumber=')) {
       const n = Number(content.slice('BuildNumber='.length));
       if (Number.isFinite(n)) buildNumber = n;
+      return;
+    }
+
+    // Режим партии — тем же каналом метаданных и той же строкой после
+    // CREATE_GAME. Читается ради одного: обычная партия Hearthstone
+    // складывает наши признаки таверны ЛОЖНО (мана читается золотом,
+    // чужие карты — витриной), и без явного режима она попадала в датасет
+    // как партия Battlegrounds.
+    if (content.startsWith('GameType=')) {
+      gameType = content.slice('GameType='.length).trim();
       return;
     }
 
@@ -1158,6 +1169,7 @@ export function createReducer(players: Players): Reducer {
       currentOpponentPlayerId,
       wonLastCombat,
       altTavern,
+      gameType,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
       lastSeenBoardTurns: Object.fromEntries(lastSeenBoardTurns),
       lobby,
