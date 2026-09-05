@@ -155,8 +155,19 @@ export interface OverlayTempo {
   readonly label: string;
 }
 
-/** Каким смыслом окрашена метка на карте. */
-export type MarkTone = 'buy' | 'sell' | 'keep' | 'target';
+/**
+ * Каким смыслом окрашена метка на карте.
+ *
+ * `tavern` — не смысл, а МЕСТО: метка стоит на кнопке таверны, а не на карте.
+ * Свой цвет ей нужен по замеру глазами, а не для красоты: у подъёма кнопка
+ * сама зелёно-золотая, и зелёное кольцо покупки на ней теряется (жалоба
+ * игрока по part41: «обводка для поднятия таверны сильно сливается
+ * по цвету»); там же игра рисует СВОИ зелёные рамки доступности вокруг
+ * обновления и заморозки. Смысл действия у кнопки и без цвета назван
+ * словом — «ПОДНЯТЬ ТАВЕРНУ · 4», «ОБНОВИТЬ · 1», «ЗАМОРОЗИТЬ», — а вот
+ * у карт цвет остаётся единственным различием покупки и продажи.
+ */
+export type MarkTone = 'buy' | 'sell' | 'keep' | 'target' | 'tavern';
 
 /**
  * Метка поверх настоящей карты в игре.
@@ -360,8 +371,9 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
     plan: modal ? null : planView(input, cards),
     tempo: modal ? null : tempoView(input),
     // Пока открыт модальный экран, стол игре не принадлежит: карты витрины
-    // и борда за ним, и кольцо на них показывало бы в никуда.
-    marks: modal ? [] : marksView(input),
+    // и борда за ним, и кольцо на них показывало бы в никуда. А вот сам
+    // модальный экран пометить можно — у лавки аксессуаров ряд свой.
+    marks: modal ? trinketMarks(input) : marksView(input),
     order: modal ? [] : orderView(input),
   };
 }
@@ -462,6 +474,45 @@ function toneOf(action: Recommendation['action']): MarkTone {
 }
 
 /**
+ * Одна карта ряда витрины: миньон или заклинание — на экране они равноправны.
+ */
+interface ShopCard {
+  readonly entityId: number;
+  readonly cardId: string;
+  readonly spell: boolean;
+}
+
+/**
+ * Ряд ВИТРИНЫ так, как он стоит на экране.
+ *
+ * Складывать два списка подряд нельзя, и это стоило игроку двух пунктов
+ * обратной связи по part41 («съехала обводка», «для заклинаний обводки
+ * вовсе нет»). Витрина у нас разложена по типу карты — `shop` отдельно,
+ * `shopSpells` отдельно, — а игра держит их в ОДНОЙ зоне с общей сквозной
+ * нумерацией: part41, ход 5 — миньоны на местах 1, 2, 4, «Recruit
+ * a Trainee» ТРЕТЬИМ; ход 7 — четыре миньона и «Enchanted Lasso» пятым.
+ * Пока состав ряда считался по одним миньонам, ряд из пяти карт советник
+ * считал рядом из четырёх, и кольцо уезжало на полшага вправо — ровно
+ * на разницу центровки.
+ *
+ * Порядок берётся из `zonePos`, а не из порядка списков: «заклинание
+ * последнее» — догадка, которую тот же ход 5 и опровергает.
+ */
+function shopRow(state: GameState): ShopCard[] {
+  const cards: { readonly card: ShopCard; readonly pos: number }[] = [
+    ...state.shop.map((m) => ({
+      card: { entityId: m.entityId, cardId: m.cardId, spell: false },
+      pos: m.zonePos,
+    })),
+    ...state.shopSpells.map((s) => ({
+      card: { entityId: s.entityId, cardId: s.cardId, spell: true },
+      pos: s.zonePos,
+    })),
+  ];
+  return cards.sort((a, b) => a.pos - b.pos).map((c) => c.card);
+}
+
+/**
  * Метки поверх настоящих карт.
  *
  * Порядок сборки — от главного к второстепенному: сначала шаги плана (весь
@@ -476,6 +527,25 @@ function marksView(input: ViewInput): OverlayMark[] {
   const marks: OverlayMark[] = [];
   const taken = new Set<string>();
 
+  const shop = shopRow(state);
+
+  /** Метка на месте `index` ряда `row` из `count` карт. */
+  const mark = (
+    row: SlotRow,
+    index: number,
+    count: number,
+    tone: MarkTone,
+    label: string | null,
+    step: number | null,
+  ): void => {
+    const key = `${row}:${String(index)}`;
+    if (taken.has(key)) return;
+    const rect = slotRect(row, index, count, aspect);
+    if (rect === null) return;
+    taken.add(key);
+    marks.push({ row, button: null, index, count, tone, label, step, rect });
+  };
+
   const place = (
     minion: { readonly entityId: number } | null,
     tone: MarkTone,
@@ -483,24 +553,35 @@ function marksView(input: ViewInput): OverlayMark[] {
     step: number | null,
   ): void => {
     if (minion === null) return;
-    const rows: readonly [SlotRow, readonly { readonly entityId: number }[]][] = [
-      ['shop', state.shop],
-      ['board', state.board],
-    ];
-    for (const [row, list] of rows) {
-      const index = list.findIndex((m) => m.entityId === minion.entityId);
-      if (index < 0) continue;
-      const key = `${row}:${String(index)}`;
-      if (taken.has(key)) return;
-      const rect = slotRect(row, index, list.length, aspect);
-      if (rect === null) return;
-      taken.add(key);
-      marks.push({ row, button: null, index, count: list.length, tone, label, step, rect });
+    const inShop = shop.findIndex((c) => c.entityId === minion.entityId);
+    if (inShop >= 0) {
+      mark('shop', inShop, shop.length, tone, label, step);
+      return;
+    }
+    const onBoard = state.board.findIndex((m) => m.entityId === minion.entityId);
+    if (onBoard >= 0) {
+      mark('board', onBoard, state.board.length, tone, label, step);
       return;
     }
     // Карты нет ни в витрине, ни на борде — она в руке, и разместить её
     // негде: рука лежит веером, её геометрия не замерена. Действие остаётся
     // в панели, и это честнее кольца, поставленного наугад.
+  };
+
+  /**
+   * Метка на ЗАКЛИНАНИИ витрины — по карте, потому что сущности у совета нет.
+   *
+   * Совет называет заклинание полем `spellCardId`, и этого достаточно: две
+   * копии одного заклинания в витрине — это две одинаковые карты по одной
+   * цене, и любая из них верный ответ на «купить вот это». Ищется карта
+   * только в витрине и только у действий витрины: у заклинания РУКИ то же
+   * поле значит карту в руке, а её место на экране не замерено.
+   */
+  const placeSpell = (cardId: string | null | undefined, tone: MarkTone, label: string | null, step: number | null): void => {
+    if (cardId == null) return;
+    const index = shop.findIndex((c) => c.spell && c.cardId === cardId);
+    if (index < 0) return;
+    mark('shop', index, shop.length, tone, label, step);
   };
 
   const button = (which: TavernButton, tone: MarkTone, label: string, step: number | null): void => {
@@ -525,14 +606,27 @@ function marksView(input: ViewInput): OverlayMark[] {
   const apply = (rec: Recommendation, step: number | null): void => {
     const which = buttonOf(rec.action);
     if (which !== null) {
-      button(which, toneOf(rec.action), priced(rec), step);
+      button(which, 'tavern', priced(rec), step);
       // Заморозка держит витрину ради НАЗВАННОЙ карты, и без кольца на ней
       // совет читается как «заморозить просто так» — тот же дефект, что
       // голое «ОБНОВИТЬ» без цели (part37).
-      if (rec.action === 'freeze') place(rec.minion, 'keep', null, null);
+      if (rec.action === 'freeze') {
+        place(rec.minion, 'keep', null, null);
+        // Витрину держат и ради ЗАКЛИНАНИЯ (part17 → part23 → part29):
+        // у такого совета `minion` пуст, и без кольца на карте он читался бы
+        // как «заморозить просто так».
+        placeSpell(rec.spellCardId, 'keep', null, null);
+      }
       return;
     }
     place(rec.minion, toneOf(rec.action), priced(rec), step);
+    // Покупка заклинания витрины — тоже покупка, и карта у неё на столе есть.
+    // Прежде кольца у неё не было вовсе: `minion` пуст, а по `spellCardId`
+    // никто не искал (жалоба игрока по part41, ход 5: советник предлагал
+    // «КУПИТЬ Recruit a Trainee за 2», а на столе не помечал ничего).
+    if (rec.minion === null && rec.action === 'buy') {
+      placeSpell(rec.spellCardId, toneOf(rec.action), priced(rec), step);
+    }
     // Жертва, цель и носитель — отдельные карты, и все трое названы словами
     // в строке действия; на столе им нужны свои кольца, иначе игрок ищет их
     // глазами.
@@ -565,6 +659,68 @@ function marksView(input: ViewInput): OverlayMark[] {
     if (top !== undefined) apply(top, null);
   }
   return marks;
+}
+
+/**
+ * Метка на лавке аксессуаров — кольцо на том тринкете, который советуем взять.
+ *
+ * Панель ранжирует все варианты словами, но выбирают их НЕ в панели: игрок
+ * смотрит на четыре карты посреди экрана и там же жмёт. Просьба игрока
+ * (part41) дословно: «хочу, чтобы также подсказывало на ui с тринкетами,
+ * как и с картами».
+ *
+ * Порядок вариантов на экране берётся из КАНАЛА ВЫБОРОВ, и это не вкус,
+ * а единственный источник: у сущностей тринкетов в `SETASIDE` позиция
+ * не проставлена вовсе — все четыре с `zonePos=0` (part41, 01:26:07), —
+ * а `trinketOffer` собран обходом таблицы сущностей и порядка экрана
+ * не хранит. Строки `Entities[0..3]` выбора id=8 идут ровно так, как карты
+ * стоят слева направо: Путеводная свеча, Восковое копьё, Удочка Пэгла,
+ * Чешуя волшебного дракона — сверено с кадром игрока.
+ *
+ * Молчание тут честнее догадки: нет открытого выбора (зонный путь тринкетов
+ * опаздывает — в part9 в точке решения было 3 варианта из 4) или советуемый
+ * тринкет в вариантах не нашёлся — метки нет, а панель остаётся на месте.
+ */
+function trinketMarks(input: ViewInput): OverlayMark[] {
+  const best = input.tavern?.trinkets[0];
+  const choice = input.state.openChoice;
+  if (best === undefined || choice === null || choice.options.length === 0) return [];
+
+  // Кольцо ставится только там, где ранжирование НА ЧЁМ-ТО основано:
+  // свои миньоны названного племени или среднее место по статистике.
+  // Это то же условие, по которому первый вариант выделяется в панели, —
+  // порядок «оценить не берёмся» задан обходом сущностей, и кольцо на нём
+  // утверждало бы выбор, которого мы не делали.
+  if (best.tribeMinions === 0 && best.averagePlacement == null) return [];
+
+  // Сначала по сущности, потом по карте: id варианта и id зонной копии
+  // совпадают не всегда (part9), а карта одна и та же в обоих путях.
+  // Двух одинаковых тринкетов в одном предложении не бывает.
+  const byEntity = choice.options.findIndex((o) => o.entityId === best.offer.entityId);
+  const index =
+    byEntity >= 0 ? byEntity : choice.options.findIndex((o) => o.cardId === best.offer.cardId);
+  if (index < 0) return [];
+
+  const rect = slotRect('trinket', index, choice.options.length, input.aspect ?? CALIBRATED_ASPECT);
+  if (rect === null) return [];
+
+  // Цена называется в метке по той же причине, по которой она названа
+  // в строке совета: в одном предложении варианты стоят РАЗНОГО (part32,
+  // ход 17: 4, 5, 5 и 2 при десяти золотых), и «взять вот этот» без цены
+  // не решение. Тега `COST` иногда нет вовсе — тогда цены нет и в метке.
+  const cost = best.offer.cost;
+  return [
+    {
+      row: 'trinket',
+      button: null,
+      index,
+      count: choice.options.length,
+      tone: 'buy',
+      label: cost === null ? 'ВЗЯТЬ' : `ВЗЯТЬ · ${String(cost)}`,
+      step: null,
+      rect,
+    },
+  ];
 }
 
 /**
@@ -713,12 +869,14 @@ function positionView(input: ViewInput, cards: CardIndex): OverlayLine | null {
     return { text: noOpponentReason(position.opponent), tone: 'muted' };
   }
 
-  const text = positionLine(
-    position.advice,
-    position.target,
-    cards,
+  const text = positionLine(position.advice, position.target, cards, [
     paidSlotNote(input.state, cards),
-  );
+    // Раж, платящий картой: советник по-прежнему может двинуть носителя
+    // вправо — если бой РАЗЛИЧИМО этого требует, — но молча делать этого
+    // не должен. Курса «карта в руке → проценты боя» у нас нет, и пока его
+    // нет, решает игрок, а наше дело — назвать цену (part41).
+    position.advice.rallyNote,
+  ]);
   if (opponentStale(position.target)) {
     // Не «плохой совет», а совет по устаревшим данным: разница существенная,
     // и прятать её нельзя.

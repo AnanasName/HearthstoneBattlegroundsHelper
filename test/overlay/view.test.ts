@@ -130,6 +130,7 @@ function advice(patch: Partial<PositionAdvice> = {}): PositionAdvice {
     improves: true,
     gain: 6.2,
     winGain: 5.1,
+    rallyNote: null,
     elapsedMs: 3200,
     report: {
       top: [],
@@ -450,6 +451,128 @@ describe('вид оверлея', () => {
     expect(sell?.step).toBeNull();
   });
 
+  it('метки: заклинание витрины стоит в ОДНОМ ряду с миньонами', () => {
+    // part41, ход 5: миньоны на местах 1, 2 и 4, а «Recruit a Trainee»
+    // ТРЕТЬИМ. Пока ряд считался по одним миньонам, советник видел ряд
+    // из трёх карт вместо четырёх, кольцо уезжало на полшага, а у самого
+    // заклинания метки не было вовсе — оба пункта игрока.
+    const shop = [minion(201, { zonePos: 1 }), minion(202, { zonePos: 2 }), minion(203, { zonePos: 4 })];
+    const buySpell: Recommendation = {
+      action: 'buy',
+      minion: null,
+      spellCardId: 'BG28_504',
+      score: 6.4,
+      cost: 2,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'даёт миньона',
+    };
+    const view = buildView(
+      input({
+        state: {
+          ...state,
+          shop,
+          shopSpells: [
+            {
+              entityId: 775,
+              cardId: 'BG28_504',
+              zonePos: 3,
+              cost: 2,
+              scriptData: [],
+              unplayable: false,
+              costsHealth: false,
+            },
+          ],
+        },
+        tavern: { ...tavern, recommendations: [buySpell] },
+      }),
+      cards,
+    );
+
+    const mark = view.marks.find((m) => m.row === 'shop');
+    expect(mark?.count, 'ряд из четырёх карт, а не из трёх миньонов').toBe(4);
+    expect(mark?.index, 'заклинание стоит третьим').toBe(2);
+    expect(mark?.label).toContain('КУПИТЬ');
+
+    // И место миньона в том же ряду считается по позиции, а не по номеру
+    // в списке: четвёртая карта ряда — это индекс 3, хотя миньон третий.
+    const buyLast: Recommendation = { ...buySpell, minion: minion(203, { zonePos: 4 }), spellCardId: null };
+    const last = buildView(
+      input({
+        state: {
+          ...state,
+          shop,
+          shopSpells: [
+            {
+              entityId: 775,
+              cardId: 'BG28_504',
+              zonePos: 3,
+              cost: 2,
+              scriptData: [],
+              unplayable: false,
+              costsHealth: false,
+            },
+          ],
+        },
+        tavern: { ...tavern, recommendations: [buyLast] },
+      }),
+      cards,
+    );
+    expect(last.marks.find((m) => m.row === 'shop')?.index).toBe(3);
+  });
+
+  it('метки: заморозка РАДИ заклинания помечает и кнопку, и саму карту', () => {
+    // У такого совета `minion` пуст (витрину держат ради заклинания,
+    // ветка part17 → part29), и кольца на карте не было вовсе — совет
+    // читался как «заморозить просто так».
+    const freezeForSpell: Recommendation = {
+      action: 'freeze',
+      minion: null,
+      spellCardId: 'BG28_512',
+      score: 8.5,
+      cost: 0,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'даёт миньона, а золота не хватает',
+    };
+    const view = buildView(
+      input({
+        state: {
+          ...state,
+          shop: [minion(201, { zonePos: 1 })],
+          shopSpells: [
+            {
+              entityId: 900,
+              cardId: 'BG28_512',
+              zonePos: 2,
+              cost: 2,
+              scriptData: [],
+              unplayable: false,
+              costsHealth: false,
+            },
+          ],
+        },
+        tavern: { ...tavern, recommendations: [freezeForSpell] },
+      }),
+      cards,
+    );
+
+    expect(view.marks.find((m) => m.button === 'freeze')?.tone).toBe('tavern');
+    const card = view.marks.find((m) => m.row === 'shop');
+    expect(card?.index).toBe(1);
+    expect(card?.count).toBe(2);
+    expect(card?.tone).toBe('keep');
+  });
+
+  it('метки: у кнопок таверны свой цвет, а не цвет покупки', () => {
+    // Кнопка подъёма сама зелёно-золотая, и зелёное кольцо на ней теряется
+    // (жалоба игрока по part41). Смысл действия у кнопки назван словом,
+    // у карт же цвет — единственное различие покупки и продажи.
+    const view = buildView(input({ spendPlan: plan() }), cards);
+    expect(view.marks.find((m) => m.button === 'levelUp')?.tone).toBe('tavern');
+    expect(view.marks.find((m) => m.row === 'shop')?.tone).toBe('buy');
+  });
+
   it('метки: карту руки разместить негде, и она метки не получает', () => {
     // Рука лежит веером, её геометрия не замерена. Кольцо наугад показало бы
     // на чужую карту — это хуже, чем отсутствие кольца.
@@ -562,6 +685,110 @@ describe('вид оверлея', () => {
     );
     expect(view.marks).toHaveLength(0);
     expect(view.order).toHaveLength(0);
+  });
+
+  it('метки: лавка аксессуаров помечает советуемый вариант, порядок — из канала выборов', () => {
+    // Просьба игрока по part41: «хочу, чтобы также подсказывало на ui
+    // с тринкетами, как и с картами». Порядок на экране знает ТОЛЬКО канал
+    // выборов: у сущностей тринкетов в SETASIDE позиция не проставлена —
+    // все четыре с `zonePos=0`, — а порядок `trinketOffer` экрану не равен.
+    // Числа взяты с кадра: советуемая «Чешуя волшебного дракона» стоит
+    // на экране ЧЕТВЁРТОЙ, а в `trinketOffer` — второй.
+    const offer = (entityId: number, cardId: string, cost: number | null) => ({
+      entityId,
+      cardId,
+      subsetRaces: [],
+      cost,
+    });
+    const scale = offer(6616, 'BG32_MagicItem_363', 3);
+    const withTrinkets: TavernAdvice = {
+      ...tavern,
+      trinkets: [
+        { offer: scale, name: 'Faerie Dragon Scale', tribeMinions: 5, reason: 'упоминает DRAGON' },
+        {
+          offer: offer(6618, 'BG32_MagicItem_366', 1),
+          name: 'Guiding Candle',
+          tribeMinions: 0,
+          reason: 'эффект вне племён',
+        },
+      ],
+    };
+    const openChoice: GameState['openChoice'] = {
+      id: 8,
+      sourceCardId: 'BG30_Trinket_2nd',
+      options: [
+        { entityId: 6618, cardId: 'BG32_MagicItem_366' },
+        { entityId: 6617, cardId: 'BG36_MagicItem_309' },
+        { entityId: 6615, cardId: 'BG30_MagicItem_993' },
+        { entityId: 6616, cardId: 'BG32_MagicItem_363' },
+      ],
+    };
+
+    const view = buildView(
+      input({ state: { ...state, openChoice }, tavern: withTrinkets, spendPlan: plan() }),
+      cards,
+    );
+
+    expect(view.marks).toHaveLength(1);
+    const mark = view.marks[0]!;
+    expect(mark.row).toBe('trinket');
+    expect(mark.index, 'на экране он четвёртый').toBe(3);
+    expect(mark.count).toBe(4);
+    // Цена в метке обязательна: в одном предложении варианты стоят разного.
+    expect(mark.label).toBe('ВЗЯТЬ · 3');
+    // Стол за модальным экраном по-прежнему не помечается, и номеров нет.
+    expect(view.marks.some((m) => m.row === 'shop' || m.row === 'board')).toBe(false);
+    expect(view.order).toHaveLength(0);
+  });
+
+  it('метки: без открытого выбора лавка молчит, а панель — нет', () => {
+    // Зонный путь тринкетов опаздывает (part9: в точке решения 3 варианта
+    // из 4). Кольцо наугад показало бы на чужую карту, а список советов
+    // остаётся на месте и всё называет словами.
+    const withTrinkets: TavernAdvice = {
+      ...tavern,
+      trinkets: [
+        {
+          offer: { entityId: 6616, cardId: 'BG32_MagicItem_363', subsetRaces: [], cost: 3 },
+          name: 'Faerie Dragon Scale',
+          tribeMinions: 5,
+          reason: 'упоминает DRAGON',
+        },
+      ],
+    };
+    const view = buildView(input({ tavern: withTrinkets }), cards);
+    expect(view.marks).toHaveLength(0);
+    expect(view.actions[0]?.text).toContain('Faerie Dragon Scale');
+  });
+
+  it('метки: лавка без основания для порядка кольца не получает', () => {
+    // Когда ни племён, ни статистики, порядок вариантов задан обходом
+    // сущностей — кольцо на первом утверждало бы выбор, которого мы
+    // не делали. Панель при этом всё равно показывает все варианты.
+    const withUnknown: TavernAdvice = {
+      ...tavern,
+      trinkets: [
+        {
+          offer: { entityId: 1, cardId: 'X', subsetRaces: [], cost: 2 },
+          name: 'Неизвестный',
+          tribeMinions: 0,
+          averagePlacement: null,
+          reason: 'оценить не берёмся',
+        },
+      ],
+    };
+    const view = buildView(
+      input({
+        state: {
+          ...state,
+          openChoice: { id: 1, sourceCardId: 'BG30_Trinket_1st', options: [{ entityId: 1, cardId: 'X' }] },
+        },
+        tavern: withUnknown,
+      }),
+      cards,
+    );
+    expect(view.marks).toHaveLength(0);
+    expect(view.actions[0]?.text).toContain('Неизвестный');
   });
 
   it('номера расстановки появляются только когда совет что-то меняет', () => {

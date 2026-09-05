@@ -165,7 +165,10 @@ function printPosition(
   }
 
   console.log(
-    `   расстановка: ${positionLine(advice, target, cards, state === null ? null : paidSlotNote(state, cards))}`,
+    `   расстановка: ${positionLine(advice, target, cards, [
+      state === null ? null : paidSlotNote(state, cards),
+      advice.rallyNote,
+    ])}`,
   );
 
   if (opponentStale(target)) {

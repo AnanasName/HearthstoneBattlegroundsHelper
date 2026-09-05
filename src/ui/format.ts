@@ -293,18 +293,25 @@ export function positionLine(
   advice: PositionAdvice,
   target: PositionTarget,
   cards: CardIndex,
-  paidSlot: string | null = null,
+  notes: readonly (string | null)[] = [],
 ): string {
   const odds = `${winPercent(advice.report.current.estimate).toFixed(0)}% побед`;
   const spent = `${opponentSource(target)}, ${String(advice.elapsedMs)} мс`;
   const best = advice.top[0];
-  const paid = paidSlot === null ? '' : `; ${paidSlot}`;
+  // Приписок бывает несколько, и все они об одном: чего расстановка НЕ
+  // считает (платный край борда, раж, платящий картой). Список, а не пара
+  // параметров: следующая такая слепота допишется одной строкой у места,
+  // где её нашли, а не расширением подписи этой функции.
+  const tail = notes
+    .filter((n): n is string => typeof n === 'string' && n !== '')
+    .map((n) => `; ${n}`)
+    .join('');
 
   if (!advice.improves || best === undefined) {
-    return `менять нечего (${odds}, ${spent})${paid}`;
+    return `менять нечего (${odds}, ${spent})${tail}`;
   }
   return (
     `${best.board.map((m) => minionLabel(m, cards)).join(' → ')}` +
-    `  +${advice.gain.toFixed(1)} п.п. к ${odds} (${spent})${paid}`
+    `  +${advice.gain.toFixed(1)} п.п. к ${odds} (${spent})${tail}`
   );
 }
