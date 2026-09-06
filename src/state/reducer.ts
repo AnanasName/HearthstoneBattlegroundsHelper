@@ -50,8 +50,23 @@ const FULL_ENTITY_CREATING_RE = /^FULL_ENTITY - Creating ID=(\d+) CardID=(\S*)/;
  * Пока разбор искал только форму FULL_ENTITY, теги после SHOW_ENTITY уходили
  * в никуда, а раскрытые карты оставались без cardId — именно поэтому энчанты
  * выглядели безымянными.
+ *
+ * CHANGE_ENTITY устроен ТАК ЖЕ и разбирается тем же шаблоном: игра сообщает
+ * им, что сущность стала ДРУГОЙ КАРТОЙ, — новый id карты в хвосте после
+ * `CardID=`, а дескриптор по общему правилу показывает состояние ДО замены
+ * (docs/power-log.md, п. 5). За строкой идёт блок тегов новой карты
+ * (`CARDTYPE`, `ATK`, `HEALTH`, `PREMIUM`, `CARDRACE`), поэтому строку
+ * обязан узнавать не только тот, кому нужен cardId: пока она не узнавалась,
+ * `current` оставался на ПРЕЖНЕЙ сущности, и эти теги уходили к ней.
+ *
+ * По корпусу 45 партий таких строк 252 в канале-источнике, и они делают три
+ * разные вещи: слот аксессуара становится взятым тринкетом (по две на партию),
+ * миньон соперника превращается в бою, а «Сейф» `BG36_520t` в НАШЕЙ руке
+ * открывается ЗОЛОТЫМ миньоном (part46: 16 событий за партию). Последнее
+ * и стоило совета: рука числилась вечным «Unplayable», и разыграть открытый
+ * сейф советник не предлагал никогда.
  */
-const SHOW_ENTITY_RE = /^SHOW_ENTITY - Updating Entity=(\d+) CardID=(\S*)/;
+const UPDATING_ENTITY_RE = /^(?:SHOW|CHANGE)_ENTITY - Updating Entity=(\d+) CardID=(\S*)/;
 
 /** Кнопка подъёма таверны — по одной на каждый достижимый тир. */
 const TECH_UP_BUTTON_RE = /^TB_BaconShopTechUp\d+_Button$/;
@@ -814,15 +829,23 @@ export function createReducer(players: Players): Reducer {
       return;
     }
 
-    if (content.startsWith('FULL_ENTITY') || content.startsWith('SHOW_ENTITY')) {
-      const revealing = content.startsWith('SHOW_ENTITY');
+    if (
+      content.startsWith('FULL_ENTITY') ||
+      content.startsWith('SHOW_ENTITY') ||
+      content.startsWith('CHANGE_ENTITY')
+    ) {
+      // FULL_ENTITY лишь ОБЪЯВЛЯЕТ карту, а SHOW_ENTITY и CHANGE_ENTITY
+      // сообщают, чем она стала, — их слово старше того, что было известно.
+      const authoritative = !content.startsWith('FULL_ENTITY');
       currentIsGameEntity = false;
 
       if (descriptorHere !== null) {
         // У SHOW_ENTITY с дескриптором cardId стоит в хвосте, после `CardID=`,
         // а внутри самого дескриптора он ещё пустой — карта же была скрыта.
+        // У CHANGE_ENTITY дескриптор несёт СТАРУЮ карту, и хвост тут не
+        // уточнение, а замена.
         const revealed = /\bCardID=(\S+)\s*$/.exec(content)?.[1];
-        const e = touch(descriptorHere.id, revealed ?? descriptorHere.cardId, revealing);
+        const e = touch(descriptorHere.id, revealed ?? descriptorHere.cardId, authoritative);
         e.zone = descriptorHere.zone;
         e.zonePos = descriptorHere.zonePos;
         e.controller ??= descriptorHere.player;
@@ -830,7 +853,7 @@ export function createReducer(players: Players): Reducer {
         return;
       }
 
-      const shown = SHOW_ENTITY_RE.exec(content);
+      const shown = UPDATING_ENTITY_RE.exec(content);
       if (shown?.[1] !== undefined) {
         current = touch(Number(shown[1]), shown[2] ?? '', true);
         return;
@@ -1119,6 +1142,36 @@ export function createReducer(players: Players): Reducer {
             branchData,
           );
 
+    /**
+     * Вариант выбора — это СУЩНОСТЬ, а не строка, которой канал выбора её
+     * когда-то назвал.
+     *
+     * Строки `Entities[i]=` приходят один раз, при открытии выбора, и держат
+     * карту на тот момент. Дальше игра карту меняет: за ЖЕТОН в выборе героя
+     * можно заменить одного из четырёх, и приходит это `CHANGE_ENTITY`
+     * на той же сущности (part46, 23:04:55: `id=115` Зирелла `BG20_HERO_101`
+     * → Инге `BG26_HERO_102`, а игрок выбрал её же шестью секундами позже).
+     * Пока вариант хранил снятую копию, советник целую минуту предлагал взять
+     * героя, которого на экране уже не было, — жалоба игрока по part46.
+     *
+     * Отсюда правило: cardId варианта берётся с сущности, когда она известна
+     * и названа. Не известна (id канала выбора не всегда совпадает с зонной
+     * копией, part9) — остаётся то, что сказал канал. Тем же проходом берутся
+     * значения плейсхолдеров текста: у сокровища «+{0} Attack» число лежит
+     * в `TAG_SCRIPT_DATA_NUM_1` (part10).
+     */
+    const resolveOption = (o: ChoiceOption): ChoiceOption => {
+      const e = entities.get(o.entityId);
+      if (e === undefined) return o;
+      return {
+        ...o,
+        cardId: e.cardId === '' ? o.cardId : e.cardId,
+        scriptData: [1, 2, 3, 4].map(
+          (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
+        ),
+      };
+    };
+
     // Открытое предложение тринкетов: варианты показаны, выбор ещё не сделан.
     // Маркер — BACON_TRINKET=1 при жизни в SETASIDE: на выборе клиент уводит
     // все варианты в REMOVEDFROMGAME (проверено на part6 по сущностям
@@ -1239,20 +1292,7 @@ export function createReducer(players: Players): Reducer {
           : {
               id: openChoice.id,
               sourceCardId: openChoice.sourceCardId,
-              // Значения плейсхолдеров текста — с сущности варианта, когда
-              // она известна. Id из канала выбора не всегда совпадает
-              // с зонной копией (part9), тогда чисел просто нет.
-              options: openChoice.options.map((o) => {
-                const e = entities.get(o.entityId);
-                return e === undefined
-                  ? o
-                  : {
-                      ...o,
-                      scriptData: [1, 2, 3, 4].map(
-                        (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
-                      ),
-                    };
-              }),
+              options: openChoice.options.map(resolveOption),
             },
       heroChoice:
         heroChoice === null
@@ -1260,7 +1300,7 @@ export function createReducer(players: Players): Reducer {
           : {
               id: heroChoice.id,
               sourceCardId: heroChoice.sourceCardId,
-              options: heroChoice.options,
+              options: heroChoice.options.map(resolveOption),
             },
       trinketsByPlayer,
       activatedEntityIds: [...activatedEntityIds].sort((a, b) => a - b),

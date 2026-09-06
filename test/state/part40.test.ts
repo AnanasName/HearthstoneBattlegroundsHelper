@@ -231,11 +231,19 @@ describe('part40: пираты Патчеса — активации, прода
     );
 
     const plan = spendPlan(state, { cards });
+    // Четвёртым шагом план доигрывает ЗОЛОТОГО Cadaver Caretaker 6/6
+    // из открытого «Сейфа» — он лежит в руке и стоит ноль золота.
+    // До чтения `CHANGE_ENTITY` (part46) рука числилась вечным
+    // «Unplayable» (`BG36_520t`), и этого шага не было: за партию сейф
+    // открывался ЧЕТЫРЕ раза (20:08:37, 20:12:37, 20:15:51, 20:16:38).
     expect(plan.steps.map((s) => s.recommendation.action)).toEqual([
       'heroPower',
       'play',
       'levelUp',
+      'play',
     ]);
     expect(plan.steps[0]?.recommendation.cost).toBe(3);
+    expect(plan.steps[3]?.recommendation.cost).toBe(0);
+    expect(plan.steps[3]?.recommendation.minion?.golden).toBe(true);
   });
 });

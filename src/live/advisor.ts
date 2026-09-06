@@ -176,6 +176,13 @@ function minionKey(m: Minion): string {
  * Сюда входит всё, от чего зависит хоть один совет, и не входит ничего
  * другого: иначе каждое служебное событие считалось бы новым положением.
  */
+/** Открытый выбор в ключе положения: id выбора, сущности вариантов И их карты. */
+function choiceKey(choice: GameState['openChoice']): string {
+  return choice === null
+    ? '-'
+    : `${String(choice.id)}:${choice.options.map((o) => `${String(o.entityId)}=${o.cardId}`).join(',')}`;
+}
+
 export function situationKey(state: GameState): string {
   return [
     state.phase,
@@ -195,14 +202,18 @@ export function situationKey(state: GameState): string {
     // Модальный выбор карт — та же болезнь (part13, ход 5): раскопка
     // «Нового ростка» открылась, не тронув ни золота, ни бордов, советник
     // не пересчитался, и оверлей показывал «НИЧЕГО» поверх трёх вариантов.
-    state.openChoice === null
-      ? '-'
-      : `${String(state.openChoice.id)}:${state.openChoice.options.map((o) => o.entityId).join(',')}`,
+    //
+    // В ключ идёт и КАРТА варианта, а не только его сущность: игра умеет
+    // подменить карту, оставив сущность (`CHANGE_ENTITY`), и по одним
+    // сущностям такая подмена неотличима от «ничего не изменилось».
+    choiceKey(state.openChoice),
     // Выбор героя — самое первое положение партии: кроме него в состоянии
     // ещё ничего нет, и без него в ключе совет по героям никто не увидит.
-    state.heroChoice === null
-      ? '-'
-      : `${String(state.heroChoice.id)}:${state.heroChoice.options.map((o) => o.entityId).join(',')}`,
+    // Именно тут подмена карты и случается: за ЖЕТОН игрок меняет одного
+    // из четырёх героев, id варианта остаётся прежним, и без карты в ключе
+    // оверлей продолжал бы советовать героя, которого на экране уже нет
+    // (жалоба игрока по part46 — «ui не перерисовался для нового героя»).
+    choiceKey(state.heroChoice),
   ].join('|');
 }
 

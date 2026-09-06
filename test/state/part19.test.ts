@@ -164,7 +164,14 @@ describe('part19: заморозка после подъёма, ветви Choos
       (r) => r.action === 'play' && r.spellCardId === 'BG31_880',
     );
     expect(play).toBeDefined();
-    expect(play?.targetMinion?.cardId).toBe('BGS_004');
+    // Цель — ЗОЛОТОЙ Soul Rewinder 8/4, крупнейшее тело борда. До чтения
+    // `CHANGE_ENTITY` (part46) его на борде не было видно вовсе: игра
+    // собирает золотого строкой `CHANGE_ENTITY - Updating Entity=1808
+    // CardID=BG26_174_G` (23:55:16), а разбор её не знал — сущность
+    // оставалась простой копией, и усиление доставалось Wrath Weaver 5/7
+    // как «крупнейшему». Тест держал не правило, а слепоту редьюсера, —
+    // тот же случай, что part14 до part40.
+    expect(play?.targetMinion?.cardId).toBe('BG26_174_G');
     // Ветвь названа: одна — если её выбрал замер разделения статов,
     // обе — если по нашей шкале они равны и разделить нечем.
     expect((play?.spellBranches ?? []).length).toBeGreaterThan(0);
@@ -183,7 +190,9 @@ describe('part19: заморозка после подъёма, ветви Choos
     if (play === undefined) return;
     const line = recommendationLine(play, cards);
     expect(line).toContain('Allied Buckler +1/+3');
-    expect(line).toContain('на Wrath Weaver');
+    // Цель в строке — та же, что в самом совете: золотой Soul Rewinder
+    // (см. выше про `CHANGE_ENTITY`).
+    expect(line).toContain('на Soul Rewinder 8/4 (зол)');
   });
 
   it('ход 9: ралли вторым номером — совет подтверждается перебором (пункт 3)', () => {

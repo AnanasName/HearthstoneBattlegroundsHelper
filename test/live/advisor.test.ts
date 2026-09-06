@@ -314,4 +314,46 @@ describe('живой советник: когда звать и когда бр�
     // Закрытие выбора — тоже новое положение: старые «ВЫБРАТЬ?» гасятся.
     expect(situationKey(withChoice)).not.toBe(situationKey({ ...withChoice, openChoice: null }));
   });
+
+  it('ЗАМЕНА карты варианта — новое положение, хотя сущность та же', () => {
+    // part46: за жетон игрок меняет одного из четырёх героев на экране
+    // выбора, и приходит это `CHANGE_ENTITY` на ТОЙ ЖЕ сущности (`id=115`:
+    // Зирелла → Инге). Пока ключ знал только сущности вариантов, подмена
+    // была для него неотличима от «ничего не изменилось»: советник
+    // не пересчитывался, и оверлей продолжал предлагать героя, которого
+    // на экране уже нет, — это и есть «ui не перерисовался».
+    const state = tavernState();
+    const withHeroes = {
+      ...state,
+      heroChoice: {
+        id: 1,
+        sourceCardId: null,
+        options: [
+          { entityId: 114, cardId: 'BG28_HERO_800' },
+          { entityId: 115, cardId: 'BG20_HERO_101' },
+        ],
+      },
+    };
+    const replaced = {
+      ...withHeroes,
+      heroChoice: {
+        ...withHeroes.heroChoice,
+        options: [
+          { entityId: 114, cardId: 'BG28_HERO_800' },
+          { entityId: 115, cardId: 'BG26_HERO_102' },
+        ],
+      },
+    };
+    expect(situationKey(withHeroes)).not.toBe(situationKey(replaced));
+    // То же и у модального выбора карт: там подмена тоже возможна.
+    const choice = {
+      ...state,
+      openChoice: { id: 2, sourceCardId: 'BG33_101', options: [{ entityId: 1202, cardId: 'BG26_146' }] },
+    };
+    const choiceReplaced = {
+      ...choice,
+      openChoice: { ...choice.openChoice, options: [{ entityId: 1202, cardId: 'BG25_001' }] },
+    };
+    expect(situationKey(choice)).not.toBe(situationKey(choiceReplaced));
+  });
 });
