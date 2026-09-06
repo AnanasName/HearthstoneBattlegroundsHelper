@@ -135,8 +135,9 @@ npm run spike:buff                  замер «+3/+1 против +1/+3» на
 npm run spike:bufftarget            КОМУ усиление: крупнейшему телу или вихрю
 npm run spike:level                 подъём: частота совета и согласие с игроком
 npm run spike:taunt                 вредит ли провокация носителю ралли
+npm run spike:taunttarget           КОМУ заклинание со статами и провокацией
 npm run spike:hand                  что даёт розыгрыш карты, живущей в руке
-npm run spike:horizon               сколько ходов таверны остаётся впереди
+npm run spike:horizon               сколько ходов таверны и покупок остаётся впереди
 npm run spike:arena                 чей ход лучше по ближайшему бою: игрок, советник, оракул
 npm run capture                     архивация растущего Power.log
 ```

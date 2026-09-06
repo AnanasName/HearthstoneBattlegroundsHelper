@@ -31,6 +31,7 @@
  * игрок может возразить, а не гадать, откуда взялась ветвь.
  */
 import { tavernTurnOf } from './rules.js';
+import { loadCardIndex } from '../../data/cards.js';
 import { loadDataset } from '../../ml/dataset.js';
 import {
   DEFAULT_FILTER,
@@ -44,6 +45,18 @@ interface Point {
   readonly hp: number;
   /** Сколько ходов таверны в этой партии было ПОСЛЕ этой точки. */
   readonly remaining: number;
+  /**
+   * Сколько МИНЬОНОВ было куплено с этой точки и до конца партии.
+   *
+   * Второй горизонт того же замера, и он тут по той же причине, что первый:
+   * витринный бафф «this game» (Eonar's Favor, part43) платит не разово,
+   * а каждой будущей покупкой, и число покупок нельзя выдумывать. Заклинания
+   * из счёта исключены — усиление достаётся телам.
+   *
+   * `null` — у записи нет журнала действий (старая схема датасета): считать
+   * такую партию нулём покупок значило бы занижать таблицу молча.
+   */
+  readonly buysLeft: number | null;
 }
 
 function mean(xs: readonly number[]): number {
@@ -67,6 +80,7 @@ export function collectPoints(
 
   // Умолчание — свои партии: таблица `remainingTavernTurns` замерена на них,
   // и перезамер обязан сравнивать то же с тем же (`src/ml/provenance.ts`).
+  const cards = loadCardIndex();
   for (const game of filterGames(ds.games, filter)) {
     const checkpoints = game.record.checkpoints;
     if (checkpoints.length === 0) continue;
@@ -74,12 +88,27 @@ export function collectPoints(
     const last = Math.max(...turns);
     lengths.push(last);
 
+    // Покупки МИНЬОНОВ по журналу партии: тип карты берётся из справочника —
+    // в журнале лежит только `cardId`, а заклинание витрины покупается тем же
+    // действием `buy`.
+    const actions = game.record.actions;
+    const buys =
+      actions === undefined
+        ? null
+        : actions.filter(
+            (a) =>
+              a.type === 'buy' &&
+              a.cardId !== null &&
+              cards.info(a.cardId)?.type === 'MINION',
+          );
+
     for (const [i, checkpoint] of checkpoints.entries()) {
       const hero = (checkpoint.state as { hero?: { health?: number; armor?: number } }).hero;
       points.push({
         tavernTurn: turns[i] ?? 0,
         hp: (hero?.health ?? 0) + (hero?.armor ?? 0),
         remaining: last - (turns[i] ?? 0),
+        buysLeft: buys === null ? null : buys.filter((b) => b.turn >= checkpoint.turn).length,
       });
     }
   }
@@ -110,6 +139,26 @@ function main(): void {
     );
   }
   console.log(`\nтаблица для rules.remainingTavernTurns: [${table.join(', ')}]`);
+
+  // Второй горизонт: сколько ТЕЛ ещё будет куплено. Им считается витринный
+  // бафф «this game» (part43) — тот же вопрос «сколько ещё впереди», только
+  // мерой не ходов, а покупок.
+  const withBuys = points.filter((p) => p.buysLeft !== null);
+  console.log(
+    `\nход таверны | точек | покупок миньонов впереди: среднее / медиана` +
+      ` (записей с журналом: ${String(withBuys.length)} из ${String(points.length)})`,
+  );
+  const buysTable: number[] = [];
+  for (let turn = 1; turn <= 20; turn++) {
+    const rest = withBuys.filter((p) => p.tavernTurn === turn).map((p) => p.buysLeft ?? 0);
+    if (rest.length === 0) continue;
+    buysTable[turn - 1] = Number(mean(rest).toFixed(1));
+    console.log(
+      `${String(turn).padStart(11)} | ${String(rest.length).padStart(5)} | ` +
+        `${mean(rest).toFixed(2).padStart(7)} / ${median(rest).toFixed(1)}`,
+    );
+  }
+  console.log(`\nтаблица для rules.remainingTavernBuys: [${buysTable.join(', ')}]`);
 
   console.log('\nразрез по здоровью (все ходы) — связь есть, в таблицу не входит:');
   for (const [lo, hi] of [
