@@ -317,6 +317,34 @@
         display: inline-flex;
         gap: 3px;
         margin: 0 6px;
+        vertical-align: bottom;
+      }
+
+      /*
+        Клетка — столбик «число сверху, подпись снизу»: рамку и тень игрок
+        читать не обязан, а вопрос «что это вообще значит» уже задан вслух
+        (part43). Подписи стоят у САМИХ клеток, а не только строкой ниже:
+        строку ниже надо сначала связать со шкалой глазами, и пока этого
+        не сделано, шкала читается как указание.
+      */
+      #tempo .cell {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        line-height: 1.1;
+      }
+
+      /*
+        Подпись одна и та же по цвету и размеру у «вы» и у «кривой»: цветом
+        или размером одна из них стала бы главной, а вердикта у кривой нет
+        (см. `OverlayTempo`). Пустая подпись держит высоту — иначе клетки
+        прыгают по вертикали.
+      */
+      #tempo .cap {
+        font-size: 9px;
+        color: var(--muted);
+        min-height: 10px;
+        white-space: nowrap;
       }
 
       /*
@@ -514,21 +542,28 @@
           if (cell.you) marks.push('you');
           if (cell.curve) marks.push('curve');
           if (cell.locked) marks.push('locked');
-          strip.appendChild(node('span', `${cell.tier}`, marks.join(' ')));
+          const column = node('span', '', 'cell');
+          column.appendChild(node('span', `${cell.tier}`, marks.join(' ')));
+          // Подпись — словами и у самой клетки: обе метки названы, ни одна
+          // не выделена (part43, «она мне что-то рекомендует?»).
+          const caption = [cell.you ? 'вы' : '', cell.curve ? 'кривая' : '']
+            .filter((x) => x)
+            .join('·');
+          column.appendChild(node('span', caption, 'cap'));
+          strip.appendChild(column);
         }
         head.appendChild(strip);
         target.appendChild(head);
 
-        // Метки дублируются словами: экран в оттенках серого обязан читаться
-        // целиком, а рамка и тень на 12px различимы не всякому.
+        // Тир игрока и тир кривой названы словами ПРЯМО НА ШКАЛЕ, поэтому
+        // здесь остаётся только то, чего на шкале нет: ход таверны (шкала,
+        // в которой кривая и написана) и цена подъёма. Прежде эта строка
+        // повторяла оба тира числами — с подписями у клеток это было бы
+        // третье повторение одного и того же.
         const upgrade = tempo.upgrade
           ? ` · подъём до ${tempo.upgrade.target} за ${tempo.upgrade.cost}`
           : '';
-        target.appendChild(
-          line(
-            `ход таверны ${tempo.tavernTurn} · вы ${tempo.tier} · кривая ${tempo.curveTier}${upgrade}`,
-          ),
-        );
+        target.appendChild(line(`ход таверны ${tempo.tavernTurn}${upgrade}`));
         if (tempo.note) target.appendChild(line(tempo.note));
       }
 
