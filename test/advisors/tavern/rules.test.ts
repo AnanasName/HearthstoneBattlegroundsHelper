@@ -87,6 +87,7 @@ const hero = (health: number, damage = 0, armor = 0): Hero => ({
   heroPowerUnplayable: false,
   heroPowerLocked: false,
   heroPowerHasActivate: false,
+  heroPowerExhausted: null,
   heroPowerScriptData: [],
 });
 
@@ -2818,6 +2819,7 @@ describe('бесплатная сила героя', () => {
     heroPowerEntityId: 136,
     heroPowerCost: null,
     heroPowerHasActivate: true,
+    heroPowerExhausted: null,
     heroPowerScriptData: [],
     ...patch,
   });
@@ -2892,6 +2894,7 @@ describe('сила героя, дающая своему миньону ключ
     heroPowerEntityId: 121,
     heroPowerCost: null,
     heroPowerHasActivate: true,
+    heroPowerExhausted: null,
     heroPowerScriptData: [],
     ...patch,
   });
@@ -3028,6 +3031,7 @@ describe('сила героя, ВЫСТРЕЛИВАЮЩАЯ миньоном в�
     heroPowerEntityId: 181,
     heroPowerCost: null,
     heroPowerHasActivate: true,
+    heroPowerExhausted: null,
     heroPowerScriptData: [],
     ...patch,
   });
@@ -3102,6 +3106,7 @@ describe('сила героя, дающая заклинание таверны 
     heroPowerEntityId: 166,
     heroPowerCost: 1,
     heroPowerHasActivate: true,
+    heroPowerExhausted: null,
     heroPowerScriptData: [],
     ...patch,
   });
@@ -4092,6 +4097,7 @@ describe('сила героя «после N кличевых покупок —
     heroPowerEntityId: 226,
     heroPowerCost: null,
     heroPowerHasActivate: false,
+    heroPowerExhausted: null,
     heroPowerScriptData: scriptData,
   });
   const busker = minion(7, { cardId: 'BUSKER', attack: 3, health: 1, techLevel: 1 });

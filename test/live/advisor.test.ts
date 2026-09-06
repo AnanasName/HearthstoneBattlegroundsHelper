@@ -86,6 +86,7 @@ const HERO: GameState['hero'] = {
   heroPowerUnplayable: false,
   heroPowerLocked: false,
   heroPowerHasActivate: false,
+  heroPowerExhausted: null,
   heroPowerScriptData: [],
 };
 

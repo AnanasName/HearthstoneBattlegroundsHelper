@@ -954,6 +954,7 @@ export function createReducer(players: Players): Reducer {
     heroPowerUnplayable: boolean;
     heroPowerLocked: boolean;
     heroPowerHasActivate: boolean;
+    heroPowerExhausted: boolean | null;
     heroPowerScriptData: readonly (number | null)[];
   }
 
@@ -968,6 +969,7 @@ export function createReducer(players: Players): Reducer {
       heroPowerUnplayable: false,
       heroPowerLocked: false,
       heroPowerHasActivate: false,
+      heroPowerExhausted: null,
       heroPowerScriptData: [],
     };
     if (self === null) return none;
@@ -989,6 +991,10 @@ export function createReducer(players: Players): Reducer {
         // part13, «Мана в минуту» Хроми: HAS_ACTIVATE_POWER=1, тега COST нет.
         // Пассивные силы тега не имеют, и «нажать» их советовать нельзя.
         heroPowerHasActivate: flag(e, 'HAS_ACTIVATE_POWER'),
+        // «Жать нельзя прямо сейчас» — part45, сила Инге на два нажатия.
+        // Тега может не быть вовсе (part8), и тогда `null`: молчание игры
+        // нельзя читать ни как «можно», ни как «нельзя».
+        heroPowerExhausted: e.tags.has('EXHAUSTED') ? flag(e, 'EXHAUSTED') : null,
         // Счётчик «после N покупок» (part34, «Бранное дело»): NUM_1 — остаток,
         // тега при создании нет вовсе, дальше 3 → 2 → 1 → 0.
         heroPowerScriptData: [1, 2, 3, 4].map(

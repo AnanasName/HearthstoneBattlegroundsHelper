@@ -214,6 +214,7 @@ describe('счёт против поля из нескольких бордов'
     heroPowerUnplayable: false,
     heroPowerLocked: false,
   heroPowerHasActivate: false,
+  heroPowerExhausted: null,
   heroPowerScriptData: [],
   };
 
@@ -308,6 +309,7 @@ describe('вопрос советнику из состояния партии',
     heroPowerUnplayable: false,
     heroPowerLocked: false,
   heroPowerHasActivate: false,
+  heroPowerExhausted: null,
   heroPowerScriptData: [],
   };
 

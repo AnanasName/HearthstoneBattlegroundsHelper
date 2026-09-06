@@ -146,8 +146,8 @@ function upgradeActions(list: readonly LegacyAction[]): PlayerAction[] {
 }
 
 /** Герой старой записи: поля part34 и part37 в нём могут отсутствовать. */
-type LegacyHero = Omit<Hero, 'heroPowerScriptData' | 'heroPowerLocked'> &
-  Partial<Pick<Hero, 'heroPowerScriptData' | 'heroPowerLocked'>>;
+type LegacyHero = Omit<Hero, 'heroPowerScriptData' | 'heroPowerLocked' | 'heroPowerExhausted'> &
+  Partial<Pick<Hero, 'heroPowerScriptData' | 'heroPowerLocked' | 'heroPowerExhausted'>>;
 
 /** Миньон старой записи: живой цены покупки (part35) в нём может не быть. */
 type LegacyMinion = Omit<Minion, 'buyCost'> & Partial<Pick<Minion, 'buyCost'>>;
@@ -182,7 +182,14 @@ function upgradeState(state: GameState): GameState {
   // Ошибиться умолчание может лишь в сторону прежнего поведения — того,
   // с которым записи и собирались.
   const hero: Hero | null =
-    legacyHero === null ? null : { heroPowerScriptData: [], heroPowerLocked: false, ...legacyHero };
+    legacyHero === null
+      ? null
+      : {
+          heroPowerScriptData: [],
+          heroPowerLocked: false,
+          heroPowerExhausted: null,
+          ...legacyHero,
+        };
   return {
     ...EMPTY_STATE,
     ...state,

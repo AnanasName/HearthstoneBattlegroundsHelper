@@ -148,6 +148,13 @@ export interface Recommendation {
    */
   readonly grantsKeyword?: BinaryKeywordField;
   /**
+   * Статы, которые действие КЛАДЁТ на цель, — «Give a minion Attack equal
+   * to your Tier» силой героя (part45). Нужно плану ровно затем же, зачем
+   * `grantsKeyword`: прибавка постоянная и известна числом, значит шаг
+   * прозрачен, и следующий шаг обязан видеть цель уже усиленной.
+   */
+  readonly grantsStats?: { readonly stat: 'attack' | 'health'; readonly amount: number };
+  /**
    * Остаток счётчика силы «после N покупок с механикой — награда» ПОСЛЕ
    * этой покупки (part34, «Бранное дело»). Заполняется у покупки, которую
    * сила засчитывает; план кладёт число в `heroPowerScriptData[0]`
@@ -3429,26 +3436,39 @@ export function freezeRule(
 }
 
 /**
- * Можно ли нажать силу героя ПРЯМО СЕЙЧАС — три запрета одним местом.
+ * Можно ли нажать силу героя ПРЯМО СЕЙЧАС — все запреты одним местом.
  *
- * Запретов три, и каждый читается из лога: сила уже нажата в этом ходу
+ * Запретов четыре, и каждый читается из лога: сила уже нажата в этом ходу
  * (блок PLAY на её сущности), сила временно неиграбельна
- * (`LITERALLY_UNPLAYABLE`) и сила ещё не открыта (`LOCK_VISUAL` — замок
- * «Unlocks at Tier N», part37).
+ * (`LITERALLY_UNPLAYABLE`), сила ещё не открыта (`LOCK_VISUAL` — замок
+ * «Unlocks at Tier N», part37) и сила исчерпана на этот ход (`EXHAUSTED`).
  *
- * Одной функцией, а не тремя условиями в пяти правилах: два первых запрета
+ * Одной функцией, а не условиями в пяти правилах: первые два запрета
  * и были размножены по пяти местам, и добавление третьего в четыре из пяти
  * прошло бы молча — ровно тот способ, которым разъезжаются списки
  * (`CURRENT_BUILD_PARTS`, docs/journal.md). Прочие условия у правил свои:
  * `heroPowerHasActivate` (пассивную силу не «нажимают»), цена, место
  * на борде.
+ *
+ * **`EXHAUSTED` СИЛЬНЕЕ «нажата в этом ходу», и это правка part45.**
+ * Сила Инге жмётся ДВАЖДЫ за ход, и по блокам PLAY второе нажатие
+ * неотличимо от исчерпанной силы: после первого советник замолкал
+ * до конца хода и молча терял половину бесплатного усиления. Тег говорит
+ * прямо — на первом нажатии игра ставит `EXHAUSTED=1` и тут же снимает
+ * его в `0`, на втором оставляет `1`. Поэтому: тег есть — отвечает он,
+ * тега нет (`null`, part8 — десять нажатий и ни одного тега) — отвечает
+ * прежний признак. Обратный порядок («жать нельзя, если ЛИБО нажата,
+ * ЛИБО исчерпана») вернул бы ровно ту дыру, ради которой всё и затевалось.
  */
 export function heroPowerReady(hero: {
   readonly heroPowerUsedThisTurn: boolean;
   readonly heroPowerUnplayable: boolean;
   readonly heroPowerLocked: boolean;
+  readonly heroPowerExhausted?: boolean | null;
 }): boolean {
-  return !hero.heroPowerUsedThisTurn && !hero.heroPowerUnplayable && !hero.heroPowerLocked;
+  if (hero.heroPowerUnplayable || hero.heroPowerLocked) return false;
+  const exhausted = hero.heroPowerExhausted ?? null;
+  return exhausted === null ? !hero.heroPowerUsedThisTurn : !exhausted;
 }
 
 /**
@@ -4157,6 +4177,85 @@ export function heroPowerKeywordRule(
       `${KEYWORD_NAME_RU[field]} на ${name} ` +
       `${String(target.attack ?? '?')}/${String(target.health ?? '?')} (${gift.toFixed(1)})` +
       (notes.length > 0 ? `: ${notes.join('; ')}` : ''),
+  };
+}
+
+/**
+ * Правило силы героя, кладущей на СВОЕГО миньона статы величиной с ТИР.
+ *
+ * Инге Стальной Гимн (part45): «Give a minion Attack equal to your Tier»
+ * и «…Health equal to your Tier», половины меняются местами каждый ход.
+ * Сила БЕСПЛАТНА (тега `COST` у неё нет вовсе, как у Хроми в part13),
+ * активна с первого хода и не под замком — а советник молчал про неё все
+ * пятнадцать ходов партии, потому что величина прибавки названа СЛОВОМ,
+ * а не цифрой, и ни один из шести каналов чтения силы её не видел. Игрок
+ * нажимал силу сам каждый ход и написал: «не предлагает нажать силу героя».
+ *
+ * Считается без единого нового веса: прибавка — `тир × perStatPoint`, цена
+ * (у платной силы этого класса, если такая появится) — по `goldPointValue`,
+ * как у слова в `heroPowerKeywordRule`. Тир берётся живой из состояния:
+ * в тексте числа нет, а прибавка равна тиру НА МОМЕНТ НАЖАТИЯ — это видно
+ * по борду (Клыкастый походник 2/3 → 4/3 после двух нажатий на тире 1).
+ *
+ * Цель — общая `buffTarget`, то есть крупнейшее своё тело мимо кандидатов
+ * в продажу (part17, part36). Отдельного правила у неё нет намеренно:
+ * усиление постоянное, и вопрос «кому» тут ровно тот же, что у заклинания
+ * с +N/+M, — второе определение той же вещи разъехалось бы молча.
+ *
+ * Очки малые (на первом тире 0.5, на пятом 2.5), и это НЕ порог, а честная
+ * цена бесплатного действия на нашей шкале: в списке сила стоит внизу,
+ * а в план входит всегда — шаг стоит ноль золота и ничего не вытесняет.
+ * Ровно так же ведёт себя бесплатная сила-обновление (part13).
+ */
+export function heroPowerStatsRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if (!heroPowerReady(hero)) return null;
+  const cost = hero.heroPowerCost ?? 0;
+  if (cost > state.gold) return null;
+  if (state.board.length === 0) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  let stat: 'attack' | 'health' | null = null;
+  for (const word of rules.heroPowerTierStatsWords) {
+    const found = new RegExp(word, 'i').exec(text)?.[1]?.toLowerCase();
+    if (found === 'attack' || found === 'health') {
+      stat = found;
+      break;
+    }
+  }
+  if (stat === null) return null;
+
+  const amount = state.techLevel;
+  if (amount <= 0) return null;
+
+  const target = buffTarget(state, deps, rules);
+  if (target === null) return null;
+
+  const score = amount * rules.value.perStatPoint - cost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  const name = deps.cards.info(target.cardId)?.name ?? target.cardId;
+  const statRu = stat === 'attack' ? 'атаки' : 'здоровья';
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    targetMinion: target,
+    grantsStats: { stat, amount },
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} ${cost > 0 ? `за ${String(cost)}` : 'бесплатна'} — ` +
+      `+${String(amount)} ${statRu} (по тиру таверны) на ${name} ` +
+      `${String(target.attack ?? '?')}/${String(target.health ?? '?')}`,
   };
 }
 
@@ -7428,6 +7527,7 @@ export function adviseTavern(
     heroPowerRule(state, deps, rules),
     freeHeroPowerRule(state, deps, rules),
     heroPowerKeywordRule(state, deps, rules),
+    heroPowerStatsRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),
     heroPowerGoldRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),

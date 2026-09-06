@@ -42,6 +42,7 @@ const hero = (): Hero => ({
   heroPowerUnplayable: false,
   heroPowerLocked: false,
   heroPowerHasActivate: false,
+  heroPowerExhausted: null,
   heroPowerScriptData: [],
 });
 

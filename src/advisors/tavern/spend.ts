@@ -314,7 +314,12 @@ export function applyRecommendation(
       // эффект известен целиком — слово ложится на цель, и шаг прозрачен.
       const gift = rec.targetMinion;
       const keyword = rec.grantsKeyword;
-      const grants = gift != null && keyword !== undefined;
+      // Сила, кладущая на своего миньона СТАТЫ («Give a minion Attack equal
+      // to your Tier», part45): эффект известен числом, шаг прозрачен так же,
+      // как у слова. Без этого следующий шаг плана считал бы цель по старым
+      // статам — та же дыра, что у заряда хранителя (`spellMagnetGain`).
+      const stats = rec.grantsStats;
+      const grants = gift != null && (keyword !== undefined || stats !== undefined);
       // Продажа, ОПЛАЧИВАЮЩАЯ нажатие на полном борде (part40, ход 13):
       // без неё шаг стоил бы золота, которого нет, а жертва осталась бы
       // на борде — ровно та дыра, из-за которой прибавку от продажи
@@ -325,14 +330,31 @@ export function applyRecommendation(
       return {
         state: paid({
           gold: state.gold - rec.cost + refund,
-          hero: hero === null ? null : { ...hero, heroPowerUsedThisTurn: true },
+          // Гасится и `EXHAUSTED`, а не только «нажата в этом ходу»: с part45
+          // тег СИЛЬНЕЕ признака нажатия (`heroPowerReady`), и у силы Инге он
+          // стоит в `false` посреди хода — без гашения план жал бы одну и ту
+          // же силу шаг за шагом. Сколько нажатий положено, в логе не написано
+          // нигде, поэтому план берёт ОДНО: недосчитать бесплатный шаг честнее,
+          // чем построить ход на выдуманном лимите. Второе нажатие вернётся
+          // само — живой оверлей пересчитает совет, увидев `EXHAUSTED=0`.
+          hero:
+            hero === null
+              ? null
+              : { ...hero, heroPowerUsedThisTurn: true, heroPowerExhausted: true },
           // Сила с ЦЕЛЬЮ в витрине забирает карту насовсем («Lock and Load»
           // Тавиша, part29: миньон уходит в REMOVEDFROMGAME). Без этого
           // следующий шаг плана мог бы предложить купить то, чем мы только
           // что выстрелили.
           shop: rec.minion === null ? state.shop : withoutEntity(state.shop, rec.minion.entityId),
           board: grants
-            ? sellBoard.map((m) => (m.entityId === gift.entityId ? withKeyword(m, keyword) : m))
+            ? sellBoard.map((m) => {
+                if (m.entityId !== gift.entityId) return m;
+                const withWord = keyword === undefined ? m : withKeyword(m, keyword);
+                if (stats === undefined) return withWord;
+                return stats.stat === 'attack'
+                  ? { ...withWord, attack: (withWord.attack ?? 0) + stats.amount }
+                  : { ...withWord, health: (withWord.health ?? 0) + stats.amount };
+              })
             : sellBoard,
         }),
         opaque: !grants,

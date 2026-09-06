@@ -137,8 +137,29 @@ describe('part29: сила героя с целью, цена в здоровь�
     expect(heroPowerShotRule(full, { cards }, DEFAULT_TAVERN_RULES)).toBeNull();
 
     const hero = s.hero as NonNullable<GameState['hero']>;
-    const used = { ...s, hero: { ...hero, heroPowerUsedThisTurn: true } };
+
+    // Нажатую силу игра метит ДВУМЯ признаками сразу, и подменять один
+    // из них — значит строить состояние, которого в партии не бывает.
+    // Замер по этому же логу: все четыре `EXHAUSTED=0` у «На изготовку!»
+    // приходят ровно со сменой хода (01:09:52, 01:10:40, 01:11:42,
+    // 01:13:30), то есть внутри хода после нажатия тег стоит в единице.
+    // Прежняя версия теста ставила только `heroPowerUsedThisTurn` и с part45
+    // проходить перестала: `heroPowerReady` теперь верит тегу, когда тот
+    // есть, — иначе сила Инге, которую жмут дважды за ход, замолкала бы
+    // после первого нажатия.
+    const used = {
+      ...s,
+      hero: { ...hero, heroPowerUsedThisTurn: true, heroPowerExhausted: true },
+    };
     expect(heroPowerShotRule(used, { cards }, DEFAULT_TAVERN_RULES)).toBeNull();
+
+    // Запасной путь — сила БЕЗ тега (part8: десять нажатий и ни одного
+    // `EXHAUSTED`): там ответ по-прежнему даёт «нажата в этом ходу».
+    const noTag = {
+      ...s,
+      hero: { ...hero, heroPowerUsedThisTurn: true, heroPowerExhausted: null },
+    };
+    expect(heroPowerShotRule(noTag, { cards }, DEFAULT_TAVERN_RULES)).toBeNull();
   });
 
   /**
