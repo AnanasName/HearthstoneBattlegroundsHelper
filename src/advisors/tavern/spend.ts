@@ -2,6 +2,7 @@ import type { GameState, Minion } from '../../state/types.js';
 import {
   adviseTavern,
   withKeyword,
+  withMagnetDoublingSpent,
   type Recommendation,
   type TavernAdvisorDeps,
 } from './advisor.js';
@@ -226,7 +227,11 @@ export function applyRecommendation(
       // витрину и золото потрачено.
       if (rec.magnetizeTo != null) {
         return {
-          state: paid({ gold: state.gold - rec.cost + refund, shop, board }),
+          state: paid({
+            gold: state.gold - rec.cost + refund,
+            shop,
+            board: withMagnetDoublingSpent(board, rec.magnetizeTo),
+          }),
           opaque: false,
           terminal: false,
         };
@@ -286,7 +291,11 @@ export function applyRecommendation(
       // и остаток обязан это учесть — как и `goldSpent` следом за ним.
       if (rec.magnetizeTo != null) {
         return {
-          state: paid({ gold: state.gold + refund, hand, board }),
+          state: paid({
+            gold: state.gold + refund,
+            hand,
+            board: withMagnetDoublingSpent(board, rec.magnetizeTo),
+          }),
           opaque: false,
           terminal: false,
         };

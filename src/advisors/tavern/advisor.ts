@@ -1284,16 +1284,31 @@ export function poisonAmongSeen(state: GameState): boolean {
  *    касание, а голые статы об него обнуляются. Если сам магнит дарит
  *    щит, угроза для носителя снята и размер снова главный.
  *
- * Порядок предпочтений: пригодные по племени → кому дар не пропадёт →
- * при яде со щитом → самый крупный. Каждый следующий фильтр отступает,
- * если оставляет пусто: статы складываются всегда, и совсем без носителя
- * магнит остаётся телом.
+ * Порядок предпочтений: носитель с ВКЛЮЧЁННЫМ удвоением (и только для того
+ * модуля, который на него притязает) → пригодные по племени → кому дар
+ * не пропадёт → при яде со щитом → самый крупный. Каждый следующий фильтр
+ * отступает, если оставляет пусто: статы складываются всегда, и совсем без
+ * носителя магнит остаётся телом.
  */
 export function magnetizeTarget(
   magnet: Minion,
   board: readonly Minion[],
   cards: CardIndex,
   poisonThreat = false,
+  /**
+   * Притязает ли ЭТОТ модуль на носителя с включённым удвоением.
+   *
+   * Решает не сам `magnetizeTarget`, а вызывающий: удвоение достаётся
+   * ОДНОМУ модулю за нажатие, и выбирать его надо по РАЗНИЦЕ, которую оно
+   * даёт (лишние статы модуля), а не по очкам розыгрыша целиком. Очки
+   * несут ещё тир, племя и ключевые слова — величины про сам модуль,
+   * от носителя не зависящие, — и по ним удвоение доставалось бы
+   * не крупнейшему модулю, а самому дорогому (part44, ход 17: советник
+   * клал на удвоенного носителя Annoy-o-Module 2/4 при Shield of the Legion
+   * 7/3 в той же руке). Тот же урок, что «число, которым СОРТИРУЮТ,
+   * и число, которым ОТБИРАЮТ, — разные» (part39).
+   */
+  claimsDoubler = false,
 ): Minion | null {
   const magnetInfo = cards.info(magnet.cardId);
   const carrierRaces =
@@ -1312,10 +1327,33 @@ export function magnetizeTarget(
       (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
     );
 
+  let pool = eligible;
+
+  // УДВОЕНИЕ носителя разбирается ПЕРВЫМ — раньше дара и размера.
+  //
+  // Оно одноразовое: нажатие включает режим на одном миньоне, и гасит его
+  // первый же модуль. Значит вопрос не «кому лучше», а «кто заберёт»,
+  // и забирать должен крупнейший модуль: разница — это его лишние статы.
+  // На part44 (ход 17) числа таковы: у Shield of the Legion 7/3 удвоение
+  // стоит 5.0 очка, у Annoy-o-Module 2/4 — 3.0, а дар провокации, ради
+  // которого правило ключевых слов вело туда мелкий модуль, — 1.0.
+  //
+  // Оговорка названа: при близких по размеру модулях уступленный дар
+  // (щит — 3.0) может стоить дороже сбережённых статов, и тогда порядок
+  // фильтров неверен. Общего сравнения тут нет НАМЕРЕННО — цену дара
+  // на конкретном носителе `magnetizeTarget` не считает вовсе, а класс
+  // узкий: карт с удвоением в пуле ОДНА.
+  const doubledHosts = pool.filter((m) => magnetDoublerOf(m, cards) !== null);
+  if (doubledHosts.length > 0) {
+    if (claimsDoubler) pool = doubledHosts;
+    else if (doubledHosts.length < pool.length) {
+      pool = pool.filter((m) => magnetDoublerOf(m, cards) === null);
+    }
+  }
+
   const grants = BINARY_KEYWORD_FLAGS.filter(([mech]) =>
     magnetInfo?.mechanics.includes(mech) ?? false,
   );
-  let pool = eligible;
   if (grants.length > 0) {
     const keepsGift = pool.filter((m) => grants.some(([, has]) => !has(m)));
     if (keepsGift.length > 0) pool = keepsGift;
@@ -1328,6 +1366,84 @@ export function magnetizeTarget(
   }
 
   return largest(pool);
+}
+
+/**
+ * Тег «следующее примагничивание к этому миньону удвоено».
+ *
+ * Игра его не именует — в логе он числом (как `2442` у связки кнопки
+ * покупки с миньоном, part35). Ставится нажатием активации и гаснет тем
+ * самым примагничиванием, которое удвоил: на part44 пять пар «1 → 0»
+ * за партию, все на Дрон-дубликаторе и все внутри своего хода.
+ */
+const MAGNET_DOUBLE_TAG = '4945';
+
+/**
+ * Во сколько раз ляжет следующий модуль на этого носителя; `null` — режим
+ * выключен или карта про удвоение не говорит.
+ *
+ * Нужны ОБА факта, и они из разных мест: «режим включён сейчас» — тег
+ * (иначе советник обещал бы удвоение всю партию), «во сколько раз» — слово
+ * из текста карты. У золотой копии слово своё («tripled»), и берётся оно
+ * с золотой карты, а не подстановкой тройки по признаку `golden`: карта
+ * говорит прямо, гадать незачем.
+ */
+export function magnetDoublerOf(
+  carrier: Minion,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number | null {
+  if ((carrier.tags[MAGNET_DOUBLE_TAG] ?? 0) <= 0) return null;
+  const golden =
+    carrier.golden && !carrier.cardId.endsWith('_G')
+      ? cards.info(`${carrier.cardId}_G`)
+      : null;
+  const text = (golden ?? cards.info(carrier.cardId))?.text ?? '';
+  for (const w of rules.magnetDoubleWords) {
+    const m = new RegExp(w, 'i').exec(text);
+    const word = m?.[1]?.toLowerCase();
+    if (word !== undefined) return rules.magnetMultiplierWords[word] ?? null;
+  }
+  return null;
+}
+
+/**
+ * Борд, на котором удвоение носителя ПОТРАЧЕНО этим примагничиванием.
+ *
+ * Нужно плану: он кладёт модули цепочкой, а удвоение достаётся ОДНОМУ
+ * из них — на part44 (ход 17) в руке лежало четыре модуля при одном
+ * включённом носителе. Без гашения второй и третий шаги считались бы
+ * по тегу, которого в игре к тому моменту уже нет, — тот же класс, что
+ * счётчик «после N покупок» (part34) и скидка силы от покупки (part40):
+ * число, которое меняет СОБСТВЕННЫЙ шаг плана.
+ */
+export function withMagnetDoublingSpent(
+  board: readonly Minion[],
+  host: Minion | null,
+): readonly Minion[] {
+  if (host === null) return board;
+  return board.map((m) =>
+    m.entityId === host.entityId && (m.tags[MAGNET_DOUBLE_TAG] ?? 0) > 0
+      ? { ...m, tags: { ...m.tags, [MAGNET_DOUBLE_TAG]: 0 } }
+      : m,
+  );
+}
+
+/**
+ * Притязает ли модуль на носителя с включённым удвоением.
+ *
+ * Удвоение достаётся одному модулю, и достаться должно КРУПНЕЙШЕМУ: разница
+ * — это лишние статы модуля, то есть его собственная сумма атаки и здоровья.
+ * Соперники считаются по РУКЕ: модули оттуда кладутся даром и в любом
+ * порядке, тогда как модуль витрины сначала надо купить. Ничья отдаёт
+ * притязание обоим — это безвредно: первый же розыгрыш гасит тег, и второй
+ * пересчитается уже без удвоения.
+ */
+function claimsMagnetDoubler(minion: Minion, state: GameState, cards: CardIndex): boolean {
+  const stats = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+  return !state.hand.some(
+    (m) => m.entityId !== minion.entityId && isMagnetic(m, cards) && stats(m) > stats(minion),
+  );
 }
 
 /**
@@ -1825,8 +1941,19 @@ export function buyRules(
       // перекладывал половину решения на него (part13, ход 15). На полном
       // борде носитель ещё и освобождает от продажи: слот магниту не нужен.
       const host = isMagnetic(minion, deps.cards)
-        ? magnetizeTarget(minion, state.board, deps.cards, poisonAmongSeen(state))
+        ? magnetizeTarget(
+            minion,
+            state.board,
+            deps.cards,
+            poisonAmongSeen(state),
+            claimsMagnetDoubler(minion, state, deps.cards),
+          )
         : null;
+      // Удвоение на носителе — те же лишние статы, что и у розыгрыша из руки.
+      const doubler = host === null ? null : magnetDoublerOf(host, deps.cards, rules);
+      const magnetStats = (minion.attack ?? 0) + (minion.health ?? 0);
+      const doubledGain =
+        doubler === null ? 0 : (doubler - 1) * magnetStats * rules.value.perStatPoint;
 
       // Сколько копий кандидата стоит на борде: тройка сливает их в золотого,
       // и место освобождается само.
@@ -1906,6 +2033,12 @@ export function buyRules(
             ? `борд полон, но магнитится — примагнитить к ${hostName}${shieldHint}`
             : `магнитный — носитель ${hostName}${shieldHint}`,
         );
+        if (doubler !== null) {
+          notes.push(
+            `у ${hostName} включено удвоение — модуль ляжет ${String(doubler)} раза ` +
+              `(+${String((doubler - 1) * magnetStats)} статов)`,
+          );
+        }
       }
 
       // Скидка — не деталь: покупка за 0–1 меняет весь план хода, и совет
@@ -1923,7 +2056,7 @@ export function buyRules(
         {
           action: 'buy' as const,
           minion,
-          score: value.total,
+          score: value.total + doubledGain,
           cost,
           requiresSlot,
           sellFirst,
@@ -1943,7 +2076,8 @@ export function buyRules(
             : {}),
           reason:
             `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
-            `тир ${tier === null ? '?' : String(tier)}, ценность ${value.total.toFixed(1)}` +
+            `тир ${tier === null ? '?' : String(tier)}, ` +
+            `ценность ${(value.total + doubledGain).toFixed(1)}` +
             (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
         },
       ];
@@ -2029,7 +2163,13 @@ export function playRules(
     // неполном борде — игрок решает «телом или примагнитить», и совет без
     // носителя перекладывал половину решения на него (part13, ход 15).
     const host = isMagnetic(minion, deps.cards)
-      ? magnetizeTarget(minion, state.board, deps.cards, poisonAmongSeen(state))
+      ? magnetizeTarget(
+          minion,
+          state.board,
+          deps.cards,
+          poisonAmongSeen(state),
+          claimsMagnetDoubler(minion, state, deps.cards),
+        )
       : null;
 
     // На полном борде розыгрыш идёт через продажу. Ценность кандидата
@@ -2066,6 +2206,15 @@ export function playRules(
     // придётся его продавать, если я не найду 3 копию».
     // Доля награды за покупку (part34) — тем более: карта уже куплена.
     const playValue = value.total - value.copies - value.heroPowerBuy;
+
+    // Удвоение на носителе: модуль ложится на него не один раз, а `k`, —
+    // значит его статы достаются борду `k` раз. Своего веса тут нет
+    // и не нужно: величина считается тем же `perStatPoint`, что и любые
+    // другие статы, а `k` называет сама карта носителя.
+    const doubler = host === null ? null : magnetDoublerOf(host, deps.cards, rules);
+    const magnetStats = (minion.attack ?? 0) + (minion.health ?? 0);
+    const doubledGain =
+      doubler === null ? 0 : (doubler - 1) * magnetStats * rules.value.perStatPoint;
 
     // Ставка на тройку, занимающая ПОСЛЕДНИЙ свободный слот, разменивается
     // на ОДИН бой.
@@ -2115,6 +2264,14 @@ export function playRules(
           ? `борд полон, но магнитится — к ${hostName}${shieldHint}`
           : `магнитный — носитель ${hostName}${shieldHint}`,
       );
+      // Удвоение называется словами: игрок нажал активацию сам и вправе
+      // знать, на какой модуль советник её тратит и почему на этот.
+      if (doubler !== null) {
+        notes.push(
+          `у ${hostName} включено удвоение — модуль ляжет ${String(doubler)} раза ` +
+            `(+${String((doubler - 1) * magnetStats)} статов)`,
+        );
+      }
     } else if (full && victim !== null) {
       const victimName = deps.cards.info(victim.minion.cardId)?.name ?? victim.minion.cardId;
       notes.push(`борд полон, продать ${victimName} (${victim.value.toFixed(1)})`);
@@ -2140,7 +2297,7 @@ export function playRules(
       {
         action: 'play' as const,
         minion,
-        score: playValue,
+        score: playValue + doubledGain,
         cost: 0,
         requiresSlot: full && host === null,
         sellFirst: full && host === null ? (victim?.minion ?? null) : null,
@@ -2153,7 +2310,7 @@ export function playRules(
         targetMinion: modal?.target ?? null,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
-          `ценность ${playValue.toFixed(1)}` +
+          `ценность ${(playValue + doubledGain).toFixed(1)}` +
           (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
       },
     ];
@@ -7209,9 +7366,16 @@ export function playPlan(
       boardAfter.filter((m) => m.entityId !== minion.entityId),
       deps.cards,
       poison,
+      claimsMagnetDoubler(minion, state, deps.cards),
     );
     if (host !== null) {
       magnetSteps.push({ minion, magnetizeTo: host, sellFirst: null, score: rec.score });
+      // Удвоение потрачено ЭТИМ шагом: следующий модуль обязан считать
+      // носителя обычным, иначе цепочка обещала бы удвоение дважды. Тот же
+      // приём, что в плане трат (`withMagnetDoublingSpent`), — здесь он
+      // на месте, потому что `boardAfter` изменяемый.
+      const spent = withMagnetDoublingSpent(boardAfter, host);
+      if (spent !== boardAfter) boardAfter.splice(0, boardAfter.length, ...spent);
     } else if (slots > 0) {
       slots -= 1;
       boardAfter.push(minion);

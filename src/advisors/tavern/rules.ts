@@ -508,6 +508,28 @@ export interface TavernRules {
   readonly setStatsWords: readonly string[];
 
   /**
+   * Активация, УДВАИВАЮЩАЯ следующее примагничивание: «Activate ({0}): The
+   * next Magnetization to this minion this turn is doubled» (Дрон-дубликатор
+   * `BG36_506`, тир 4; золотая версия пишет «tripled»).
+   *
+   * Это не прибавка статов и не добыча — прежний разбор активаций не видел
+   * тут ничего, — а РЕЖИМ носителя: пока он держится, следующий модуль
+   * ложится на этого миньона дважды. Факт «режим включён» игра сообщает
+   * тегом (`MAGNET_DOUBLE_TAG` в advisor.ts): он ставится нажатием и гаснет
+   * тем самым примагничиванием, которое удвоил.
+   *
+   * Множитель берётся СЛОВОМ из текста (группа 1 шаблона), а не из того,
+   * золотой ли миньон: у золотой копии слово своё, и подставлять тройку
+   * по признаку «золотой» значило бы гадать там, где карта говорит прямо.
+   *
+   * Класс узкий и назван: во всём снапшоте таких карт две (обычная
+   * и золотая), в пуле — ОДНА.
+   */
+  readonly magnetDoubleWords: readonly string[];
+  /** Слово множителя из текста → во сколько раз ляжет модуль. */
+  readonly magnetMultiplierWords: Readonly<Record<string, number>>;
+
+  /**
    * Сила, ДЕШЕВЕЮЩАЯ от покупок своего племени: «Get a Pirate. After you buy
    * a Pirate, your next Hero Power costs (1) less» (Патчес,
    * `TB_BaconShop_HP_072`, база 3).
@@ -1319,6 +1341,15 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     "\\bset\\s+(?:another|a|your)\\s+(?:friendly\\s+)?minion['’]?s\\s+stats\\s+to\\s+" +
       '(?:\\{(\\d)\\}|(\\d+))\\s*/\\s*(?:\\{(\\d)\\}|(\\d+))',
   ],
+
+  // «The next <b>Magnetization</b> to this minion this turn is doubled.»
+  // Разметка стоит ПОСРЕДИ шаблона, поэтому между словами — не пробел
+  // (урок part16 и «Gain 2 free <b>Refreshes</b>» из part23). Группа 1 —
+  // слово множителя.
+  magnetDoubleWords: [
+    '\\bnext\\s*(?:<[^>]*>\\s*)*magnetization\\b[^.]*\\b(doubled|tripled)\\b',
+  ],
+  magnetMultiplierWords: { doubled: 2, tripled: 3 },
 
   // «After you buy a Pirate, your next Hero Power costs (1) less.» (Патчес).
   // Группа 1 — племя, группа 2 — величина скидки.
