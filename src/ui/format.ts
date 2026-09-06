@@ -9,6 +9,7 @@ import type {
 import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
 import type { SpendPlan } from '../advisors/tavern/spend.js';
 import type { CardIndex } from '../data/cards.js';
+import type { FieldStrength } from '../advisors/strength/strength.js';
 import type { PlaceForecast } from '../ml/forecast.js';
 import type { GameState, Minion } from '../state/types.js';
 
@@ -171,6 +172,43 @@ export function forecastLine(forecast: PlaceForecast): string {
   return (
     `ожидаемое место ${forecast.place.toFixed(1)} ± ${forecast.error.toFixed(1)}` +
     ` — прогноз, не совет; по ${String(forecast.games)} партиям`
+  );
+}
+
+/** Склонение слова «борд» при числе: 41 борд, 42 борда, 45 бордов. */
+function boardsWord(n: number): string {
+  const last = n % 10;
+  const tens = n % 100;
+  if (last === 1 && tens !== 11) return 'борд';
+  if (last >= 2 && last <= 4 && (tens < 12 || tens > 14)) return 'борда';
+  return 'бордов';
+}
+
+/**
+ * Сила стола одной строкой — для терминала.
+ *
+ * Говорит ровно то же, что блок оверлея, и теми же словами: доля выигранных
+ * боёв против поля этого хода, размер поля и цена поражения рядом с запасом
+ * здоровья. Вердикта нет намеренно — «усиливаться или качаться» ближайшим
+ * боем не решается (см. `OverlayStrength`), и слово «слабый» тут было бы
+ * советом, которого замер не подтверждает.
+ */
+export function strengthLine(strength: FieldStrength, hp: number): string {
+  // «сейчас» — то же слово и по той же причине, что в оверлее: в начале хода
+  // борд ещё не укомплектован, и на part44 оценка до покупок и после
+  // расходилась как 6 % против 70 %.
+  const head =
+    `ваш стол берёт сейчас ${strength.percent.toFixed(0)} % боёв ` +
+    `${String(strength.tavernTurn)}-го хода таверны — не совет; ` +
+    `поле ${String(strength.boards)} ${boardsWord(strength.boards)} соперников`;
+  // Цена поражения печатается только там, где за ней стоит не горстка боёв:
+  // порог и довод — у `MIN_LOSSES_TO_SHOW` в overlay/view.ts.
+  if (strength.damageOnLoss === null || strength.damageLosses < 8) {
+    return `${head}; у вас ${String(hp)} hp`;
+  }
+  return (
+    `${head}; поражение здесь стоит ~${strength.damageOnLoss.toFixed(0)} hp, ` +
+    `у вас ${String(hp)}`
   );
 }
 

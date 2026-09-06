@@ -12,6 +12,8 @@ import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import { waitingForLogText } from '../ui/setup.js';
 import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.js';
+import { loadFieldBoards } from '../advisors/strength/boards.js';
+import { strengthKey } from '../advisors/strength/strength.js';
 
 /**
  * Окно оверлея поверх игры.
@@ -167,6 +169,10 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
   // (`data/ml/place-model.json`), истории партии он набирает сам.
   const forecaster = new PlaceForecaster();
 
+  // Эталонное поле бордов: читается один раз при старте (2.4 МБ), живёт
+  // в главном потоке. `null` — снапшота нет, и блок силы молчит.
+  const fieldBoards = loadFieldBoards();
+
   let latest: GameState | null = null;
   let tavern: ViewInput['tavern'] = null;
   let thinking = false;
@@ -176,6 +182,12 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
   // же правил на гипотетических состояниях, симулятор ему не нужен. Правила
   // умолчальные — те же, на которых считает живой советник.
   let plan: ViewInput['spendPlan'] = null;
+  // Сила стола приходит из воркера с опозданием, поэтому держится вместе
+  // с ключом борда, на котором посчитана: пока борд тот же, число остаётся
+  // на экране. Гасить его на каждую смену положения значило бы мигать
+  // блоком после каждой покупки, хотя борд не менялся (`strengthKey`).
+  let strength: ViewInput['strength'] = null;
+  let strengthKeyShown = '';
   // Предупреждение продукта держится до конца партии: оно про данные,
   // а не про положение дел, и гаснуть с новым советом не должно.
   let warning: string | null = null;
@@ -196,6 +208,7 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
           // в переменной: он меняется от состояния, а не от совета, и его
           // накопитель обновляется чаще, чем зовётся советник.
           forecast: forecaster.current(),
+          strength,
           // Окно накрывает экран целиком, поэтому его соотношение сторон
           // и есть игровое: по нему метки переводятся из долей высоты,
           // которыми замерена раскладка, в доли ширины.
@@ -211,6 +224,8 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
       cards,
       position: worker,
       buys: worker,
+      strength: worker,
+      fieldBoards,
       dataset: new DatasetRecorder({ dir: DATASET_DIR }),
       forecast: forecaster,
     },
@@ -229,12 +244,27 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
         // Досчёт покупок тоже про прошлое положение: строка гасится
         // до прихода свежего результата.
         buyCheck = null;
+        // А сила стола гасится, только если сменился САМ БОРД: от витрины
+        // и золота она не зависит.
+        if (strengthKey(state) !== strengthKeyShown) {
+          strength = null;
+          strengthKeyShown = '';
+        }
         show();
       },
       onBuyCheck: (result, target) => {
         // Брошенный досчёт ничего не меняет: строка уже погашена onTavern.
         if (result !== null) {
           buyCheck = { result, target };
+          show();
+        }
+      },
+      onStrength: (value, state) => {
+        // Брошенный счёт ничего не меняет: число уже погашено onTavern,
+        // если борд успел смениться.
+        if (value !== null) {
+          strength = value;
+          strengthKeyShown = strengthKey(state);
           show();
         }
       },

@@ -6,6 +6,11 @@ import type {
   BuyCheckOptions,
   BuyCheckResult,
 } from '../../advisors/tavern/simulated.js';
+import type {
+  FieldStrength,
+  FieldStrengthOptions,
+  FieldStrengthQuestion,
+} from '../../advisors/strength/strength.js';
 
 /**
  * Разговор с воркером расстановки.
@@ -34,16 +39,19 @@ import type {
  *
  * ## Два вида работы — два слота отмены
  *
- * Воркер считает и расстановку, и досчёт покупок: снапшот карт один,
- * грузить его дважды незачем. Задачи разного вида не отменяют друг друга —
- * у каждого вида своя ячейка в общей памяти (слот 0 — расстановка,
- * слот 1 — покупки). Очередь всё же одна: покупки (полсекунды) советник
- * шлёт ПЕРЕД расстановкой (секунды), чтобы короткий счёт не ждал длинного.
+ * Воркер считает расстановку, досчёт покупок и силу стола: снапшот карт
+ * один, грузить его трижды незачем. Задачи разного вида не отменяют друг
+ * друга — у каждого вида своя ячейка в общей памяти (слот 0 — расстановка,
+ * слот 1 — покупки, слот 2 — сила стола). Очередь всё же одна, поэтому
+ * порядок отправки — по длине счёта: покупки (полсекунды) и сила стола
+ * (полсекунды) уходят ПЕРЕД расстановкой (секунды), чтобы короткий счёт
+ * не ждал длинного.
  */
 
 /** Слоты в общей памяти отмены. */
 export const POSITION_SLOT = 0;
 export const BUYS_SLOT = 1;
+export const STRENGTH_SLOT = 2;
 
 export interface AdviseRequest {
   readonly type: 'advise';
@@ -61,7 +69,17 @@ export interface CheckBuysRequest {
   readonly options: BuyCheckOptions;
 }
 
-export type WorkerRequest = AdviseRequest | CheckBuysRequest;
+export interface StrengthRequest {
+  readonly type: 'strength';
+  readonly id: number;
+  /** Бои против каждого борда поля — вопрос собран в главном потоке. */
+  readonly question: FieldStrengthQuestion;
+  readonly options: FieldStrengthOptions;
+  /** Цена поражения этого хода: она из снапшота, а не из симулятора. */
+  readonly loss: { readonly mean: number; readonly losses: number } | null;
+}
+
+export type WorkerRequest = AdviseRequest | CheckBuysRequest | StrengthRequest;
 
 export interface ReadyMessage {
   readonly type: 'ready';
@@ -81,6 +99,12 @@ export interface BuysMessage {
   readonly result: BuyCheckResult;
 }
 
+export interface StrengthMessage {
+  readonly type: 'strength';
+  readonly id: number;
+  readonly strength: FieldStrength;
+}
+
 export interface AbortedMessage {
   readonly type: 'aborted';
   readonly id: number;
@@ -96,6 +120,7 @@ export type WorkerMessage =
   | ReadyMessage
   | AdviceMessage
   | BuysMessage
+  | StrengthMessage
   | AbortedMessage
   | FailureMessage;
 

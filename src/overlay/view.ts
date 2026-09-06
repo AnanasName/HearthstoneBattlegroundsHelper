@@ -11,6 +11,7 @@ import type { BuyCheckResult } from '../advisors/tavern/simulated.js';
 import type { SpendPlan } from '../advisors/tavern/spend.js';
 import type { CardIndex } from '../data/cards.js';
 import type { PlaceForecast } from '../ml/forecast.js';
+import type { FieldStrength } from '../advisors/strength/strength.js';
 import type { GameState } from '../state/types.js';
 import { buttonRect, slotRect, type Rect, type SlotRow, type TavernButton } from './layout.js';
 import {
@@ -246,6 +247,36 @@ export interface OverlayForecast {
   readonly label: string;
 }
 
+export interface OverlayStrength {
+  /**
+   * Доля боёв этого хода, которые наш борд выигрывает, 0..100.
+   *
+   * Не оценка по нашей шкале ценности и не прогноз места: ровно ожидаемый
+   * исход боя против ВСЕХ чужих бордов, выходивших в бой на этом же ходу
+   * таверны (`src/advisors/strength/`). Число калибровано на 466 настоящих
+   * боях, поэтому печатается как есть, без перевода в «сильный/слабый»:
+   * замер `spike:strength` показывает, что в корзине «60–80 %» игрок
+   * фактически выиграл 63.8 % боёв, а в корзине «0–20 %» — 12.9 %.
+   */
+  readonly percent: number;
+  /** Сколько чужих бордов стоит за числом — размер выборки. */
+  readonly boards: number;
+  readonly tavernTurn: number;
+  /**
+   * Во сколько здоровья обходится поражение на этом ходу и своё здоровье
+   * с бронёй рядом. `null` — цена не замерена или замерена по горстке боёв.
+   *
+   * Без второго числа первое не отвечает на вопрос, ради которого блок
+   * и заведён: слабый борд при полном запасе здоровья и слабый борд
+   * на двадцати очках — разные положения.
+   */
+  readonly loss: { readonly hp: number; readonly losses: number } | null;
+  /** Своё здоровье с бронёй. */
+  readonly hp: number;
+  /** Подпись блока — та же роль, что `label` у темпа и прогноза. */
+  readonly label: string;
+}
+
 export interface OverlayView {
   /** Есть ли что показывать вообще. */
   readonly active: boolean;
@@ -260,6 +291,8 @@ export interface OverlayView {
   readonly plan: OverlayPlan | null;
   /** Темп таверны; `null` — вне таверны и на модальных экранах. */
   readonly tempo: OverlayTempo | null;
+  /** Сила своего стола против поля хода; `null` — считать не на чем. */
+  readonly strength: OverlayStrength | null;
   /** Прогноз места; `null` — модели нет, стола не видно или не таверна. */
   readonly forecast: OverlayForecast | null;
   /** Кольца и подписи поверх настоящих карт игры. */
@@ -277,6 +310,7 @@ export const EMPTY_VIEW: OverlayView = {
   position: null,
   plan: null,
   tempo: null,
+  strength: null,
   forecast: null,
   marks: [],
   order: [],
@@ -339,6 +373,15 @@ export interface ViewInput {
    */
   readonly forecast?: PlaceForecast | null;
   /**
+   * Сила своего стола, посчитанная снаружи (`src/advisors/strength/`).
+   *
+   * Полем, а не расчётом внутри вида, по той же причине, что прогноз места:
+   * это симулятор — сорок боёв против всего поля хода, полсекунды работы, —
+   * а вид обязан строиться мгновенно и синхронно. В живом режиме число
+   * приходит из воркера и опаздывает на положение-другое.
+   */
+  readonly strength?: FieldStrength | null;
+  /**
    * Отношение ширины окна игры к высоте — под метки на картах.
    *
    * Длины раскладки замерены ВЫСОТОЙ (игра масштабирует стол по ней),
@@ -379,6 +422,9 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
       // ещё нечем и некуда. Стола с картами тоже нет — помечать нечего.
       plan: null,
       tempo: null,
+      // Сила стола молчит по той же причине, что план и темп: борда ещё
+      // нет вовсе, а «вы слабее всех» на пустом столе — не факт, а бессмыслица.
+      strength: null,
       // Прогноз молчит и здесь: точек решения ещё нет, а модель считает
       // по ним — на экране выбора героя ей нечего читать.
       forecast: null,
@@ -410,6 +456,10 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
     position: positionView(input, cards),
     plan: modal ? null : planView(input, cards),
     tempo: modal ? null : tempoView(input),
+    // Сила стола за модалкой ОСТАЁТСЯ, как и прогноз места: она про борд
+    // и ход целиком, а не про золото и витрину, которых за модальным
+    // экраном нет. Выбор тринкета её не устаревает.
+    strength: strengthView(input),
     forecast: forecastView(input),
     // Пока открыт модальный экран, стол игре не принадлежит: карты витрины
     // и борда за ним, и кольцо на них показывало бы в никуда. А вот сам
@@ -917,6 +967,65 @@ function tempoView(input: ViewInput, rules: TavernRules = DEFAULT_TAVERN_RULES):
     label: 'темп — не совет · кривая сообщества, не замер',
   };
 }
+
+/**
+ * Блок силы стола: доля выигранных боёв против поля хода — или молчание.
+ *
+ * Когда молчать, решает считающая сторона (`fieldStrengthQuestion`): нет
+ * снапшота поля, пустой борд, не таверна, слишком узкое поле хода. Вид эти
+ * условия не повторяет — второе определение того же правила разъехалось бы
+ * молча, и оверлей с терминалом стали бы показывать разное (тот же довод,
+ * что у прогноза места).
+ *
+ * Здесь решается только ПОДАЧА, и в ней два решения. Первое: цена поражения
+ * печатается лишь тогда, когда за ней стоит не горстка боёв, — на 13-м ходу
+ * таверны она посчитана по четырём поражениям, и «стоит 15 hp» там звучало бы
+ * ровно так же уверенно, как «7.5 hp» по двадцати трём. Второе: вердикта нет.
+ * Слов «сильный» и «слабый» блок не говорит, цветом ничего не красит и
+ * стрелок не рисует — потому что решение, ради которого игрок и просил число
+ * («усиливаться или улучшать таверну»), ближайшим боем не решается
+ * структурно, и картинка, читающаяся как «вам пора усиливаться», утверждала
+ * бы непроверенное. То же основание, что у блока темпа.
+ */
+function strengthView(input: ViewInput): OverlayStrength | null {
+  const strength = input.strength ?? null;
+  if (strength === null) return null;
+
+  const hero = input.state.hero;
+  // Здоровье с бронёй — то, что реально теряется в бою (`effectiveHp`
+  // в episodes.ts). Без героя блока нет вовсе: цену поражения не с чем
+  // сравнить, а одна доля побед на вопрос игрока не отвечает.
+  if (hero === null) return null;
+  const hp = (hero.health ?? 0) - hero.damage + hero.armor;
+
+  return {
+    percent: strength.percent,
+    boards: strength.boards,
+    tavernTurn: strength.tavernTurn,
+    loss:
+      strength.damageOnLoss === null || strength.damageLosses < MIN_LOSSES_TO_SHOW
+        ? null
+        : { hp: strength.damageOnLoss, losses: strength.damageLosses },
+    hp,
+    // Ярлык — то же слово, что у темпа и прогноза: это не совет. Больше
+    // в нём ничего нет намеренно — что за проценты, сказано в самой строке
+    // («берёт 62 % боёв»), а из чего они, стоит строкой ниже. Длинный
+    // ярлык переносился на вторую строку и читался как отдельное
+    // утверждение (проверено в браузере).
+    label: 'не совет',
+  };
+}
+
+/**
+ * Сколько проигранных боёв должно стоять за ценой поражения, чтобы её
+ * печатать.
+ *
+ * Восемь — не подобранное число, а край наблюдений: до 11-го хода таверны
+ * включительно в замере от 9 до 23 поражений на ход, а с 12-го — три, четыре
+ * и два. Ровно там число и перестаёт что-либо значить, и порог отсекает
+ * именно этот хвост.
+ */
+const MIN_LOSSES_TO_SHOW = 8;
 
 /**
  * Блок прогноза: число, его ошибка и выборка — или молчание.

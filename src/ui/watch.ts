@@ -25,6 +25,7 @@ import { DATASET_DIR, DatasetRecorder } from '../dataset/recorder.js';
 import { LiveAdvisor, type LiveAdvisorHandlers } from '../live/advisor.js';
 import { PositionWorker } from '../live/position/client.js';
 import { replayLog } from '../live/replay.js';
+import { loadFieldBoards } from '../advisors/strength/boards.js';
 import { startLiveSession } from '../live/session.js';
 import { PlaceForecaster } from '../ml/forecast.js';
 import type { LiveNotice } from '../live/watcher.js';
@@ -33,6 +34,7 @@ import {
   buyCheckLine,
   choiceLine,
   forecastLine,
+  strengthLine,
   minionLabel,
   noOpponentReason,
   opponentStale,
@@ -228,6 +230,10 @@ async function main(): Promise<void> {
   // только в игре, и проверить её без Hearthstone было бы нечем.
   const forecaster = new PlaceForecaster();
 
+  // Эталонное поле бордов: один разбор при старте. Нет снапшота — строки
+  // силы стола не будет вовсе (`npm run field:fit` его собирает).
+  const fieldBoards = loadFieldBoards();
+
   const handlers: LiveAdvisorHandlers = {
     onTavern: (advice, state) => {
       lastState = state;
@@ -239,6 +245,11 @@ async function main(): Promise<void> {
       // Брошенный досчёт молчит: он бросается на каждом действии игрока,
       // а эвристика уже напечатана — шуметь «брошено» тут не о чем.
       if (result !== null) console.log(`   ⚔ ${buyCheckLine(result, target, cards)}`);
+    },
+    onStrength: (strength, state) => {
+      if (strength === null || state.hero === null) return;
+      const hp = (state.hero.health ?? 0) - state.hero.damage + state.hero.armor;
+      console.log(`   ▦ ${strengthLine(strength, hp)}`);
     },
     onPosition: (advice, target) => {
       printPosition(advice, target, cards, lastState);
@@ -252,9 +263,11 @@ async function main(): Promise<void> {
   };
 
   if (args.replay !== null) {
-    const advisor = new LiveAdvisor({ cards, position, buys: position }, handlers, {
-      search: searchOptions(args),
-    });
+    const advisor = new LiveAdvisor(
+      { cards, position, buys: position, strength: position, fieldBoards },
+      handlers,
+      { search: searchOptions(args) },
+    );
     console.log(`проигрываю ${args.replay} со скоростью ×${String(args.speed)}`);
     await replayLog(
       readFileSync(args.replay, 'utf8'),
@@ -288,6 +301,8 @@ async function main(): Promise<void> {
       cards,
       position,
       buys: position,
+      strength: position,
+      fieldBoards,
       // Каждая живая партия копится в датасет фазы 6 — сыгранное
       // и не записанное потеряно навсегда.
       dataset: new DatasetRecorder({ dir: DATASET_DIR }),

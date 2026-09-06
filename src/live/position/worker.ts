@@ -3,17 +3,19 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { createBattleSimulator } from '../../advisors/battle/simulator.js';
 import { advisePosition, SearchAborted } from '../../advisors/position/advisor.js';
 import { BuyCheckAborted, checkBuysWithBattle } from '../../advisors/tavern/simulated.js';
+import { runFieldStrength, StrengthAborted } from '../../advisors/strength/strength.js';
 import {
   BUYS_SLOT,
   POSITION_SLOT,
+  STRENGTH_SLOT,
   type WorkerMessage,
   type WorkerRequest,
   type WorkerSetup,
 } from './protocol.js';
 
 /**
- * Воркер советников: держит справочник карт, считает расстановку и досчёт
- * покупок. Устройство разговора и слоты отмены — в protocol.ts.
+ * Воркер советников: держит справочник карт, считает расстановку, досчёт
+ * покупок и силу стола. Устройство разговора и слоты отмены — в protocol.ts.
  */
 
 const port = parentPort;
@@ -47,6 +49,25 @@ port.on('message', (request: WorkerRequest) => {
       return;
     }
 
+    if (request.type === 'strength') {
+      const strength = runFieldStrength(
+        request.question,
+        {
+          simulator,
+          aborted: () => Atomics.load(pending, STRENGTH_SLOT) !== request.id,
+        },
+        // Снапшота поля у воркера нет: цену поражения главный поток уже
+        // прочитал и прислал числом. Второй разбор того же файла в другом
+        // потоке — это второй источник одного факта.
+        { builtAt: '', parts: [], boards: [], damage: request.loss === null ? [] : [
+          { tavernTurn: request.question.tavernTurn, mean: request.loss.mean, losses: request.loss.losses },
+        ] },
+        request.options,
+      );
+      reply({ type: 'strength', id: request.id, strength });
+      return;
+    }
+
     const advice = advisePosition(
       request.setups,
       {
@@ -57,7 +78,11 @@ port.on('message', (request: WorkerRequest) => {
     );
     reply({ type: 'advice', id: request.id, advice });
   } catch (error) {
-    if (error instanceof SearchAborted || error instanceof BuyCheckAborted) {
+    if (
+      error instanceof SearchAborted ||
+      error instanceof BuyCheckAborted ||
+      error instanceof StrengthAborted
+    ) {
       reply({ type: 'aborted', id: request.id });
       return;
     }

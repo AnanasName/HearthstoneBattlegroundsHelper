@@ -378,6 +378,63 @@
         color: #5f6368;
       }
 
+      /* ── Сила стола ──────────────────────────────────────────────────── */
+
+      /*
+        Блок отвечает на вопрос игрока «сильный мой стол для этого хода или
+        нет» и НЕ отвечает на следующий за ним — «усиливаться или качаться»:
+        этот выбор ближайшим боем не решается (см. `OverlayStrength`).
+        Отсюда вся его внешность: ни зелёного, ни красного, ни стрелок.
+        Цветом «62 %» стало бы либо похвалой, либо тревогой, а число — просто
+        доля выигранных боёв.
+      */
+      #strength:not(:empty) {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #strength .value {
+        font-variant-numeric: tabular-nums;
+        color: #eceff1;
+      }
+
+      /*
+        Полоска — это шкала от нуля до ста, а не индикатор «хорошо/плохо».
+        На ней две метки, и обе фактические: где стоит игрок и где стоит
+        РОВНЯ со столом (50 %). Без второй метки первая ничего не значит —
+        игрок не обязан помнить, что половина боёв это норма.
+      */
+      #strength .bar {
+        position: relative;
+        display: inline-block;
+        width: 90px;
+        height: 7px;
+        margin: 0 6px;
+        vertical-align: middle;
+        background: #2c3034;
+        border: 1px solid #4a4f55;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      #strength .fill {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        background: #8d949b;
+      }
+
+      #strength .even {
+        position: absolute;
+        top: -2px;
+        bottom: -2px;
+        left: 50%;
+        width: 1px;
+        background: var(--muted);
+      }
+
       /* ── Прогноз места ───────────────────────────────────────────────── */
 
       /*
@@ -423,6 +480,7 @@
       <div id="plan"></div>
       <div id="actions"></div>
       <div id="position"></div>
+      <div id="strength"></div>
       <div id="tempo"></div>
       <div id="forecast"></div>
     </div>
@@ -567,6 +625,59 @@
         if (tempo.note) target.appendChild(line(tempo.note));
       }
 
+      function strengthBlock(target, strength) {
+        target.replaceChildren();
+        if (!strength) return;
+
+        // Первая строка — само число и шкала под ним; ярлык «не совет»
+        // стоит в ней же и последним, как у прогноза места: подпись, которую
+        // можно потерять отдельно от числа, обещала бы не то.
+        const row = node('div', '', 'line');
+        row.appendChild(node('span', 'ваш стол берёт ', 'label'));
+        row.appendChild(node('span', `${Math.round(strength.percent)} %`, 'value'));
+        // «сейчас» — не украшение. Число считается по борду, который стоит
+        // НА СТОЛЕ, а в начале хода он ещё не укомплектован: на настоящей
+        // партии (part44) оценка в начале хода и после покупок расходилась
+        // как 6 % против 70 %. Без этого слова первое читалось бы как
+        // приговор ходу, а это всего лишь «бой прямо сейчас».
+        row.appendChild(node('span', ' боёв сейчас', 'label'));
+
+        const bar = node('span', '', 'bar');
+        const fill = node('span', '', 'fill');
+        // Ширина заливки — то же число, что и в подписи: два представления
+        // одной величины, а не два числа.
+        fill.style.width = `${Math.max(0, Math.min(100, strength.percent))}%`;
+        bar.appendChild(fill);
+        bar.appendChild(node('span', '', 'even'));
+        row.appendChild(bar);
+        row.appendChild(node('span', strength.label, 'label'));
+        target.appendChild(row);
+
+        // Вторая строка — из чего число и цена ошибки. Цена и делает первое
+        // применимым: 40 % при полном запасе здоровья и 40 % на двадцати
+        // очках — разные положения. Молчит, когда цена посчитана по горстке
+        // боёв (`loss === null`).
+        // Склонение — не косметика: «41 бордов» читается как опечатка,
+        // а опечатка в подписи заставляет перечитывать само число.
+        const n = strength.boards;
+        const last = n % 10;
+        const tens = n % 100;
+        const word =
+          last === 1 && tens !== 11
+            ? 'борд'
+            : last >= 2 && last <= 4 && (tens < 12 || tens > 14)
+              ? 'борда'
+              : 'бордов';
+        const source = `ход таверны ${strength.tavernTurn} · ${n} ${word} соперников`;
+        target.appendChild(
+          line(
+            strength.loss
+              ? `${source} · поражение ~${Math.round(strength.loss.hp)} hp, у вас ${strength.hp}`
+              : `${source} · у вас ${strength.hp} hp`,
+          ),
+        );
+      }
+
       function forecastBlock(target, forecast) {
         target.replaceChildren();
         if (!forecast) return;
@@ -605,6 +716,7 @@
           );
         }
 
+        strengthBlock(el('strength'), view.strength);
         tempoBlock(el('tempo'), view.tempo);
         forecastBlock(el('forecast'), view.forecast);
 

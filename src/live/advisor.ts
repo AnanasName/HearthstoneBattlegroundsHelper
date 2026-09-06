@@ -14,6 +14,13 @@ import {
   type BuyCandidate,
   type BuyCheckResult,
 } from '../advisors/tavern/simulated.js';
+import type { FieldSnapshot } from '../advisors/strength/boards.js';
+import {
+  damageOnLoss,
+  fieldStrengthQuestion,
+  type FieldStrength,
+  type FieldStrengthQuestion,
+} from '../advisors/strength/strength.js';
 import type { CardIndex } from '../data/cards.js';
 import { isBattlegroundsGame, type GameState, type Minion } from '../state/types.js';
 
@@ -62,11 +69,32 @@ export interface BuyCheckSource {
   cancel(): void;
 }
 
+/**
+ * Кто считает силу стола. Тот же воркер, что расстановка и досчёт покупок.
+ */
+export interface StrengthSource {
+  strength(
+    question: FieldStrengthQuestion,
+    loss?: { readonly mean: number; readonly losses: number } | null,
+  ): Promise<FieldStrength | null>;
+  cancel(): void;
+}
+
 export interface LiveAdvisorDeps {
   readonly cards: CardIndex;
   readonly position: PositionSource;
   /** Необязателен: без него покупки живут одной эвристикой. */
   readonly buys?: BuyCheckSource;
+  /**
+   * Необязателен: без него блок силы стола молчит.
+   *
+   * Отдельно от источника лежит и сам снапшот поля — он читается один раз
+   * при старте и живёт в главном потоке: в вопросе к воркеру уже стоят
+   * борды, и второй разбор того же файла в другом потоке был бы вторым
+   * источником одного факта.
+   */
+  readonly strength?: StrengthSource;
+  readonly fieldBoards?: FieldSnapshot | null;
 }
 
 export interface LiveAdvisorOptions {
@@ -113,6 +141,13 @@ export interface LiveAdvisorHandlers {
    * нельзя — со стороны неотличимо от сломанного советника.
    */
   readonly onNoOpponent?: (opponent: ResolvedOpponent, state: GameState) => void;
+  /**
+   * Сила стола посчитана. `null` — брошена, положение ушло вперёд.
+   *
+   * Приходит ПОСЛЕ onTavern того же положения, как и досчёт покупок: блок
+   * силы дополняет картину, а не задерживает советы.
+   */
+  readonly onStrength?: (strength: FieldStrength | null, state: GameState) => void;
   readonly onError?: (error: Error) => void;
 }
 
@@ -209,6 +244,7 @@ export class LiveAdvisor {
     // уже относится к прошлому положению, и досчитывать его незачем.
     this.#deps.position.cancel();
     this.#deps.buys?.cancel();
+    this.#deps.strength?.cancel();
 
     this.#pending = state;
     if (this.#timer !== null) clearTimeout(this.#timer);
@@ -228,6 +264,7 @@ export class LiveAdvisor {
     this.#timer = null;
     this.#deps.position.cancel();
     this.#deps.buys?.cancel();
+    this.#deps.strength?.cancel();
   }
 
   #advise(state: GameState, key: string): void {
@@ -252,6 +289,23 @@ export class LiveAdvisor {
               question.target,
               state,
             );
+          })
+          .catch((error: unknown) => {
+            this.#handlers.onError?.(error instanceof Error ? error : new Error(String(error)));
+          });
+      }
+    }
+
+    // Сила стола — тоже полсекунды, и уходит она ПЕРЕД расстановкой по той
+    // же причине, что досчёт покупок: очередь воркера одна.
+    const strengthSource = this.#deps.strength;
+    if (strengthSource !== undefined) {
+      const ask = fieldStrengthQuestion(state, this.#deps.fieldBoards ?? null);
+      if (ask !== null) {
+        strengthSource
+          .strength(ask, damageOnLoss(this.#deps.fieldBoards ?? null, ask.tavernTurn))
+          .then((strength) => {
+            this.#handlers.onStrength?.(key === this.#key ? strength : null, state);
           })
           .catch((error: unknown) => {
             this.#handlers.onError?.(error instanceof Error ? error : new Error(String(error)));

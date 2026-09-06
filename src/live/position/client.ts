@@ -10,16 +10,23 @@ import {
   type BuyCheckResult,
 } from '../../advisors/tavern/simulated.js';
 import {
+  DEFAULT_FIELD_STRENGTH_OPTIONS,
+  type FieldStrength,
+  type FieldStrengthOptions,
+  type FieldStrengthQuestion,
+} from '../../advisors/strength/strength.js';
+import {
   BUYS_SLOT,
   NO_TASK,
   POSITION_SLOT,
+  STRENGTH_SLOT,
   type WorkerMessage,
   type WorkerRequest,
   type WorkerSetup,
 } from './protocol.js';
 
 /**
- * Советники в отдельном потоке: расстановка и досчёт покупок.
+ * Советники в отдельном потоке: расстановка, досчёт покупок и сила стола.
  *
  * Заводится один раз при старте и живёт до конца работы: смысл именно в том,
  * чтобы справочник карт грузился однажды. Новый запрос своего вида
@@ -57,9 +64,11 @@ function workerExecArgv(url: URL): string[] {
 }
 
 export class PositionWorker {
-  readonly #pending = new Int32Array(new SharedArrayBuffer(8));
+  // Три слота по четыре байта: расстановка, покупки, сила стола.
+  readonly #pending = new Int32Array(new SharedArrayBuffer(12));
   readonly #waitingPosition = new Map<number, Waiting<PositionAdvice>>();
   readonly #waitingBuys = new Map<number, Waiting<BuyCheckResult>>();
+  readonly #waitingStrength = new Map<number, Waiting<FieldStrength>>();
   readonly #worker: Worker;
   readonly #ready: Promise<number>;
   #nextId = 1;
@@ -139,15 +148,44 @@ export class PositionWorker {
     });
   }
 
+  /**
+   * Посчитать силу стола, бросив предыдущий незаконченный счёт.
+   *
+   * Вопрос собирается в главном потоке (`fieldStrengthQuestion`): там лежит
+   * снапшот поля, и посылать его в воркер незачем — в вопросе уже стоят
+   * борды, против которых считать.
+   */
+  strength(
+    question: FieldStrengthQuestion,
+    loss: { readonly mean: number; readonly losses: number } | null = null,
+    options: FieldStrengthOptions = DEFAULT_FIELD_STRENGTH_OPTIONS,
+  ): Promise<FieldStrength | null> {
+    if (this.#closed) return Promise.reject(new Error('воркер советников закрыт'));
+
+    const id = this.#nextId++;
+    Atomics.store(this.#pending, STRENGTH_SLOT, id);
+
+    return new Promise<FieldStrength | null>((resolve, reject) => {
+      this.#waitingStrength.set(id, { resolve, reject });
+      const request: WorkerRequest = { type: 'strength', id, question, options, loss };
+      this.#worker.postMessage(request);
+    });
+  }
+
   /** Бросить весь счёт: ответы больше не нужны. */
   cancel(): void {
     Atomics.store(this.#pending, POSITION_SLOT, NO_TASK);
     Atomics.store(this.#pending, BUYS_SLOT, NO_TASK);
+    Atomics.store(this.#pending, STRENGTH_SLOT, NO_TASK);
   }
 
   /** Идёт ли счёт, которого ещё ждут. */
   get busy(): boolean {
-    return this.#waitingPosition.size > 0 || this.#waitingBuys.size > 0;
+    return (
+      this.#waitingPosition.size > 0 ||
+      this.#waitingBuys.size > 0 ||
+      this.#waitingStrength.size > 0
+    );
   }
 
   async close(): Promise<void> {
@@ -172,6 +210,12 @@ export class PositionWorker {
       waiting?.resolve(message.result);
       return;
     }
+    if (message.type === 'strength') {
+      const waiting = this.#waitingStrength.get(message.id);
+      this.#waitingStrength.delete(message.id);
+      waiting?.resolve(message.strength);
+      return;
+    }
 
     // Брошенный счёт и сбой не говорят, какого вида была задача, —
     // номер задачи уникален на оба вида, ищем в обеих очередях.
@@ -187,6 +231,13 @@ export class PositionWorker {
       this.#waitingBuys.delete(message.id);
       if (message.type === 'aborted') buys.resolve(null);
       else buys.reject(new Error(message.message));
+      return;
+    }
+    const strength = this.#waitingStrength.get(message.id);
+    if (strength !== undefined) {
+      this.#waitingStrength.delete(message.id);
+      if (message.type === 'aborted') strength.resolve(null);
+      else strength.reject(new Error(message.message));
     }
   }
 
@@ -195,5 +246,7 @@ export class PositionWorker {
     this.#waitingPosition.clear();
     for (const waiting of this.#waitingBuys.values()) waiting.reject(error);
     this.#waitingBuys.clear();
+    for (const waiting of this.#waitingStrength.values()) waiting.reject(error);
+    this.#waitingStrength.clear();
   }
 }

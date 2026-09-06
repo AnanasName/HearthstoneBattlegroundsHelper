@@ -6,7 +6,9 @@ import {
   type LiveAdvisorHandlers,
   type LiveAdvisorOptions,
   type PositionSource,
+  type StrengthSource,
 } from './advisor.js';
+import type { FieldSnapshot } from '../advisors/strength/boards.js';
 import { CardsFreshness } from './freshness.js';
 import { LiveWatcher, type LiveNotice, type LiveWatcherOptions } from './watcher.js';
 
@@ -56,6 +58,12 @@ export interface LiveSessionDeps {
     update: (state: GameState) => void;
     reset: () => void;
   };
+  /**
+   * Сила стола (`src/advisors/strength/`): считающий её воркер и снапшот
+   * эталонного поля. Без любого из двух блок молчит.
+   */
+  readonly strength?: StrengthSource;
+  readonly fieldBoards?: FieldSnapshot | null;
 }
 
 export interface LiveSessionHandlers extends LiveAdvisorHandlers {
