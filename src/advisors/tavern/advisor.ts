@@ -84,6 +84,19 @@ export interface Recommendation {
    */
   readonly searchGoal?: string | null;
   /**
+   * Племя, которое надо ВЫБРАТЬ у витринного баффа «своего типа».
+   *
+   * «Choose a minion. Give minions of its type in the Tavern +3/+3 this
+   * game» (Eonar's Favor, part43): игра сразу после покупки просит выбрать
+   * миньона, а его племя и решает, кому достанется усиление. Без этого поля
+   * совет читается как «купите заклинание», и выбор молча возвращается
+   * игроку — та же дыра, что голое «ОБНОВИТЬ» без цели (part37).
+   *
+   * Это НЕ `targetMinion`: усиление получает не наш миньон, а витрина, —
+   * ровно то, что советник и обещал ошибочно, пока не читал такие карты.
+   */
+  readonly shopBuffPick?: string | null;
+  /**
    * Сколько золота действие ПРИНОСИТ — ВАЛОВЫМИ, как написано в тексте.
    *
    * У золотых заклинаний эффект известен числом («Gain 1 Gold»), и прятать
@@ -2113,6 +2126,11 @@ export function playRules(
         sellFirst: full && host === null ? (victim?.minion ?? null) : null,
         magnetizeTo: host,
         spellBranches: modal?.branches,
+        // Цель ветви — в самой строке действия: «Choose One» у миньона игра
+        // спрашивает сразу после розыгрыша, и «на кого» — половина вопроса
+        // (part43). Цель считается на борде ПОСЛЕ розыгрыша: сам миньон уже
+        // стоит и годится в цели, а жертва, освободившая ему место, продана.
+        targetMinion: modal?.target ?? null,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
           `ценность ${playValue.toFixed(1)}` +
@@ -4502,6 +4520,31 @@ export interface SpellEffect {
    * покупку усиленного миньона.
    */
   readonly buffsShop: boolean;
+  /**
+   * Витринный бафф держится ВСЮ ПАРТИЮ («this game»), а не до обновления.
+   *
+   * Слова из текста, и цена у них разная на порядок: Them Apples платит
+   * покупками этого хода — усиленные миньоны уходят с первым обновлением
+   * витрины, — а Eonar's Favor и Staff of Enrichment усиливают каждую
+   * будущую покупку до конца партии.
+   */
+  readonly buffsShopAllGame: boolean;
+  /**
+   * Племя, названное в витринном баффе; `null` — все миньоны витрины
+   * или тип, который выбираем МЫ.
+   *
+   * Нужно затем же, зачем «боевой эффект «вашим X» пуст без своих того
+   * племени» (part14): «Give Elementals in the Tavern +2/+2 this game»
+   * на борде зверей не стоит ничего, и платить за него золото не за что.
+   */
+  readonly shopBuffRace: string | null;
+  /**
+   * Тип витринного баффа выбираем мы сами: «minions of its type».
+   *
+   * Совет обязан назвать, какой именно, — иначе игра просит выбор,
+   * а помощник молчит (part37, голое «ОБНОВИТЬ»).
+   */
+  readonly shopBuffOwnType: boolean;
   /** Сумма статов усиления: «+{0} Attack», «+X/+Y». */
   readonly stats: number;
   /**
@@ -4542,6 +4585,23 @@ export interface SpellEffect {
    * в приоритет ударов не подставляется (part15, ход 19).
    */
   readonly grantsTaunt: boolean;
+  /**
+   * Даёт перерождение или вихрь.
+   *
+   * Читаются рядом с провокацией и щитом: у модального «Choose One» именно
+   * эти слова и отличают ветви друг от друга, а в счёт они не входили вовсе
+   * (part43). Веса — те же, что у ключевых слов миньона.
+   */
+  readonly grantsReborn: boolean;
+  readonly grantsWindfury: boolean;
+  /**
+   * Племя, названное в тексте как ЦЕЛЬ: «Give a Beast +{0}/+{1} and Reborn».
+   *
+   * `null` — цель любая своя. Нужно выбору цели: усиление, которое ляжет
+   * только на зверя, нельзя предлагать на крупнейшего дракона, а на борде
+   * без зверей его нельзя предлагать вовсе.
+   */
+  readonly targetRace: string | null;
   /**
    * Цель НЕ выбирается: игра распределяет эффект сама («of each type»,
    * «random», «left-most»). Совет с «→ на кого-то» показывал бы выбор,
@@ -4586,8 +4646,54 @@ export interface SpellEffect {
 export interface SpellBranch {
   readonly cardId: string;
   readonly name: string;
-  /** Короткая подпись действия: «+3/+1» у Allied Mace. Пусто, если не статы. */
+  /**
+   * Короткая подпись действия: «+3/+1» у Allied Mace, «+1/+1 и перерождение»
+   * у Sprightly Sprucing. Пусто, если сказать нечего.
+   *
+   * Ключевые слова стоят в подписи не для красоты: игра спрашивает
+   * по-русски и словами («Повысить характеристики и дать «Перерождение»»),
+   * а мы отвечали одними статами — по подписи «+1/+1» игрок не мог понять,
+   * какую из двух кнопок мы советуем (part43, ход 15).
+   */
   readonly label: string;
+}
+
+/** Ключевое слово ветви — словом, тем же, каким помечен миньон на экране. */
+const BRANCH_KEYWORD_WORDS: readonly (readonly [keyof SpellEffect, string])[] = [
+  ['divineShield', 'щит'],
+  ['grantsTaunt', 'провокация'],
+  ['grantsReborn', 'перерождение'],
+  ['grantsWindfury', 'вихрь'],
+];
+
+/**
+ * Подпись ветви: статы и ключевые слова — то, чем ветви и различаются.
+ *
+ * Числа берутся от ТОЙ ЖЕ сущности, что и оценка (`branchScriptData`),
+ * иначе подпись назовёт одно, а счёт посчитает другое.
+ */
+function branchLabelOf(
+  text: string,
+  scriptData: readonly (number | null)[],
+  effect: SpellEffect | null,
+): string {
+  const pair = statPair(text, scriptData);
+  // Половинчатое усиление («+{0} Attack», «+{1} Health») подписывается тем же
+  // числом: у ветвей скарабея вся разница как раз в нём.
+  const single = /\+(?:\{(\d)\}|(\d+))\s+(attack|health)\b/i.exec(text);
+  const stats =
+    pair !== null
+      ? `+${String(pair.attack)}/+${String(pair.health)}`
+      : single === null
+        ? ''
+        : `+${String(placeholderValue(single[1], single[2], scriptData))} ${
+            (single[3] ?? '').toLowerCase() === 'health' ? 'хп' : 'атк'
+          }`;
+  const words =
+    effect === null
+      ? []
+      : BRANCH_KEYWORD_WORDS.filter(([key]) => effect[key] === true).map(([, word]) => word);
+  return [stats, ...words].filter((x) => x !== '').join(' и ');
 }
 
 /**
@@ -4635,12 +4741,33 @@ function placeholderValue(
  * из тех же весов. «Даёт миньона» оценивается ценой покупки: точную
  * ценность (среднее по витрине) отсюда не видно — витрины у разбора нет.
  */
+/**
+ * Ключевые слова, которые ДАЁТ заклинание, — одним числом.
+ *
+ * Одной функцией, потому что мест три (ветвь, заклинание руки, заклинание
+ * витрины), а вопрос один; разъехались бы они молча — как разъезжались
+ * списки партий до `CURRENT_BUILD_PARTS`. Веса те же, что у ключевых слов
+ * миньона: слово на теле стоит одинаково, кто бы его ни принёс.
+ *
+ * «До следующего хода» тут не различается — ровно как не различалось
+ * у провокации и щита до part43; это записанный остаток долга, а не
+ * решение (временных слов в пуле три: Glowing Crown, Angler's Lure,
+ * Reinvigoration).
+ */
+function grantedKeywordScore(effect: SpellEffect, rules: TavernRules): number {
+  return (
+    (effect.divineShield ? rules.value.divineShield : 0) +
+    (effect.grantsTaunt ? rules.value.taunt : 0) +
+    (effect.grantsReborn ? rules.value.reborn : 0) +
+    (effect.grantsWindfury ? rules.value.windfury : 0)
+  );
+}
+
 function branchScore(effect: SpellEffect, rules: TavernRules): number {
   return (
     (effect.transforms ? rules.value.transform : 0) +
     effect.stats * rules.value.perStatPoint +
-    (effect.divineShield ? rules.value.divineShield : 0) +
-    (effect.grantsTaunt ? rules.value.taunt : 0) +
+    grantedKeywordScore(effect, rules) +
     // Отложенное золото ветви считается тем же курсом: для СРАВНЕНИЯ
     // ветвей между собой ход задержки почти ничего не меняет (Grace
     // Farsail: «Gain 2 Gold next turn; or Gain 4 Gold in two turns»),
@@ -4761,6 +4888,108 @@ export function remainingTurns(
   const turn = tavernTurnOf(state.turn);
   if (turn < 1) return table[0] ?? 0;
   return table[Math.min(turn, table.length) - 1] ?? 0;
+}
+
+/**
+ * Сколько миньонов мы ещё КУПИМ до конца партии — той же таблицей замера.
+ *
+ * Второй такой горизонт после `remainingTurns`, и по той же причине:
+ * витринный бафф «this game» платит не разом, а каждой будущей покупкой.
+ */
+function remainingBuys(state: GameState, rules: TavernRules): number {
+  const table = rules.remainingTavernBuys;
+  if (table.length === 0) return 0;
+  const turn = tavernTurnOf(state.turn);
+  if (turn < 1) return table[0] ?? 0;
+  return table[Math.min(turn, table.length) - 1] ?? 0;
+}
+
+/**
+ * Сколько стоит УСИЛЕНИЕ ВИТРИНЫ — одной функцией на оба места, где оно
+ * встречается (заклинание в руке и заклинание витрины).
+ *
+ * Одной, потому что формула тут одна, а мест два, и разъехались бы они
+ * молча: до part43 в руке число покупок считалось делением золота на тройку,
+ * а в витрине — живыми ценами (`bodiesAffordable`), хотя вопрос у них общий.
+ *
+ * ## Из чего складывается число
+ *
+ * Статы витринного баффа доезжают до нас ТОЛЬКО купленными телами, поэтому
+ * цена — это статы, помноженные на число таких тел, и весь вопрос в том,
+ * сколько их будет.
+ *
+ * - Бафф до обновления (Them Apples): только покупки ЭТОГО хода — усиленные
+ *   миньоны уйдут со свежей витриной, не побывав нашими (part30).
+ * - Бафф «this game» (Eonar's Favor, Staff of Enrichment, Align the
+ *   Elements): каждая будущая покупка до конца партии. Число покупок —
+ *   замеренная таблица `remainingTavernBuys`, но не больше числа МЕСТ
+ *   на борде: статы живут на телах, а тел больше семи не бывает. Оценка
+ *   от этого НИЖНЯЯ — тело, купленное и проданное по дороге, успевает
+ *   повоевать, — и так она и подписана.
+ * - Названное племя («Give Elementals in the Tavern») и выбираемый нами тип
+ *   («minions of its type») сужают счёт до своих: доля считается по СОСТАВУ
+ *   НАШЕГО БОРДА — это читаемый факт, а не коэффициент. На борде без своих
+ *   такого племени ветка молчит вовсе, как боевой эффект «вашим X» без своих
+ *   того племени (part14).
+ */
+function shopBuffValue(
+  effect: SpellEffect,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  cost: number,
+): { readonly score: number; readonly reason: string; readonly pick: string | null } | null {
+  if (effect.stats <= 0) return null;
+  const cards = deps.cards;
+  const buysNow = Math.min(state.shop.length, bodiesAffordable(state, state.gold - cost, rules));
+
+  // Чьи тела считаем: у баффа с названным племенем — только своих этого
+  // племени, у баффа «своего типа» — самое многочисленное своё племя
+  // (его мы и выберем), у общего — всех.
+  const counts = new Map<string, number>();
+  for (const m of state.board) {
+    for (const race of racesOf(m, cards)) {
+      if (race === RACE_ALL) continue;
+      counts.set(race, (counts.get(race) ?? 0) + 1);
+    }
+  }
+  const own =
+    effect.shopBuffOwnType && counts.size > 0
+      ? [...counts.entries()].reduce((a, b) => (b[1] > a[1] ? b : a))[0]
+      : null;
+  const race = effect.shopBuffRace ?? own;
+  const mates =
+    race === null
+      ? state.board.length
+      : state.board.filter((m) => {
+          const theirs = racesOf(m, cards);
+          return theirs.includes(race) || theirs.includes(RACE_ALL);
+        }).length;
+  // Своих такого племени нет — усиливать в витрине будет некого из тех,
+  // кого мы покупаем, и платить за это золото не за что.
+  if (race !== null && mates === 0) return null;
+  const share = race === null ? 1 : mates / Math.max(1, state.board.length);
+
+  // Доля своих множит ОБА срока, а не только «на партию»: у баффа
+  // с названным племенем усиление достаётся лишь покупкам этого племени,
+  // когда бы они ни случились.
+  const bodies =
+    (effect.buffsShopAllGame
+      ? Math.min(remainingBuys(state, rules), rules.boardSize)
+      : buysNow) * share;
+  const score = effect.stats * bodies * rules.value.perStatPoint - cost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  const plus = `+${String(effect.stats)} статов`;
+  const reason = effect.buffsShopAllGame
+    ? `усиление витрины до конца партии (${plus} каждому${
+        race === null ? '' : ` из племени ${race}`
+      }), тел под него ещё ${bodies.toFixed(1)} — по местам на борде, оценка нижняя`
+    : `усиление витрины (${plus} каждому), до боя доедет купленными: ` +
+      `покупок на это золото ${String(buysNow)}`;
+  // Тип выбираем мы — совет обязан назвать какой: игра просит выбрать
+  // миньона сразу после покупки, и молчание тут возвращает выбор игроку.
+  return { score, reason, pick: effect.shopBuffOwnType ? race : null };
 }
 
 /**
@@ -4918,7 +5147,12 @@ export function modalBranchAdvice(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
-): { readonly branches: readonly SpellBranch[]; readonly note: string } | null {
+): {
+  readonly branches: readonly SpellBranch[];
+  readonly note: string;
+  /** Кому достанется эффект советуемой ветви; `null` — цели нет или ветви равны. */
+  readonly target: Minion | null;
+} | null {
   const info = deps.cards.info(minion.cardId);
   if (!(info?.mechanics.includes('CHOOSE_ONE') ?? false)) return null;
 
@@ -4926,14 +5160,21 @@ export function modalBranchAdvice(
     .map((suffix) => deps.cards.info(minion.cardId + suffix))
     .flatMap((branch) => {
       if (branch === null) return [];
-      const pair = statPair(branch.text ?? '', minion.scriptData);
+      // Числа ветви — С ЕЁ СОБСТВЕННОЙ сущности, если игра их прислала:
+      // нумерация плейсхолдеров у ветви бывает своя, и подстановка
+      // родительских тегов давала «+1 к атаке» там, где карта даёт +4
+      // (part43). Соглашение part19 («как у родителя») остаётся запасным
+      // путём — у части копий сущностей ветвей не бывает.
+      const scriptData = minion.branchScriptData?.[branch.id] ?? minion.scriptData;
+      const effect = spellEffect(branch.id, scriptData, deps.cards, rules);
       return [
         {
-          value: branchValue(branch.id, minion.scriptData, state, deps, rules),
+          value: branchValue(branch.id, scriptData, state, deps, rules),
+          effect,
           branch: {
             cardId: branch.id,
             name: branch.name,
-            label: pair === null ? '' : `+${String(pair.attack)}/+${String(pair.health)}`,
+            label: branchLabelOf(branch.text ?? '', scriptData, effect),
           },
         },
       ];
@@ -4950,7 +5191,7 @@ export function modalBranchAdvice(
     const listed = all
       .map((b) => `${b.branch.name} — ${b.value?.note ?? 'оценить не берёмся'}`)
       .join('; ');
-    return { branches, note: `ветви: ${listed}` };
+    return { branches, note: `ветви: ${listed}`, target: null };
   }
 
   const best = judged.reduce((a, b) => (b.value.score > a.value.score ? b : a));
@@ -4961,8 +5202,20 @@ export function modalBranchAdvice(
 
   // Равные ветви не разделяются выдуманным доводом: совет называет обе,
   // как у «+3/+1 против +1/+3» (замер `npm run spike:buff` разницы не нашёл).
-  if (best.value.score === worst.value.score) return { branches, note };
-  return { branches: [best.branch], note };
+  // Цели у равных ветвей тоже нет: их две, и назвать одну — выдать выбор
+  // за сделанный.
+  if (best.value.score === worst.value.score) return { branches, note, target: null };
+
+  // Ветвь, которая усиливает СВОЕГО миньона, обязана назвать кого именно —
+  // ровно как заклинание-усиление с part12: игра спрашивает «на кого»,
+  // и молчание тут возвращает выбор игроку («не подсказывает какой и на
+  // кого», part43). Цель ищется тем же правилом, что у заклинаний, — вместе
+  // с фильтрами кандидата в продажу, движка и племени, названного в тексте.
+  const aimed =
+    best.effect === null || best.effect.untargeted || best.effect.stats <= 0
+      ? null
+      : spellTargetOn(best.effect, state, deps, rules, best.branch.cardId);
+  return { branches: [best.branch], note, target: aimed?.target ?? null };
 }
 
 /**
@@ -5166,9 +5419,28 @@ function computeSpellEffect(
   const transforms = destroy !== null && /to (?:get|summon|discover)/i.test(text);
 
   const grantsTaunt = /\btaunt\b/i.test(text);
+  // Перерождение и вихрь читаются так же, как провокация и щит, и по той же
+  // причине: они и есть весь смысл выбора у «Choose One». У Sprightly Scarab
+  // ветви различаются словами («+1/+1 и Reborn» против «+4 к атаке
+  // и Windfury»), а сравнивались одними статами — то есть половина карты
+  // в счёт не входила (part43, ход 15). Веса те же, что у ключевых слов
+  // миньона; 41 заклинание пула даёт хотя бы одно такое слово.
+  const grantsReborn = /\breborn\b/i.test(text);
+  const grantsWindfury = /\bwindfury\b/i.test(text);
+
+  // Племя ЦЕЛИ — «Give a Beast …», «Give a friendly Elemental …».
+  const targetRace = targetRaceOf(text, rules);
 
   // Статы ложатся на витрину, а не на наш борд, — Them Apples (part30).
   const buffsShop = rules.buffsShopWords.some((w) => new RegExp(w, 'i').test(text));
+  // Держится ли бафф всю партию и кому достаётся — читается там же, в тексте.
+  // Племя ищется в части ДО «in the Tavern»: «Give Elementals in the Tavern»
+  // говорит про элементалей витрины, а «this game» в хвосте — про срок.
+  const buffsShopAllGame =
+    buffsShop && rules.buffsShopAllGameWords.some((w) => new RegExp(w, 'i').test(text));
+  const shopBuffOwnType =
+    buffsShop && rules.shopBuffOwnTypeWords.some((w) => new RegExp(w, 'i').test(text));
+  const shopBuffRace = buffsShop && !shopBuffOwnType ? shopBuffRaceOf(text, rules) : null;
 
   // «Цель не выбирается» имеет смысл только у усилений: у замены выбор
   // жертвы и так наш, у золота цели нет вовсе. Витринный бафф раздаёт
@@ -5190,7 +5462,17 @@ function computeSpellEffect(
   const maxGold =
     maxGoldHit === null ? 0 : placeholderValue(maxGoldHit[1], maxGoldHit[2], scriptData);
 
-  if (gold === null && stats === 0 && !shield && !transforms && !grantsTaunt && !givesMinion && maxGold === 0) {
+  if (
+    gold === null &&
+    stats === 0 &&
+    !shield &&
+    !transforms &&
+    !grantsTaunt &&
+    !grantsReborn &&
+    !grantsWindfury &&
+    !givesMinion &&
+    maxGold === 0
+  ) {
     return null;
   }
   const goldAmount = gold?.[1] === undefined ? 0 : Number(gold[1]);
@@ -5204,13 +5486,56 @@ function computeSpellEffect(
     destroyRace,
     transforms,
     grantsTaunt,
+    grantsReborn,
+    grantsWindfury,
+    targetRace,
     untargeted,
     givesMinion,
     buffsShop,
+    buffsShopAllGame,
+    shopBuffRace,
+    shopBuffOwnType,
     maxGold,
     branches: [],
     chosen: null,
   };
+}
+
+/**
+ * Племя, которому достаётся витринный бафф: «Give **Elementals** in the
+ * Tavern +{0}/+{1} this game» (Align the Elements, Nomi).
+ *
+ * Ищется в части текста ДО «in the Tavern» — там стоит тот, кого усиливают.
+ * Дальше по предложению племена тоже встречаются («…from Tier 3 and below»
+ * племени не называет, зато соседние предложения бывают про своих), и поиск
+ * по всему тексту приписал бы баффу чужое племя — та же ошибка, что
+ * складывание ветвей «Choose One» в part19.
+ */
+/**
+ * Племя ЦЕЛИ заклинания: «Give a **Beast** +{0}/+{1} and Reborn».
+ *
+ * Берётся первое предложение и только после глагола выдачи: в хвосте текста
+ * племя стоит в другой роли — «If it's a Naga, also give it Windfury»
+ * (Undersea Mount) говорит про условие, а не про то, кому заклинание
+ * вообще можно применить.
+ */
+function targetRaceOf(text: string, rules: TavernRules): string | null {
+  const head = text.split(/[.;]/)[0] ?? '';
+  for (const [race, pattern] of Object.entries(rules.tribeTextWords)) {
+    if (new RegExp(`\\bgives?\\s+(?:a|an|another)\\s+(?:friendly\\s+)?(?:${pattern})\\b`, 'i').test(head)) {
+      return race;
+    }
+  }
+  return null;
+}
+
+function shopBuffRaceOf(text: string, rules: TavernRules): string | null {
+  const at = text.search(/\bin\s+the\s+tavern\b/i);
+  const head = at === -1 ? text : text.slice(0, at);
+  for (const [race, pattern] of Object.entries(rules.tribeTextWords)) {
+    if (new RegExp(`\\b(?:${pattern})\\b`, 'i').test(head)) return race;
+  }
+  return null;
 }
 
 /**
@@ -5343,6 +5668,23 @@ function spellTargetOn(
   let pool: readonly Minion[] = state.board;
   const notes: string[] = [];
 
+  // ПЛЕМЯ ЦЕЛИ, названное в тексте: «Give a **Beast** +{0}/+{1} and Reborn»
+  // (ветвь Sprightly Scarab, part43). Своих такого племени нет — заклинание
+  // не делает ничего, и советовать его нечестно: это тот же довод, по
+  // которому боевой эффект «вашим X» пуст без своих того племени (part14).
+  if (effect.targetRace !== null) {
+    const race = effect.targetRace;
+    const mates = pool.filter((m) => {
+      const theirs = racesOf(m, cards);
+      return theirs.includes(race) || theirs.includes(RACE_ALL);
+    });
+    if (mates.length === 0) return null;
+    if (mates.length < pool.length) {
+      pool = mates;
+      notes.push(`только ${race} — так сказано в тексте`);
+    }
+  }
+
   if (effect.grantsTaunt) {
     const bodies = pool.filter((m) => !isEffectEngine(m, cards, rules));
     if (bodies.length > 0 && bodies.length < pool.length) {
@@ -5430,11 +5772,18 @@ function spellTargetOn(
  *
  * Нужно замеру `spike:buff`: он сравнивает «+3/+1 против +1/+3» ровно
  * на том миньоне, которого выберет советник, а не на произвольном.
+ *
+ * `grantsTaunt` включает фильтр движков — тот самый, которым отличается
+ * цель заклинания С ПРОВОКАЦИЕЙ от цели обычного усиления (part15).
+ * Замер `spike:taunttarget` без него сравнивал бы с правилом, которого
+ * советник не применяет: у него ветвь A — это ровно то, что советник
+ * говорит сегодня, и «ровно то» обязано включать все фильтры.
  */
 export function buffTarget(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
+  grantsTaunt = false,
 ): Minion | null {
   const buff: SpellEffect = {
     gold: 0,
@@ -5445,10 +5794,16 @@ export function buffTarget(
     destroysFriendly: false,
     destroyRace: null,
     transforms: false,
-    grantsTaunt: false,
+    grantsTaunt,
+    grantsReborn: false,
+    grantsWindfury: false,
+    targetRace: null,
     untargeted: false,
     givesMinion: false,
     buffsShop: false,
+    buffsShopAllGame: false,
+    shopBuffRace: null,
+    shopBuffOwnType: false,
     maxGold: 0,
     branches: [],
     chosen: null,
@@ -5589,32 +5944,23 @@ export function spellRules(
     }
 
     // Бафф ПО ВИТРИНЕ (Them Apples, part30): статы ложатся на миньонов
-    // магазина, и до нас доезжают только те, кого мы купим. Ценность —
-    // статы на число покупок, которые остаток золота ещё позволяет;
-    // при нуле золота заклинание честно молчит — усиленные миньоны
-    // уйдут с обновлением витрины, не побывав нашими. Цели нет
+    // магазина, и до нас доезжают только те, кого мы купим. Цели нет
     // по построению: игра раздаёт сама (в логе блок PLAY с Target=0).
     if (effect.buffsShop) {
       if (spell.cost > state.gold) return [];
-      const buys = Math.min(
-        state.shop.length,
-        Math.max(0, Math.floor((state.gold - spell.cost) / rules.minionCost)),
-      );
-      const score =
-        effect.stats * buys * rules.value.perStatPoint - spell.cost * rules.goldPointValue;
-      if (score <= 0) return [];
+      const buff = shopBuffValue(effect, state, deps, rules, spell.cost);
+      if (buff === null) return [];
       return [
         {
           action: 'play' as const,
           minion: null,
           spellCardId: spell.cardId,
-          score,
+          shopBuffPick: buff.pick,
+          score: buff.score,
           cost: spell.cost,
           requiresSlot: false,
           sellFirst: null,
-          reason:
-            `${name} — усиление витрины (+${String(effect.stats)} статов каждому), ` +
-            `до боя доедет купленными: покупок на это золото ${String(buys)}`,
+          reason: `${name} — ${buff.reason}`,
         },
       ];
     }
@@ -5624,9 +5970,7 @@ export function spellRules(
     const score =
       (effect.transforms
         ? rules.value.transform
-        : effect.stats * rules.value.perStatPoint +
-          (effect.divineShield ? rules.value.divineShield : 0) +
-          (effect.grantsTaunt ? rules.value.taunt : 0)) -
+        : effect.stats * rules.value.perStatPoint + grantedKeywordScore(effect, rules)) -
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
@@ -5995,25 +6339,19 @@ export function shopSpellRules(
     // Бафф ПО ВИТРИНЕ — как у той же карты в руке: статы доезжают только
     // покупками, цель не называется (Them Apples, part30).
     if (effect.buffsShop) {
-      const buys = Math.min(
-        state.shop.length,
-        bodiesAffordable(state, state.gold - goldCost, rules),
-      );
-      const score =
-        effect.stats * buys * rules.value.perStatPoint - goldCost * rules.goldPointValue;
-      if (score <= 0) return [];
+      const buff = shopBuffValue(effect, state, deps, rules, goldCost);
+      if (buff === null) return [];
       return [
         {
           action: 'buy' as const,
           minion: null,
           spellCardId: spell.cardId,
-          score,
+          shopBuffPick: buff.pick,
+          score: buff.score,
           cost: goldCost,
           requiresSlot: false,
           sellFirst: null,
-          reason:
-            `${name} за ${price} — усиление витрины (+${String(effect.stats)} статов ` +
-            `каждому), до боя доедет купленными: покупок на остаток ${String(buys)}`,
+          reason: `${name} за ${price} — ${buff.reason}`,
         },
       ];
     }
@@ -6021,9 +6359,7 @@ export function shopSpellRules(
     if (state.board.length === 0) return [];
     const score = effect.transforms
       ? rules.value.transform
-      : effect.stats * rules.value.perStatPoint +
-        (effect.divineShield ? rules.value.divineShield : 0) +
-        (effect.grantsTaunt ? rules.value.taunt : 0);
+      : effect.stats * rules.value.perStatPoint + grantedKeywordScore(effect, rules);
     if (score <= 0) return [];
     const aimed = spellTargetOn(effect, state, deps, rules, spell.cardId);
     if (aimed === null) return [];

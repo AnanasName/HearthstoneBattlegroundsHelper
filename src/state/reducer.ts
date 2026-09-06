@@ -137,6 +137,7 @@ function toMinion(
   e: Entity,
   enchantments: readonly Enchantment[],
   buyCost: number | null = null,
+  branchScriptData: Readonly<Record<string, readonly (number | null)[]>> | undefined = undefined,
 ): Minion {
   const health = e.tags.get('HEALTH') ?? null;
   const damage = e.tags.get('DAMAGE') ?? 0;
@@ -151,6 +152,7 @@ function toMinion(
     scriptData: [1, 2, 3, 4, 5, 6].map(
       (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
     ),
+    branchScriptData,
     tags: Object.fromEntries(e.tags),
     taunt: flag(e, 'TAUNT'),
     divineShield: flag(e, 'DIVINE_SHIELD'),
@@ -608,6 +610,7 @@ export function createReducer(players: Players): Reducer {
     ownedBySelf: boolean,
     enchantments: Map<number, Enchantment[]>,
     buyCosts: ReadonlyMap<number, number> = new Map(),
+    branchData: ReadonlyMap<number, Record<string, (number | null)[]>> = new Map(),
   ): Minion[] => {
     const self = players.selfPlayerId;
     if (self === null) return [];
@@ -619,7 +622,48 @@ export function createReducer(players: Players): Reducer {
           (ownedBySelf ? e.controller === self : e.controller !== self),
       )
       .sort((a, b) => a.zonePos - b.zonePos)
-      .map((e) => toMinion(e, enchantments.get(e.id) ?? [], buyCosts.get(e.id) ?? null));
+      .map((e) =>
+        toMinion(e, enchantments.get(e.id) ?? [], buyCosts.get(e.id) ?? null, branchData.get(e.id)),
+      );
+  };
+
+  /**
+   * Плейсхолдеры ВЕТВЕЙ модального «Choose One» — с сущностей самих ветвей.
+   *
+   * Ветви лежат в снапшоте отдельными картами `<id>t` и `<id>t2` (part19),
+   * и до part43 их числа брались из тегов РОДИТЕЛЯ по соглашению «у ветви
+   * плейсхолдеры те же». Соглашение держится не всегда, и проверить это
+   * можно по самому снапшоту: у Alliance Flag ветви пишут `{0}/{1}`
+   * и `{2}/{3}` — родительские индексы, — а у Sprightly Scarab, Fearless
+   * Foodie, Sly Infiltrator и Veteran Brigand вторая ветвь ПЕРЕНУМЕРОВАНА
+   * на `{0}`. Четыре карты из двенадцати модальных, и на part43 (ход 15)
+   * это дало тихо неверное число: «+{0} Attack» второй ветви скарабея
+   * читалось как +1 при настоящих +4, и советник называл игроку ту ветвь,
+   * которая по его же шкале хуже.
+   *
+   * Игра числа ветвей пишет сама: сущности создаются с `CREATOR` = id
+   * родителя и своими `TAG_SCRIPT_DATA_NUM_*` (part43, 02:00:44 —
+   * у `BG27_084t` это 1 и 1, у `BG27_084t2` — 4). Читаем их, а соглашение
+   * оставляем запасным путём: у части копий сущностей ветвей может
+   * не оказаться вовсе.
+   */
+  const choiceBranchData = (): Map<number, Record<string, (number | null)[]>> => {
+    const byParent = new Map<number, Record<string, (number | null)[]>>();
+    for (const e of entities.values()) {
+      // Дешёвая проверка первой: сущностей за партию тысячи, а карт ветвей
+      // единицы, и суффикс отсеивает почти всё до похода в таблицу.
+      if (!e.cardId.endsWith('t') && !e.cardId.endsWith('t2')) continue;
+      const creator = e.tags.get('CREATOR') ?? 0;
+      if (creator <= 0) continue;
+      const parent = entities.get(creator);
+      if (parent === undefined || parent.cardId === '') continue;
+      if (e.cardId !== `${parent.cardId}t` && e.cardId !== `${parent.cardId}t2`) continue;
+      const data = [1, 2, 3, 4].map(
+        (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
+      );
+      byParent.set(creator, { ...byParent.get(creator), [e.cardId]: data });
+    }
+    return byParent;
   };
 
   /**
@@ -1046,7 +1090,12 @@ export function createReducer(players: Players): Reducer {
     // за партию больше тысячи, и перебор для каждого был бы квадратичным.
     const enchantmentsByHost = groupEnchantments();
 
-    const mine = (zone: string): Minion[] => collectMinions(zone, true, enchantmentsByHost);
+    // Числа ветвей модальных карт — один проход на снимок, как у энчантов:
+    // ветви бывают и у карты в руке, и у карты витрины.
+    const branchData = choiceBranchData();
+
+    const mine = (zone: string): Minion[] =>
+      collectMinions(zone, true, enchantmentsByHost, new Map(), branchData);
     const upgrade = upgradeButton();
 
     // Чужие миньоны в PLAY — это магазин в таверне и борд противника в бою.
@@ -1061,6 +1110,7 @@ export function createReducer(players: Players): Reducer {
             false,
             enchantmentsByHost,
             phase === 'tavern' ? dragBuyCosts() : new Map(),
+            branchData,
           );
 
     // Открытое предложение тринкетов: варианты показаны, выбор ещё не сделан.

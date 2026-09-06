@@ -673,8 +673,53 @@ export interface TavernRules {
    * («→ на Gem Rat 4/4» на скриншоте игрока), и статы приписывались телам,
    * которых заклинание не трогает. До нас статы доезжают только через
    * ПОКУПКУ усиленного миньона — этим ветка и оценивается.
+   *
+   * Между «minions» и «in the Tavern» игра ставит УТОЧНЕНИЯ, и шаблон
+   * подряд идущих слов их не видел (part43, ход 23): «Give minions **of its
+   * type** in the Tavern +{0}/+{1} this game» (Eonar's Favor `BG35_912` —
+   * жалоба игрока «предлагает странное заклинание, пользу от которого
+   * не вижу»), «Give **Elementals** in the Tavern» (Align the Elements,
+   * Nomi), «minions in the Tavern **from Tier 3 and below**» (Void Pup
+   * Trainer). Все они читались как обычное усиление своего миньона: совет
+   * называл цель на борде и обещал статы, которых та не получит.
    */
   readonly buffsShopWords: readonly string[];
+  /**
+   * Витринный бафф, который держится ВСЮ ПАРТИЮ, а не до обновления.
+   *
+   * Разница в цене громадная и читается прямо в тексте: у Them Apples
+   * («Give minions in the Tavern +{0}/+{1}») усиленные миньоны уходят
+   * с первым же обновлением витрины, и платит она только покупками ЭТОГО
+   * хода; у Eonar's Favor, Staff of Enrichment и Align the Elements стоит
+   * «this game», и усиление получает каждая будущая покупка названного
+   * типа до конца партии.
+   */
+  readonly buffsShopAllGameWords: readonly string[];
+  /**
+   * «Choose a minion. Give minions **of its type** in the Tavern …» — тип
+   * выбираем МЫ, и совет обязан назвать какой.
+   *
+   * Без этих слов совет читается как «купите заклинание», а игра тут же
+   * просит выбрать миньона, и выбор молча возвращается игроку — та же
+   * дыра, что у голого «ОБНОВИТЬ» без цели (part37) и у модального
+   * «Choose One» без названной ветви (part19).
+   */
+  readonly shopBuffOwnTypeWords: readonly string[];
+  /**
+   * Сколько миньонов ещё будет КУПЛЕНО, начиная с хода таверны N.
+   *
+   * Замерено по нашему датасету (`npm run spike:horizon`, 45 партий,
+   * 537 точек) — той же командой и на тех же партиях, что и
+   * `remainingTavernTurns`, и по той же причине: витринный бафф «this game»
+   * платит не разом, а каждой будущей покупкой, и число покупок нельзя
+   * выдумывать.
+   *
+   * Хвост таблицы держится на единицах точек (ход 15 — восемь, ход 16 —
+   * две), поэтому за её концом берётся последнее значение. Практически это
+   * почти не важно: ценность всё равно ограничена числом МЕСТ на борде —
+   * статы живут на телах, а тел больше семи не бывает.
+   */
+  readonly remainingTavernBuys: readonly number[];
 
   /**
    * Признаки заклинания про КРОВАВЫЕ САМОЦВЕТЫ — «Your Blood Gems give
@@ -1341,9 +1386,24 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\b(?:two|three|four|five|six|seven|\\d+) (?:friendly|of your)\\b',
   ],
 
-  // «Give minions in the Tavern +{0}/+{1}» — Them Apples, part30.
-  // Пробелы — `\s+`: тексты снапшота переносят строки посреди предложения.
-  buffsShopWords: ['minions?\\s+in\\s+the\\s+tavern'],
+  // «Give minions in the Tavern +{0}/+{1}» — Them Apples, part30; между
+  // словами игра ставит уточнения («of its type», «from Tier 3 and below»),
+  // а вместо «minions» бывает племя («Give Elementals in the Tavern») —
+  // part43, ход 23. Признак баффа — ПЛЮС после «in the Tavern»: без него
+  // под шаблон попадают «consume a minion in the Tavern to gain its stats»
+  // и «half the stats of the highest-Health minion in the Tavern», которые
+  // усиливают НАШЕГО миньона. Пробелы — `\s+`: тексты снапшота переносят
+  // строки посреди предложения.
+  buffsShopWords: [
+    '\\bgive\\b[^.]*\\bin\\s+the\\s+tavern\\b[^.]*\\+',
+    '\\bminions?\\s+in\\s+the\\s+tavern\\b[^.]*\\bhave\\s+\\+',
+  ],
+  buffsShopAllGameWords: ['\\bthis\\s+game\\b'],
+  shopBuffOwnTypeWords: ['\\bof\\s+(?:its|their)\\s+type\\b'],
+  // Замер 06.09.2026, `npm run spike:horizon`: 45 партий, 537 точек.
+  remainingTavernBuys: [
+    23.4, 22.6, 22.7, 21.5, 20.2, 19.4, 18.6, 17.2, 14.6, 14.8, 13.2, 10.6, 9.6, 8.3, 4,
+  ],
 
   // «Your Blood Gems…» — Gem Day и родня, part30; переносы те же.
   bloodGemWords: ['blood\\s+gems?'],

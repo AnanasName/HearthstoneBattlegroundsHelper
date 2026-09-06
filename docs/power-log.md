@@ -739,6 +739,36 @@ D 21:16:17 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=�
   `TAG_SCRIPT_DATA_NUM_1 value=1` у `BG36_332` и у `BG36_332t2` — «+1
   к максимуму золота».
 
+  **И совпадают они НЕ ВСЕГДА — part43 показал обратный случай.** У Шустрого
+  скарабея `BG27_084` («Choose One — Give a Beast +{0}/+{1} and Reborn;
+  or +{2} Attack and Windfury») родитель несёт `[1, 1, 4]`, а вторая ветвь
+  в снапшоте написана СВОИМИ индексами — «Give a Beast **+{0} Attack**
+  and Windfury», — и её собственная сущность несёт ровно четвёрку:
+
+  ```
+  D 02:00:44 GameState.DebugPrintPower() -     SHOW_ENTITY - Updating Entity=[… id=3717 zone=SETASIDE …] CardID=BG27_084t
+          tag=TAG_SCRIPT_DATA_NUM_1 value=1
+          tag=TAG_SCRIPT_DATA_NUM_2 value=1
+          tag=CREATOR value=3716
+  D 02:00:44 GameState.DebugPrintPower() -     SHOW_ENTITY - Updating Entity=[… id=3718 zone=SETASIDE …] CardID=BG27_084t2
+          tag=TAG_SCRIPT_DATA_NUM_1 value=4
+          tag=CREATOR value=3716
+  ```
+
+  Связь с родителем тут **`CREATOR`, а не `PARENT_CARD`** (`PARENT_CARD=0`
+  у обеих ветвей этой карты), и это второй способ той же связи, а не замена:
+  у part28 `PARENT_CARD` заполнен. Значения по ходу блока успевают
+  обнулиться и вернуться (`1 → 0 → 1`), поэтому читать надо последнее.
+
+  Насколько часто расходится нумерация — считается по снапшоту: модальных
+  карт в пуле двенадцать, у шести из них в тексте есть числа, и вторая
+  ветвь перенумерована на `{0}` у ЧЕТЫРЁХ — Sprightly Scarab, Fearless
+  Foodie, Sly Infiltrator, Veteran Brigand; родительскую нумерацию
+  сохраняют только Alliance Flag и Forest's Bounty. То есть соглашение
+  «у ветви плейсхолдеры как у родителя» (part19) верно в меньшинстве
+  случаев, и подстановка родительских тегов даёт не пропуск, а ДРУГОЕ
+  ЧИСЛО: «+4 к атаке» читается как «+1».
+
 ## Предел золота бывает БОЛЬШЕ десяти
 
 Тег `RESOURCES` — это максимум золота хода, и правилом игры он растёт

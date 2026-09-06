@@ -1681,10 +1681,16 @@ describe('заклинания руки', () => {
       destroyRace: null,
       transforms: false,
       grantsTaunt: false,
+      grantsReborn: false,
+      grantsWindfury: false,
+      targetRace: null,
       untargeted: false,
       givesMinion: false,
       goldNextTurn: 0,
       buffsShop: false,
+      buffsShopAllGame: false,
+      shopBuffRace: null,
+      shopBuffOwnType: false,
       maxGold: 0,
       // Ветви — только у модального «Choose One» (part19); у обычного
       // заклинания их нет, и выбирать нечего.
@@ -1749,9 +1755,18 @@ describe('заклинания руки', () => {
       destroyRace: 'UNDEAD',
       transforms: false,
       grantsTaunt: false,
+      grantsReborn: false,
+      grantsWindfury: false,
+      // Племя ЖЕРТВЫ читается своим полем (`destroyRace`), а `targetRace` —
+      // это племя того, кому заклинание что-то ДАЁТ: «Give a Beast …».
+      // У «Destroy a friendly Undead» такого адресата нет.
+      targetRace: null,
       untargeted: false,
       givesMinion: false,
       buffsShop: false,
+      buffsShopAllGame: false,
+      shopBuffRace: null,
+      shopBuffOwnType: false,
       maxGold: 0,
       branches: [],
       chosen: null,
@@ -4218,5 +4233,158 @@ describe('заклинание руки, обновляющее витрину �
     expect(recs[0]?.refreshesShop).toBe(true);
     const plain = { ...mosaic(), cardId: 'SKIPPER' };
     expect(discountRefreshRule(plain, s, mosaicDeps)).toBeNull();
+  });
+});
+
+describe('витринный бафф с уточнением и сроком «this game» (part43)', () => {
+  const FAVOR = 'FAVOR';
+  const ELEMENTS = 'ELEMENTS';
+  const APPLES = 'APPLES';
+  const ABSORPTION = 'ABSORPTION';
+  const buffCards = createCardIndex([
+    ...STUB_CARDS,
+    { id: 'BEAST_1', name: 'Зверь', type: 'Minion', techLevel: 2, races: ['BEAST'], isBaconPool: true },
+    {
+      id: FAVOR,
+      name: 'Покровительство Эонар',
+      type: 'Battleground_spell',
+      isBaconPool: true,
+      text: 'Choose a minion. Give minions of its type in the Tavern +{0}/+{1} this game.',
+    },
+    {
+      id: ELEMENTS,
+      name: 'Выравнивание стихий',
+      type: 'Battleground_spell',
+      isBaconPool: true,
+      text: 'Give Elementals in the Tavern +{0}/+{1} this game.',
+    },
+    {
+      id: APPLES,
+      name: 'Держи яблочко',
+      type: 'Battleground_spell',
+      isBaconPool: true,
+      text: 'Give minions in the Tavern +{0}/+{1}.',
+    },
+    {
+      id: ABSORPTION,
+      name: 'Чародейское поглощение',
+      type: 'Battleground_spell',
+      isBaconPool: true,
+      text: 'Give a friendly Elemental half the stats of the highest-Health minion in the Tavern.',
+    },
+  ]);
+
+  it('уточнение между слов больше не прячет витринный бафф', () => {
+    // «minions OF ITS TYPE in the Tavern» и «Give ELEMENTALS in the Tavern»
+    // читались усилением своего миньона — с целью и статами, которых карта
+    // не даёт (жалоба игрока по part43, ход 23).
+    const favor = spellEffect(FAVOR, [3, 3], buffCards);
+    expect(favor?.buffsShop).toBe(true);
+    expect(favor?.buffsShopAllGame).toBe(true);
+    expect(favor?.shopBuffOwnType).toBe(true);
+    expect(favor?.untargeted).toBe(true);
+    expect(favor?.stats).toBe(6);
+
+    const elements = spellEffect(ELEMENTS, [2, 2], buffCards);
+    expect(elements?.buffsShop).toBe(true);
+    expect(elements?.shopBuffRace).toBe('ELEMENTAL');
+  });
+
+  it('бафф до обновления и бафф на партию различаются словом «this game»', () => {
+    expect(spellEffect(APPLES, [2, 2], buffCards)?.buffsShopAllGame).toBe(false);
+    expect(spellEffect(ELEMENTS, [2, 2], buffCards)?.buffsShopAllGame).toBe(true);
+  });
+
+  it('усиление СВОЕГО миньона числом из витрины витринным баффом не считается', () => {
+    // Граница класса: свободный шаблон «give … in the tavern» проглотил бы
+    // Arcane Absorption, которая усиливает НАШЕГО элементаля числом
+    // из витрины. Читаемого числа у неё нет вовсе, поэтому эффект пуст —
+    // и это честнее выдуманного витринного баффа.
+    expect(spellEffect(ABSORPTION, [], buffCards)).toBeNull();
+  });
+
+  it('цена баффа «на партию» — будущие покупки, но не больше мест на борде', () => {
+    // Шесть зверей из семи на борде, ход таверны 12: покупок впереди 10.6,
+    // мест на борде семь, доля своих 6/7 — значит тел под усиление шесть.
+    const own = [
+      minion(1, { cardId: 'BEAST_1' }),
+      minion(2, { cardId: 'BEAST_1' }),
+      minion(3, { cardId: 'BEAST_1' }),
+      minion(4, { cardId: 'BEAST_1' }),
+      minion(5, { cardId: 'BEAST_1' }),
+      minion(6, { cardId: 'BEAST_1' }),
+      minion(7, { cardId: 'DRAGON_1' }),
+    ];
+    const s = state({
+      turn: 23,
+      techLevel: 5,
+      gold: 10,
+      goldTotal: 10,
+      board: own,
+      shopSpells: [
+        {
+          entityId: 800,
+          cardId: FAVOR,
+          cost: 2,
+          scriptData: [3, 3, null, null],
+          zonePos: 6,
+          unplayable: false,
+          costsHealth: false,
+        },
+      ],
+    });
+    const rec = shopSpellRules(s, { cards: buffCards }).find((r) => r.spellCardId === FAVOR);
+    expect(rec, 'совет купить витринный бафф').toBeDefined();
+    // Цели на борде у него нет — усиление достаётся витрине.
+    expect(rec?.targetMinion ?? null).toBeNull();
+    // Тип выбираем мы, и совет называет какой.
+    expect(rec?.shopBuffPick).toBe('BEAST');
+    // 6 статов × 6 тел × 0.5 очка − 2 золота × 3 = 12.
+    expect(rec?.score).toBeCloseTo(12, 5);
+    expect(rec?.reason).toContain('до конца партии');
+  });
+});
+
+describe('ключевые слова и племя цели у заклинания (part43)', () => {
+  const REBORN = 'REBORN_SPELL';
+  const WINDFURY = 'WINDFURY_SPELL';
+  const kwCards = createCardIndex([
+    ...STUB_CARDS,
+    { id: 'BEAST_1', name: 'Зверь', type: 'Minion', techLevel: 2, races: ['BEAST'], isBaconPool: true },
+    {
+      id: REBORN,
+      name: 'Живительная стрижка',
+      type: 'Spell',
+      isBaconPool: true,
+      text: 'Give a Beast +{0}/+{1} and <b>Reborn</b>.',
+    },
+    {
+      id: WINDFURY,
+      name: 'Поддержка',
+      type: 'Spell',
+      isBaconPool: true,
+      text: 'Give a Beast +{0} Attack and <b>Windfury</b>.',
+    },
+  ]);
+
+  it('перерождение и вихрь читаются наравне с провокацией и щитом', () => {
+    const reborn = spellEffect(REBORN, [1, 1], kwCards);
+    expect(reborn?.grantsReborn).toBe(true);
+    expect(reborn?.grantsWindfury).toBe(false);
+    expect(reborn?.stats).toBe(2);
+    const windfury = spellEffect(WINDFURY, [4], kwCards);
+    expect(windfury?.grantsWindfury).toBe(true);
+    expect(windfury?.grantsReborn).toBe(false);
+    expect(windfury?.stats).toBe(4);
+  });
+
+  it('племя цели читается из текста', () => {
+    // «Give a BEAST …»: крупнейшее тело борда бывает другого племени,
+    // и без этого поля совет называл бы цель, которой заклинание
+    // не достанется (part43, ход 15 — крупнейшим был пират).
+    expect(spellEffect(REBORN, [1, 1], kwCards)?.targetRace).toBe('BEAST');
+    expect(spellEffect(WINDFURY, [4], kwCards)?.targetRace).toBe('BEAST');
+    // Усиление без племени в тексте цель не сужает.
+    expect(spellEffect('S_BUFF', [2, 2], cards)?.targetRace ?? null).toBeNull();
   });
 });

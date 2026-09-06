@@ -101,7 +101,11 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // то есть покупка следующего хода, и без этих слов возражение игрока
   // «купить всё равно не на что» верно по всему, что он видит (part37).
   const goal = r.searchGoal == null ? '' : ` — ищем ${r.searchGoal}`;
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}`;
+  // Витринный бафф «своего типа» спрашивает племя сразу после покупки,
+  // и назвать его надо в самой строке: усиление получит ВИТРИНА, а не наш
+  // миньон, поэтому «→ на» тут было бы враньём (part43, Eonar's Favor).
+  const pick = r.shopBuffPick == null ? '' : ` → выбрать ${r.shopBuffPick}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}${pick}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */
