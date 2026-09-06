@@ -499,11 +499,20 @@ function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
   return shown;
 }
 
-/** Кнопка таверны, которой распоряжается действие; `null` — действие про карту. */
+/**
+ * Кнопка, которой распоряжается действие; `null` — действие про карту.
+ *
+ * Сила героя и тёмный дар добавлены 06.09 — по кадру, который игрок прислал
+ * ровно ради этого. До него у обоих не было координат вовсе, и совет
+ * «СИЛА ГЕРОЯ · 1» оставался только в панели, хотя жать надо кнопку
+ * на столе (docs/next-steps.md, долг part43).
+ */
 function buttonOf(action: Recommendation['action']): TavernButton | null {
   if (action === 'levelUp') return 'levelUp';
   if (action === 'reroll') return 'refresh';
   if (action === 'freeze') return 'freeze';
+  if (action === 'heroPower') return 'heroPower';
+  if (action === 'darkGift') return 'darkGift';
   return null;
 }
 
@@ -657,7 +666,14 @@ function marksView(input: ViewInput): OverlayMark[] {
         // у такого совета `minion` пуст, и без кольца на карте он читался бы
         // как «заморозить просто так».
         placeSpell(rec.spellCardId, 'keep', null, null);
+        return;
       }
+      // У СИЛЫ ГЕРОЯ бывают и цель, и жертва, и обе — карты на столе:
+      // «Give a minion Reborn» называет, кому (part32), а на полном борде
+      // нажатие оплачивается продажей (part40, ход 13). Кольцо только
+      // на кнопке оставляло бы вторую половину совета словами в панели.
+      place(rec.sellFirst, 'sell', ACTION_LABEL.sell, null);
+      place(rec.targetMinion ?? null, 'target', 'ЦЕЛЬ', null);
       return;
     }
     place(rec.minion, toneOf(rec.action), priced(rec), step);

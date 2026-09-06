@@ -218,4 +218,71 @@ describe('раскладка карт на экране', () => {
     // Кнопки лежат над витриной — иначе метка на подъёме села бы на карты.
     expect(levelUp.y + levelUp.h).toBeLessThan(slotRect('shop', 0, 3, ASPECT)!.y);
   });
+
+  /**
+   * Сила героя и тёмный дар — сверка с кадром, как у рядов стола.
+   *
+   * Кадр `data/screenshots/dark_gift_and_hero_ability.png` (part37, ход 9)
+   * прислан игроком ровно ради этого замера: до него у обеих кнопок
+   * не было координат вовсе. Числа сняты по кадру 2559×1599 — обод силы
+   * 1442..1646 по горизонтали и 1141..1337 по вертикали, обод дара
+   * 2165..2312 и 392..517.
+   */
+  const GIFT_SHOT = { w: 2559, h: 1599 };
+  const GIFT_ASPECT = GIFT_SHOT.w / GIFT_SHOT.h;
+  const MEASURED_BUTTONS = {
+    // Центр силы взят по деревянному ободу; зелёный диск внутри него —
+    // 1480..1610 / 1168..1293, и он служит вторым, независимым якорем.
+    heroPower: { x: 1544, y: 1239, glow: { x0: 1480, x1: 1610, y0: 1168, y1: 1293 } },
+    darkGift: { x: 2238, y: 455 },
+  };
+
+  it('центры силы героя и тёмного дара совпадают с кнопками на кадре', () => {
+    const at = (name: 'heroPower' | 'darkGift') => {
+      const r = buttonRect(name, GIFT_ASPECT);
+      return { cx: (r.x + r.w / 2) * GIFT_SHOT.w, cy: (r.y + r.h / 2) * GIFT_SHOT.h, r };
+    };
+    for (const name of ['heroPower', 'darkGift'] as const) {
+      const { cx, cy } = at(name);
+      const m = MEASURED_BUTTONS[name];
+      // Тот же допуск, что у рядов стола: замер пиксельный, а не глазомерный.
+      expect(Math.abs(cx - m.x), `${name} по x`).toBeLessThan(15);
+      expect(Math.abs(cy - m.y), `${name} по y`).toBeLessThan(15);
+    }
+  });
+
+  it('слот силы героя накрывает светящийся диск и не берёт монету цены', () => {
+    // Монета цены стоит НАД кнопкой — как медальон тира над картой витрины
+    // (part42): её низ на кадре 1145, и слот, начинающийся выше, обводил бы
+    // цену вместе с кнопкой. Диск же обязан войти целиком — он и есть
+    // то, на что игрок смотрит.
+    const r = buttonRect('heroPower', GIFT_ASPECT);
+    const box = {
+      x0: r.x * GIFT_SHOT.w,
+      x1: (r.x + r.w) * GIFT_SHOT.w,
+      y0: r.y * GIFT_SHOT.h,
+      y1: (r.y + r.h) * GIFT_SHOT.h,
+    };
+    const glow = MEASURED_BUTTONS.heroPower.glow;
+    expect(box.x0).toBeLessThan(glow.x0);
+    expect(box.x1).toBeGreaterThan(glow.x1);
+    expect(box.y0).toBeLessThan(glow.y0);
+    expect(box.y1).toBeGreaterThan(glow.y1);
+  });
+
+  it('сила героя стоит НИЖЕ рядов стола, а тёмный дар — правее и выше их', () => {
+    // Свойства, за которые держится смысл: сила — у портрета героя внизу,
+    // дар — на правой стене над таймером. Перепутать их местами формула
+    // не может молча.
+    const power = buttonRect('heroPower', GIFT_ASPECT);
+    const gift = buttonRect('darkGift', GIFT_ASPECT);
+    const board = slotRect('board', 6, 7, GIFT_ASPECT)!;
+    expect(power.y).toBeGreaterThan(board.y + board.h);
+    expect(centerX(power)).toBeGreaterThan(0.498);
+    expect(gift.x).toBeGreaterThan(board.x + board.w);
+    expect(gift.y + gift.h).toBeLessThan(board.y);
+    // По высоте дар заходит на полосу витрины, и это не ошибка: он на СТЕНЕ,
+    // а не на столе, и от крайней карты витрины его отделяет ширина стола.
+    expect(gift.x).toBeGreaterThan(slotRect('shop', 4, 5, GIFT_ASPECT)!.x);
+  });
 });
