@@ -936,6 +936,7 @@ describe('вид оверлея', () => {
       battle: 0,
       doubler: 0,
       heroPower: 0,
+      activation: 0,
       textTribe: 0,
       textMech: 0,
       namedCard: 0,

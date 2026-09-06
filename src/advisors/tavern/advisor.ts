@@ -238,6 +238,14 @@ export interface ValueBreakdown {
   readonly doubler: number;
   /** Синергия с СИЛОЙ ГЕРОЯ: её текст называет племя кандидата или продажу. */
   readonly heroPower: number;
+  /**
+   * Статы, которые кладёт на борд одно нажатие АКТИВАЦИИ этого миньона.
+   *
+   * Считается только там, где число читается точно и достаётся нашему
+   * борду; цена нажатия в золоте не вычитается — подробности
+   * у `activationBoardStats`.
+   */
+  readonly activation: number;
   readonly total: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
@@ -1074,6 +1082,9 @@ export function minionValue(
   // на нашей шкале статов, своего веса у него нет намеренно.
   const heroPowerPlay = heroPowerPlayStats(state, cards, rules) * w.perStatPoint;
 
+  // Активация (part44): на нашей же шкале статов, своего веса нет.
+  const activation = activationBoardStats(candidate, state, cards, rules) * w.perStatPoint;
+
   return {
     techLevel: tech,
     stats,
@@ -1089,6 +1100,7 @@ export function minionValue(
     spellMagnet,
     doubler,
     heroPower,
+    activation,
     heroPowerPlay,
     heroPowerBuy,
     heroPowerBuyLeft,
@@ -1108,6 +1120,7 @@ export function minionValue(
       spellMagnet +
       doubler +
       heroPower +
+      activation +
       heroPowerPlay +
       heroPowerBuy,
     tribeMates: mates,
@@ -1717,6 +1730,13 @@ function isAuraOverOthers(m: Minion, cards: CardIndex, rules: TavernRules): bool
  * Если весь борд из таких аур, выбор честно возвращается к слабейшему
  * из них: место под покупку взять всё равно откуда-то надо. Тот же приём,
  * что у цели провокации с миньонами-движками (part15).
+ *
+ * Носителей АКТИВАЦИИ этот фильтр НЕ трогает, и это решено замером,
+ * а не рассуждением: запрет их продавать был написан по part44 и на
+ * корпусе (469 точек 41 партии) в худших случаях предлагал продать
+ * Kalecgos 190/159 ради Hired Mount 40/52. Активация входит теперь
+ * ЧИСЛОМ в саму ценность (`activationBoardStats`), и на большом борде
+ * это число мало само собой.
  */
 export function weakestOwn(
   state: GameState,
@@ -4339,6 +4359,105 @@ function consumeGain(
 }
 
 /**
+ * Текст эффекта активации — или `null`, если у миньона её нет.
+ *
+ * Одна функция на двух читателей: правило активаций (что нажать сейчас)
+ * и слагаемое активации в ценности тела (`activationBoardStats`). Второе
+ * определение того же разбора рядом — ровно тот способ, которым правила
+ * расходятся молча.
+ */
+function activateEffectText(minion: Minion, cards: CardIndex): string | null {
+  if ((minion.tags['HAS_ACTIVATE_POWER'] ?? 0) <= 0) return null;
+  const text = cards.info(minion.cardId)?.text ?? '';
+  return /activate \([^)]*\):([\s\S]*)$/i.exec(text)?.[1] ?? null;
+}
+
+/** Сумма прибавки статов из текста активации: «+{0}/+{1}» или «+2/+2». */
+function activationStats(minion: Minion, effectText: string): number {
+  let stats = 0;
+  for (const m of effectText.matchAll(/\+(?:\{(\d)\}|(\d+))/g)) {
+    const placeholder = m[1];
+    const literal = m[2];
+    if (placeholder !== undefined) stats += minion.scriptData[Number(placeholder)] ?? 0;
+    else if (literal !== undefined) stats += Number(literal);
+  }
+  return stats;
+}
+
+/**
+ * Сколько СТАТОВ кладёт на НАШ борд одно нажатие активации этого миньона.
+ *
+ * Зачем слагаемое. Наша шкала меряет ТЕЛА (тир, статы, ключевые слова),
+ * а повторяемая способность за золото не входила в неё ни одним числом.
+ * На part44 (ход 11) это вышло наружу: Suspicious Prisonguard 3/3 тира 1
+ * («Activate (1): Give another minion +3/+3») стоил 5.0 и уходил в жертву
+ * первым, а отработавший клич Oozeling Gladiator 2/2 тира 2 — 6.0
+ * и оставался, потому что тир у него выше. Игрок продал ровно наоборот.
+ *
+ * **Почему это ЧИСЛО, а не запрет «носителя активации не продавать».**
+ * Запрет был написан первым и ЗАМЕРЕН на корпусе: 469 точек решения
+ * 41 партии, жертва менялась в 18, и в худших случаях он предлагал
+ * продать Kalecgos 190/159 (194.0), лишь бы сберечь Hired Mount 40/52
+ * (60.5) — разница 133.5 очка. Запрет не масштабируется: «+3/+3 за
+ * золотой» решает на пятом ходу и не значит ничего на борде из
+ * стопятидесятых. Число масштабируется само.
+ *
+ * **Считается только то, что читается ТОЧНО и достаётся НАШЕМУ борду:**
+ *
+ *  - «Give another minion +{0}/+{1}» — прибавка в наших же единицах;
+ *  - «Set another minion's stats to {1}/{2}» — РАЗНОСТЬЮ с лучшей целью
+ *    (part40), и она сама убывает по мере роста борда;
+ *  - витринные усиления («all minions in the Tavern +{1}/+{2}», Deft
+ *    Deserter) НЕ считаются: статы достаются витрине, а не нам, — тот же
+ *    признак, что у заклинаний с part43;
+ *  - «Get/Discover/Summon …» и поглощение витрины НЕ считаются: там
+ *    у нас курс, а не число («принесёт миньона» у Fruit Vendor — это
+ *    вообще заклинания-бананы), и слагаемое из курса раздуло бы ценность
+ *    ровно там, где мы читаем хуже всего;
+ *  - эффекты со словом «destroy» (Dead Bellringer: «destroy it to gain
+ *    +{1}/+{2}») НЕ считаются: прибавка там оплачена своим же миньоном,
+ *    а цену мы не читаем.
+ *
+ * Цена нажатия в золоте здесь НЕ вычитается, и это осознанно: слагаемое
+ * отвечает на вопрос «сколько стоит ЭТО ТЕЛО», а не «нажать ли сейчас» —
+ * на второй отвечает `activationRules`, и там золото вычитается. Оценка
+ * от этого ВЕРХНЯЯ на цену золота и НИЖНЯЯ на число будущих нажатий.
+ *
+ * Класс назван: в пуле 395 миньонов активация у 17, точно читаемых
+ * эффектов — три (Suspicious Prisonguard, Tyrael, Dead Bellringer, причём
+ * последний отсеивается словом «destroy»).
+ */
+function activationBoardStats(
+  minion: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const effectText = activateEffectText(minion, cards);
+  if (effectText === null) return 0;
+  if (/\bdestroy\b/i.test(effectText)) return 0;
+  if (rules.buffsShopWords.some((w) => new RegExp(w, 'i').test(effectText))) return 0;
+
+  const others = state.board.filter((m) => m.entityId !== minion.entityId);
+  const setStats = setStatsOf(minion, effectText, rules);
+  if (setStats !== null) {
+    if (others.length === 0) return 0;
+    const best = others.reduce((a, b) =>
+      setStats.total - ((b.attack ?? 0) + (b.health ?? 0)) >
+      setStats.total - ((a.attack ?? 0) + (a.health ?? 0))
+        ? b
+        : a,
+    );
+    return Math.max(0, setStats.total - ((best.attack ?? 0) + (best.health ?? 0)));
+  }
+
+  const stats = activationStats(minion, effectText);
+  // «Give ANOTHER minion» — цель на борде, и без неё прибавке некуда лечь.
+  if (stats > 0 && /\banother\b/i.test(effectText) && others.length === 0) return 0;
+  return stats;
+}
+
+/**
  * Абсолютные статы «задать статы» — или `null`, если текст не про это.
  *
  * Числа читаются так же, как везде: плейсхолдер `{N}` — индекс
@@ -4398,20 +4517,12 @@ export function activationRules(
     if (cost > state.gold) return [];
 
     const info = deps.cards.info(minion.cardId);
-    const text = info?.text ?? '';
-    const activate = /activate \([^)]*\):([\s\S]*)$/i.exec(text);
-    if (activate?.[1] === undefined) return [];
-    const effectText = activate[1];
+    const effectText = activateEffectText(minion, deps.cards);
+    if (effectText === null) return [];
 
     // Тот же разбор, что у заклинаний: литералы и плейсхолдеры-индексы
     // в теги NUM — только теги здесь живут на самом миньоне.
-    let stats = 0;
-    for (const m of effectText.matchAll(/\+(?:\{(\d)\}|(\d+))/g)) {
-      const placeholder = m[1];
-      const literal = m[2];
-      if (placeholder !== undefined) stats += minion.scriptData[Number(placeholder)] ?? 0;
-      else if (literal !== undefined) stats += Number(literal);
-    }
+    const stats = activationStats(minion, effectText);
     const givesMinion = /\b(?:get|summon|discover)\b/i.test(effectText);
 
     // «Задать статы» — не прибавка, и числа тут АБСОЛЮТНЫЕ (part40, Тираэль:
