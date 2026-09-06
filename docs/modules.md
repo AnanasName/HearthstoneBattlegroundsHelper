@@ -38,6 +38,10 @@
 | `src/advisors/position/rallySwing.ts` | раж, платящий картой: тай-брейк среди неразличимых и приписка |
 | `src/advisors/position/rng.ts` | детерминированный ГПСЧ, подмена `Math.random` |
 | `src/advisors/position/spike.ts` | замеры фазы 3, воспроизводимые |
+| `src/advisors/strength/boards.ts` | эталонное поле: чужие борды по ходам таверны, снапшот `data/field/` |
+| `src/advisors/strength/fit.ts` | сборка снапшота поля из логов фикстур (`npm run field:fit`) |
+| `src/advisors/strength/strength.ts` | сила своего стола: доля выигранных боёв против поля хода |
+| `src/advisors/strength/spike.ts` | замер калибровки силы (`npm run spike:strength`) |
 | `src/advisors/position/spikeField.ts` | замеры цели-поля: молчание, цена K бордов, качество |
 | `src/data/cards.ts` | справочник карт: племя, тир, статы по cardId; пул миньонов тира |
 | `src/data/bgStats.ts` | статистика мест героев и тринкетов (снапшот Firestone) |
@@ -139,5 +143,7 @@ npm run spike:taunttarget           КОМУ заклинание со стат�
 npm run spike:hand                  что даёт розыгрыш карты, живущей в руке
 npm run spike:horizon               сколько ходов таверны и покупок остаётся впереди
 npm run spike:arena                 чей ход лучше по ближайшему бою: игрок, советник, оракул
+npm run spike:strength              калибрована ли «сила стола» (сверка с фактическими боями)
+npm run field:fit                   пересобрать эталонное поле бордов в data/field/
 npm run capture                     архивация растущего Power.log
 ```
