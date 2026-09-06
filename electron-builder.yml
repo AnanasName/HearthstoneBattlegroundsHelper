@@ -36,6 +36,13 @@ extraResources:
     to: data/ml
     filter:
       - '*.json'
+  # Эталонное поле бордов (сила стола). По той же причине, что веса выше:
+  # снапшот собирается из ЛОГОВ ФИКСТУР, которых у исполнителя нет, —
+  # значит это данные, а не расчёт при старте (src/advisors/strength/boards.ts).
+  - from: data/field
+    to: data/field
+    filter:
+      - '*.json'
 asar: false
 win:
   target:
