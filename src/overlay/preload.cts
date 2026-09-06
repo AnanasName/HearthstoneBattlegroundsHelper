@@ -17,4 +17,17 @@ electron.contextBridge.exposeInMainWorld('overlay', {
       handler(view);
     });
   },
+  /**
+   * Второй канал — где на окне лежит ЭКРАН игры (пиксели CSS).
+   *
+   * Он понадобился ровно потому, что окно и экран совпадают не всегда:
+   * Windows ужимает окно до рабочей области, а доли меток считаются
+   * от стола, то есть от экрана целиком (part46, `layout.ts`, `stageBox`).
+   * Разметке и тут решать нечего — приходит готовый прямоугольник.
+   */
+  onStage: (handler: (box: unknown) => void): void => {
+    electron.ipcRenderer.on('overlay:stage', (_event: unknown, box: unknown) => {
+      handler(box);
+    });
+  },
 });

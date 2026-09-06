@@ -11,6 +11,7 @@ import { PlaceForecaster } from '../ml/forecast.js';
 import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import { waitingForLogText } from '../ui/setup.js';
+import { stageBox } from './layout.js';
 import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.js';
 import { loadFieldBoards } from '../advisors/strength/boards.js';
 import { strengthKey } from '../advisors/strength/strength.js';
@@ -109,11 +110,39 @@ function createWindow(getLastView: () => OverlayView): BrowserWindow {
   // forward: события мыши всё равно доходят до игры, а окно их не перехватывает.
   created.setIgnoreMouseEvents(true, { forward: true });
 
+  /**
+   * Где на окне лежит экран — считается ПОСЛЕ создания и по фактическому
+   * размеру окна, а не по запрошенному.
+   *
+   * `new BrowserWindow({width, height})` — просьба, а не факт: Windows ужимает
+   * обычное окно до рабочей области, и у игрока окно вышло на 48 DIP ниже
+   * экрана (замер по кадру part46 — см. `stageBox`). `getContentBounds()`
+   * возвращает то, что получилось на самом деле, поэтому разница углов
+   * и размеры экрана считаются из него, а не из `area`.
+   */
+  const sendStage = (): void => {
+    if (created.isDestroyed()) return;
+    const box = stageBox(screen.getPrimaryDisplay().bounds, created.getContentBounds());
+    created.webContents.send('overlay:stage', box);
+  };
+
   // Разметка грузится дольше, чем поднимается живой цикл, а сообщения,
   // отправленные до её готовности, пропадают молча. Поэтому последний вид
   // хранится и отправляется заново, когда окно готово.
   created.webContents.on('did-finish-load', () => {
+    sendStage();
     created.webContents.send('overlay:view', getLastView());
+  });
+
+  // Смена разрешения или масштаба экрана двигает стол под метками, а окно
+  // при этом остаётся прежним. Событие редкое, но молчаливое: без него
+  // метки уехали бы и вернуть их можно было бы только перезапуском.
+  const onMetrics = (): void => {
+    sendStage();
+  };
+  screen.on('display-metrics-changed', onMetrics);
+  created.on('closed', () => {
+    screen.removeListener('display-metrics-changed', onMetrics);
   });
 
   // Путь абсолютный, и это не придирка: относительный `loadFile` считается

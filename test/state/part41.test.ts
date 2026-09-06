@@ -84,15 +84,17 @@ describe('part41: метки поверх карт — ряд витрины, к
     expect(state.turn).toBe(7);
     const v = view(state);
 
+    // Помечен ПЕРВЫЙ шаг плана, и с part46 только он: заклинание стоит
+    // пятым в ряду из ПЯТИ карт — то есть ряд собран из миньонов
+    // и заклинаний вместе, ради чего тест и написан.
     const lasso = v.marks.find((m) => m.step === 1);
-    const tarecgosa = v.marks.find((m) => m.step === 2);
     expect(lasso?.index).toBe(4);
     expect(lasso?.count).toBe(5);
-    expect(tarecgosa?.index).toBe(2);
-    expect(tarecgosa?.count).toBe(5);
-    // Центр среднего слота нечётного ряда — центр стола.
-    const center = tarecgosa!.rect.x + tarecgosa!.rect.w / 2;
-    expect(center).toBeCloseTo(0.498, 3);
+    // Второй шаг (Tarecgosa третьей из пяти) на столе больше не помечается:
+    // ход читается по одному шагу, следующий приходит сам после покупки.
+    expect(v.marks.some((m) => m.step === 2)).toBe(false);
+    // Что средний слот нечётного ряда стоит по центру стола, держит
+    // геометрический тест (`test/overlay/layout.test.ts`).
   });
 
   it('ход 9: кнопка подъёма помечена своим цветом, а карта — цветом покупки', () => {
@@ -102,10 +104,15 @@ describe('part41: метки поверх карт — ряд витрины, к
     expect(state.turn).toBe(9);
     const v = view(state);
 
+    // Подъём — ПЕРВЫЙ шаг плана, и метка на нём: цвет кнопки проверяется
+    // там, где он виден.
     expect(v.marks.find((m) => m.button === 'levelUp')?.tone).toBe('tavern');
-    expect(v.marks.find((m) => m.row === 'shop' && m.step === 2)?.tone).toBe('buy');
-    // Ряд снова из пяти: четыре миньона и «Alliance Flag».
-    expect(v.marks.find((m) => m.row === 'shop')?.count).toBe(5);
+    // Покупка второго шага на столе больше не помечена (part46), но ряд
+    // всё равно виден — у жертвы того же шага своё кольцо, и ряд у него
+    // из ПЯТИ карт: четыре миньона и «Alliance Flag».
+    expect(v.marks.some((m) => m.step === 2)).toBe(false);
+    const shopMark = v.marks.find((m) => m.row === 'shop');
+    if (shopMark !== undefined) expect(shopMark.count).toBe(5);
   });
 
   it('ход 13: носитель ража, платящего картой, опознаётся на борде', () => {

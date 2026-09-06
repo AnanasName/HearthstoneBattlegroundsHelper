@@ -439,7 +439,11 @@ describe('вид оверлея', () => {
     expect(hero.tempo).toBeNull();
   });
 
-  it('метки: шаги плана садятся на карты витрины и кнопки таверны', () => {
+  it('метки: на столе ПЕРВЫЙ шаг плана, остальные — только в панели', () => {
+    // Просьба игрока по part46: «сейчас ходы показываются все на экране
+    // сразу, давай лучше последовательность». Ход на пять шагов давал
+    // до девяти колец разом. Следующий шаг приходит сам: игрок сыграл —
+    // лог показал — советник пересчитал ход на новом состоянии.
     const view = buildView(input({ spendPlan: plan() }), cards);
 
     const buy = view.marks.find((m) => m.row === 'shop');
@@ -449,16 +453,18 @@ describe('вид оверлея', () => {
     expect(buy?.step).toBe(1);
     expect(buy?.label).toContain('КУПИТЬ');
 
-    // Подъём — не карта: у него своя кнопка, и метка идёт на неё.
-    const level = view.marks.find((m) => m.button === 'levelUp');
-    expect(level?.step).toBe(2);
-    expect(level?.label).toContain('ПОДНЯТЬ');
+    // Подъём — ВТОРОЙ шаг того же плана, и на столе его теперь нет.
+    expect(view.marks.some((m) => m.button === 'levelUp')).toBe(false);
 
-    // Жертва названа словами в строке действия, а на столе ей нужно кольцо.
+    // А вот жертва — часть ПЕРВОГО шага, и её кольцо остаётся: без него
+    // «купить, продав X» читается наполовину.
     const sell = view.marks.find((m) => m.tone === 'sell');
     expect(sell?.row).toBe('board');
     expect(sell?.index).toBe(1);
     expect(sell?.step).toBeNull();
+
+    // Номер у кольца сохранён: он связывает стол со списком в панели.
+    expect(view.plan?.steps.length).toBe(2);
   });
 
   it('метки: заклинание витрины стоит в ОДНОМ ряду с миньонами', () => {
@@ -578,9 +584,18 @@ describe('вид оверлея', () => {
     // Кнопка подъёма сама зелёно-золотая, и зелёное кольцо на ней теряется
     // (жалоба игрока по part41). Смысл действия у кнопки назван словом,
     // у карт же цвет — единственное различие покупки и продажи.
-    const view = buildView(input({ spendPlan: plan() }), cards);
-    expect(view.marks.find((m) => m.button === 'levelUp')?.tone).toBe('tavern');
-    expect(view.marks.find((m) => m.row === 'shop')?.tone).toBe('buy');
+    // Подъём стоит ПЕРВЫМ шагом: на столе метка только у первого, и цвет
+    // проверяется там, где он виден.
+    const levelFirst = plan({
+      steps: [step(tavern.recommendations[1]!, 7, 2), step(tavern.recommendations[0]!, 2, 0)],
+    });
+    expect(
+      buildView(input({ spendPlan: levelFirst }), cards).marks.find((m) => m.button === 'levelUp')
+        ?.tone,
+    ).toBe('tavern');
+    expect(buildView(input({ spendPlan: plan() }), cards).marks.find((m) => m.row === 'shop')?.tone).toBe(
+      'buy',
+    );
   });
 
   it('метки: карту руки разместить негде, и она метки не получает', () => {
@@ -600,9 +615,14 @@ describe('вид оверлея', () => {
       cards,
     );
     expect(view.marks.some((m) => m.row !== null)).toBe(false);
-    // Кнопка подъёма при этом помечена: шаг, который разместить МОЖНО,
-    // от соседства с неразмещаемым не страдает.
-    expect(view.marks.some((m) => m.button === 'levelUp')).toBe(true);
+    // Кнопка подъёма при этом помечена, хотя шаг ВТОРОЙ: помечается первый
+    // шаг, который виден на столе, иначе на ходу «разыграть из руки» стол
+    // остался бы пустым при живом плане в панели.
+    const level = view.marks.find((m) => m.button === 'levelUp');
+    expect(level).toBeDefined();
+    // Номер честный — второй, а не первый: игрок видит, что помеченное
+    // действие в плане не первое.
+    expect(level?.step).toBe(2);
   });
 
   it('метки: одна карта помечается один раз', () => {
