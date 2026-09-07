@@ -220,6 +220,71 @@ describe('раскладка карт на экране', () => {
   });
 
   /**
+   * Три кнопки таверны — сверка с кадром, как у рядов стола и у силы героя.
+   *
+   * Якорь — пурпурная ПЛАШКА кнопки, пойманная маской по цвету: она
+   * объективна и держится во всех восьми кадрах `data/screenshots/`, где
+   * виден ряд (тот же приём, что медальон тира в part42). Числа сняты
+   * с `third_turn.png` (2559×1599); на прочих кадрах ряд стоит в пределах
+   * четырёх пикселей от этих значений, и допуск 15 их покрывает.
+   *
+   * Главное, что держит этот тест: кнопка ЗАМОРОЗКИ в игре меньше соседних
+   * и стоит ВЫШЕ них. Прежняя модель давала всем трём одну вертикаль
+   * и один размер — её прямоугольник висел на 22 пикселя ниже кнопки
+   * и захватывал доску под ней (жалоба part49: «фрейм с заморозкой
+   * съезжает»). Свойство проверяется отдельно от координат: сравняются
+   * снова — упадёт именно оно, а не допуск.
+   */
+  const TAVERN_SHOT = { w: 2559, h: 1599 };
+  const TAVERN_ASPECT = TAVERN_SHOT.w / TAVERN_SHOT.h;
+  const MEASURED_TAVERN = {
+    levelUp: { x: 1031, y: 304.5, plate: { x0: 983, x1: 1079, y0: 238, y1: 371 } },
+    refresh: { x: 1530, y: 304.5, plate: { x0: 1482, x1: 1577, y0: 238, y1: 371 } },
+    freeze: { x: 1694, y: 264.5, plate: { x0: 1653, x1: 1734, y0: 208, y1: 321 } },
+  } as const;
+
+  it('центры кнопок таверны совпадают с кнопками на кадре', () => {
+    for (const name of ['levelUp', 'refresh', 'freeze'] as const) {
+      const r = buttonRect(name, TAVERN_ASPECT);
+      const cx = (r.x + r.w / 2) * TAVERN_SHOT.w;
+      const cy = (r.y + r.h / 2) * TAVERN_SHOT.h;
+      const m = MEASURED_TAVERN[name];
+      expect(Math.abs(cx - m.x), `${name} по x`).toBeLessThan(15);
+      expect(Math.abs(cy - m.y), `${name} по y`).toBeLessThan(15);
+    }
+  });
+
+  it('слот кнопки таверны накрывает её плашку целиком', () => {
+    for (const name of ['levelUp', 'refresh', 'freeze'] as const) {
+      const r = buttonRect(name, TAVERN_ASPECT);
+      const box = {
+        x0: r.x * TAVERN_SHOT.w,
+        x1: (r.x + r.w) * TAVERN_SHOT.w,
+        y0: r.y * TAVERN_SHOT.h,
+        y1: (r.y + r.h) * TAVERN_SHOT.h,
+      };
+      const p = MEASURED_TAVERN[name].plate;
+      expect(box.x0, `${name} слева`).toBeLessThan(p.x0);
+      expect(box.x1, `${name} справа`).toBeGreaterThan(p.x1);
+      expect(box.y0, `${name} сверху`).toBeLessThan(p.y0);
+      expect(box.y1, `${name} снизу`).toBeGreaterThan(p.y1);
+    }
+  });
+
+  it('заморозка стоит ВЫШЕ соседних кнопок и меньше их', () => {
+    const refresh = buttonRect('refresh', TAVERN_ASPECT);
+    const levelUp = buttonRect('levelUp', TAVERN_ASPECT);
+    const freeze = buttonRect('freeze', TAVERN_ASPECT);
+    // Факт игры, а не округление: плашка заморозки на кадре 81×113 на y
+    // 208..321, у соседей 96×133 на y 238..371 — и так во всех восьми кадрах.
+    expect(freeze.y + freeze.h / 2).toBeLessThan(refresh.y + refresh.h / 2 - 0.015);
+    expect(freeze.h).toBeLessThan(refresh.h);
+    expect(freeze.w).toBeLessThan(refresh.w);
+    expect(levelUp.y).toBeCloseTo(refresh.y, 6);
+    expect(levelUp.h).toBeCloseTo(refresh.h, 6);
+  });
+
+  /**
    * Сила героя и тёмный дар — сверка с кадром, как у рядов стола.
    *
    * Кадр `data/screenshots/dark_gift_and_hero_ability.png` (part37, ход 9)
