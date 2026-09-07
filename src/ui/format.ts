@@ -106,7 +106,15 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // и назвать его надо в самой строке: усиление получит ВИТРИНА, а не наш
   // миньон, поэтому «→ на» тут было бы враньём (part43, Eonar's Favor).
   const pick = r.shopBuffPick == null ? '' : ` → выбрать ${r.shopBuffPick}`;
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}${pick}`;
+  // Скидка на заклинание витрины от клича — там же и по тому же доводу
+  // (part49). Без этих слов план начинается с покупки, которая в списке
+  // советов стоит четвёртой: «КУПИТЬ Ominous Seer 2/1 за 2» читается как
+  // ошибка, пока не сказано, что следом заклинание стоит на золотой меньше.
+  const discount =
+    r.spellDiscountAfter === undefined
+      ? ''
+      : ` — клич: заклинание витрины дешевле на ${String(r.spellDiscountAfter)}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}${pick}${discount}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

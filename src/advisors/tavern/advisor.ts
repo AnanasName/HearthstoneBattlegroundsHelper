@@ -183,6 +183,18 @@ export interface Recommendation {
    */
   readonly heroPowerCostAfter?: number;
   /**
+   * На сколько подешевеют заклинания ВИТРИНЫ после этой покупки — у миньонов,
+   * чей клич говорит «The next Tavern spell you buy costs (N) less» (Зловещая
+   * пророчица `BG31_330`, part49).
+   *
+   * Родня `heroPowerCostAfter` и заведено по той же причине: цену заклинания
+   * редьюсер читает тегом `COST` и в списке всегда прав, но скидку, которую
+   * приносит СОБСТВЕННЫЙ шаг плана, взять неоткуда. Оценка ВЕРХНЯЯ: текст
+   * обещает скидку СЛЕДУЮЩЕМУ заклинанию, а план роняет цену всем сразу —
+   * различие видно только в ходу, где план покупает ДВА заклинания подряд.
+   */
+  readonly spellDiscountAfter?: number;
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется у подъёма таверны и у прокрутки — у обоих по одной причине:
@@ -809,6 +821,34 @@ export function heroPowerBuyDiscount(
   }
   return null;
 }
+
+/**
+ * На сколько КЛИЧ этого миньона дешевит следующее заклинание витрины.
+ *
+ * `null` — карта так не работает (подавляющее большинство: в пуле миньонов
+ * такая одна). Живая цена тут не участвует: скидку применяет план на своём
+ * гипотетическом состоянии, а список читает цену тегом `COST` — игра
+ * проставляет её в тот же миг, что срабатывает клич (part49).
+ */
+export function spellBuyDiscount(
+  cardId: string,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number | null {
+  return memoByCard(SPELL_BUY_DISCOUNT_CACHE, cardId, cards, rules, () => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (text === '') return null;
+    const hit = firstMatchAll(rules.spellBuyDiscountWords, text);
+    if (hit === null) return null;
+    const amount = Number.parseInt(hit[2] ?? '', 10);
+    return Number.isFinite(amount) && amount > 0 ? amount : null;
+  });
+}
+
+const SPELL_BUY_DISCOUNT_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, number | null>>
+>();
 
 function parseHeroPowerBuyReward(
   powerId: string,
@@ -1952,6 +1992,13 @@ export function buyRules(
       const cost = buyCostOf(minion, rules);
       let value = minionValue(minion, state, deps, rules);
       const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
+      // Скидка заполняется, только когда в витрине есть что дешевить: текст
+      // обещает её СЛЕДУЮЩЕМУ купленному заклинанию, хоть бы и через ход, —
+      // но ход через ход советник не считает (тот же отказ, что у отложенного
+      // золота, part46), а пустая приписка «заклинания подешевеют» на витрине
+      // без заклинаний была бы советом ни о чём.
+      const spellDiscount =
+        state.shopSpells.length > 0 ? spellBuyDiscount(minion.cardId, deps.cards, rules) : null;
 
       // Магнитному миньону носитель называется всегда, а не только на полном
       // борде: игрок решает «телом или примагнитить», и совет без носителя
@@ -2091,6 +2138,11 @@ export function buyRules(
           (deps.cards.info(minion.cardId)?.races ?? []).includes(powerDiscount.race)
             ? { heroPowerCostAfter: Math.max(1, powerCost - powerDiscount.amount) }
             : {}),
+          // Клич, дешевящий заклинание витрины (Зловещая пророчица, part49).
+          // Поле заполняется у ЛЮБОЙ такой покупки, а применяет его план —
+          // и только когда миньон встаёт на борд: клич срабатывает розыгрышем,
+          // а на полном борде без продажи карта осталась бы в руке.
+          ...(spellDiscount === null ? {} : { spellDiscountAfter: spellDiscount }),
           reason:
             `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
             `тир ${tier === null ? '?' : String(tier)}, ` +
