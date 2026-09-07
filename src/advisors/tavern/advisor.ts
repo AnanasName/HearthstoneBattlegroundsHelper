@@ -5193,6 +5193,19 @@ export function activationRules(
     // в теги NUM — только теги здесь живут на самом миньоне.
     const stats = activationStats(minion, effectText);
     const givesMinion = /\b(?:get|summon|discover)\b/i.test(effectText);
+    /**
+     * «…Then destroy it…» — указанный миньон не получатель прибавки,
+     * а РАСХОДНИК (part50, «Мертвый звонарь» `BG36_511`: «Give a different
+     * friendly Undead Reborn. Then destroy it to gain +{1}/+{2}»).
+     *
+     * Общее правило «цель баффа — крупнейший свой» тут даёт совет, который
+     * при буквальном исполнении убивает главную карту борда: на ходу 31
+     * part50 план предлагал указать на Drustfallen Butcher 2636/2401.
+     * Лог показывает, что происходит на самом деле: цель уходит в GRAVEYARD
+     * и возвращается БАЗОВОЙ копией (Мумификатор с накопленными статами
+     * вернулся с ATK=5), а `+8/+8` получает сам звонарь (111/44 → 119/52).
+     */
+    const destroysTarget = /\bdestroy\s+it\b/i.test(effectText);
 
     // «Задать статы» — не прибавка, и числа тут АБСОЛЮТНЫЕ (part40, Тираэль:
     // «Set another minion's stats to {1}/{2}» = 50/50 за 1 золото). Цель
@@ -5229,6 +5242,15 @@ export function activationRules(
         `сделает ${deps.cards.info(setBest.minion.cardId)?.name ?? setBest.minion.cardId} ` +
         `${String(setStats.attack)}/${String(setStats.health)} — ` +
         `+${String(setBest.gain)} статов`;
+    } else if (stats > 0 && destroysTarget) {
+      // «Then destroy it» — прибавка достаётся САМОМУ активирующему, а цель
+      // получает перерождение и уничтожается (part50, «Мертвый звонарь»
+      // `BG36_511`). Наш борд от нажатия всё равно растёт на те же статы,
+      // поэтому очки прежние; врала не цифра, а ЦЕЛЬ и СЛОВА.
+      score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
+      what =
+        `+${String(stats)} статов САМОМУ ${name}; ` +
+        `цель получит перерождение и будет уничтожена — вернётся базовой копией`;
     } else if (stats > 0) {
       score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
       what = `+${String(stats)} статов`;
@@ -5244,14 +5266,32 @@ export function activationRules(
     // и она ОБРАТНАЯ (наименьший свой получает больше всех) — своим полем,
     // а не общим правилом «крупнейший».
     const others = state.board.filter((m) => m.entityId !== minion.entityId);
+
+    // Племя цели, если текст его называет: указать на миньона чужого племени
+    // игра не даст вовсе («a different friendly Undead»). Пустой отбор
+    // возвращает прежний пул — правило сужает выбор, а не отменяет совет.
+    const namedRace =
+      Object.entries(rules.tribeTextWords).find(([, word]) =>
+        new RegExp(`\\b(?:${word})\\b`, 'i').test(effectText),
+      )?.[0] ?? null;
+    const sameRace =
+      namedRace === null
+        ? others
+        : others.filter((m) => racesOf(m, deps.cards).includes(namedRace));
+    const pool = sameRace.length > 0 ? sameRace : others;
+
+    const size = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
     const target =
       setBest !== null && setBest.gain > 0
         ? setBest.minion
-        : stats > 0 && others.length > 0
-          ? others.reduce((a, b) =>
-              (b.attack ?? 0) + (b.health ?? 0) > (a.attack ?? 0) + (a.health ?? 0) ? b : a,
-            )
-          : null;
+        : destroysTarget && pool.length > 0
+          ? // Расходник — тот, кого не жаль обнулить до базовой копии.
+            // В part50 игрок одиннадцать раз указывал на мелкого Мумификатора
+            // и ни разу на крупное тело.
+            pool.reduce((a, b) => (size(b) < size(a) ? b : a))
+          : stats > 0 && pool.length > 0
+            ? pool.reduce((a, b) => (size(b) > size(a) ? b : a))
+            : null;
 
     return [
       {

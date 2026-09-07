@@ -176,8 +176,29 @@ function asRaces(card: RawCard): string[] {
  * ключевое слово от силы 2, «цель не выбирается» 46 (там почти всё —
  * миньоны с «your other minions», у которых цели и правда нет).
  */
+/**
+ * Разделитель золотого варианта: `3[x]` — или ГОЛАЯ ЦИФРА (part50).
+ *
+ * Обычно золотую версию отделяет «цифры + `[x]`», и по ней текст и резался
+ * с part17. Но у трёх карт набора маркера `[x]` нет вовсе — цифра стоит
+ * сразу после точки, а за ней заглавной буквой начинается повтор:
+ *
+ *   Butchering      «…+{0} Attack this game <i>(wherever they are).</i>5Destroy…»
+ *   Healthy Bounty  «…friendly minions +{1} Health.4Give four friendly…»
+ *   Hostile Bounty  «…friendly minions +{0} Attack.4Give four friendly…»
+ *
+ * Цена ровно та же, что в part17, и видна на part50: у Butchering числа
+ * обеих версий складывались, и советник обещал «усиление перед боем
+ * (+12 статов)» там, где карта даёт +6 к атаке. Класс узкий и посчитан:
+ * по снапшоту таких карт ТРИ, и все три — заклинания-усиления, то есть
+ * ровно те, чьи числа мы читаем. Условие держится на трёх признаках сразу
+ * (точка, затем цифры, затем ЗАГЛАВНАЯ буква), чтобы не срезать прозу:
+ * свободный поиск цифры после точки резал бы текст в середине.
+ */
+const GOLDEN_TEXT_CUT = /\d+\[x\]|(?<=\.(?:<\/i>)?)\d+(?=[A-Z])/;
+
 export function normalizeCardText(text: string): string {
-  const cut = /\d+\[x\]/.exec(text);
+  const cut = GOLDEN_TEXT_CUT.exec(text);
   const one = cut === null || cut.index === 0 ? text : text.slice(0, cut.index);
   return one.replace(/\s+/g, ' ').trim();
 }
