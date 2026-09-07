@@ -4372,6 +4372,160 @@ function keywordTarget(
  * Совет бесплатный, поэтому в плане он не спорит с покупками за золото:
  * он лишь называет цель. Порядок в списке решают очки цели.
  */
+/**
+ * Сила героя, ПОДНИМАЮЩАЯ карту витрины на тир выше, — «Алчность
+ * Галакронда» `TB_BaconShop_HP_011` (part47): «Choose a minion in the
+ * Tavern. Then choose a higher Tier minion to replace it», цена 1.
+ *
+ * **Молчание было полным, и это его цена:** сила активна с первого хода,
+ * не под замком и стоит золотой, а под шаблоны «даёт миньона» не подходит
+ * ни одним словом — ни «discover», ни «get», ни «add … to your hand»,
+ * — поэтому `heroPowerRule` отбрасывал её ещё до счёта. За part47 игрок
+ * нажал её ПЯТЬ раз, советник не назвал её ни в одной из десяти точек
+ * решения, и пришла жалоба: «на данном герое выгоднее нажимать силу героя
+ * и получать рано сильных существ».
+ *
+ * **Фактура прочитана из лога, а не из текста карты.** Пять нажатий подряд
+ * дают одно и то же: цель — миньон ВИТРИНЫ (`Target=… player=16`), следом
+ * `DebugPrintEntityChoices` с ТРЕМЯ вариантами, и у всех трёх
+ * `TECH_LEVEL` ровно на единицу выше тира цели (1→2, 2→3, 3→4, 4→5, 5→6).
+ * Выбранный встаёт В ВИТРИНУ на место цели, а сама цель уходит
+ * в `REMOVEDFROMGAME`, — то есть тело мы получаем не бесплатно, за него
+ * ещё надо заплатить обычную цену покупки.
+ *
+ * **Оценка считается ПОКУПКАМИ, а не слотом, и это не вкус.** Слотовая
+ * форма («ожидание тира N+1 минус ценность цели») на part47 переворачивает
+ * ход 7: там шесть золотых покупают ДВА тела по 18.5, а нажатие оставляет
+ * пять — то есть одно, — и слотовая форма звала бы жать, теряя 18.5.
+ * Поэтому форма та же, что у `discountRefreshRule`: лучшие покупки,
+ * которые витрина отдаёт ПОСЛЕ нажатия на остаток золота, минус лучшие
+ * покупки по карману СЕЙЧАС. Цена силы при этом вычитается ровно один раз
+ * — уменьшением бюджета, — а не ещё и по курсу золота: двойной счёт делал
+ * ход 3 отрицательным (−1.88 вместо +1.12) и гасил ровно тот случай,
+ * на который игрок и жаловался.
+ *
+ * **Цель выбирается по РАЗНИЦЕ, а не по тиру** (урок part44): поднимать
+ * надо ту карту, чей подъём даёт больше всего, — на ходу 11 part47 это
+ * Eternal Knight тира 2 (+7.4), а не Costume Enthusiast тира 5 (+4.8),
+ * потому что вторую мы и так купим. Карта, которая ЛУЧШЕ ожидания своего
+ * тира+1, целью не становится вовсе: на ходу 19 подъём Motley Phalanx
+ * стоил бы −9.8.
+ *
+ * **Чего правило НЕ считает, названо вслух.** Игрок играл ЛЕСТНИЦЕЙ:
+ * морозил витрину (8 заморозок за партию) и каждый ход поднимал ОДНУ
+ * И ТУ ЖЕ карту на тир — 1→2→3→4→5→6, — так что к 11-му ходу при таверне 2
+ * в витрине стоял тир 5. Одноходовая оценка этого не видит: она меряет
+ * прирост ЭТОГО хода, а лестница копится ходами. Складывать её в число
+ * мы не станем — горизонта у неё нет, а выдуманный коэффициент перевернул
+ * бы и подъём таверны; лестница получается САМА, если каждый её шаг
+ * положителен и витрину держит `freezeRule`.
+ */
+export function heroPowerUpgradeRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!heroPowerReady(hero)) return null;
+
+  const cost = hero.heroPowerCost;
+  if (cost === null || cost < 0) return null;
+  if (cost > state.gold) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  if (text === '') return null;
+  if (!rules.heroPowerUpgradeWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  // Поднятая карта остаётся В ВИТРИНЕ, и без покупки она этот ход
+  // не значит ничего — то же условие, что у платного обновления
+  // (`paidRerollIsUseful`, part18). Держать её заморозкой ради следующего
+  // хода правило не обещает: это уже лестница, а её мы не считаем.
+  const goldAfter = state.gold - cost;
+  if (bodiesAffordable(state, goldAfter, rules) <= 0) return null;
+
+  // Что витрина отдаёт при данном золоте: лучшие по ценности, пока хватает
+  // денег. Одной функцией на оба вопроса — «сейчас» и «после», — иначе
+  // сравнивались бы числа с разной начинкой.
+  const bestBuys = (offers: readonly { cost: number; value: number }[], gold: number): number => {
+    let left = gold;
+    let sum = 0;
+    for (const offer of [...offers].sort((a, b) => b.value - a.value)) {
+      if (offer.cost > left) continue;
+      left -= offer.cost;
+      sum += offer.value;
+    }
+    return sum;
+  };
+
+  const offers = state.shop.map((m) => ({
+    minion: m,
+    cost: buyCostOf(m, rules),
+    value: minionValue(m, state, deps, rules).total,
+  }));
+  if (offers.length === 0) return null;
+  const now = bestBuys(offers, state.gold);
+
+  let best: {
+    minion: Minion;
+    expected: number;
+    tier: number;
+    score: number;
+    value: number;
+  } | null = null;
+  for (const offer of offers) {
+    const tier = offer.minion.techLevel ?? state.techLevel;
+    const expected = discoverPoolValue([tier + 1], state, deps, rules);
+    // Пула выше нет — с верхнего тира поднимать некуда, и это не ошибка.
+    if (expected === null) continue;
+    // Цена поднятой карты — обычная цена покупки: живой цены у неё ещё
+    // нет вовсе (её создаст игра), а тег скидки к новой сущности
+    // не относится.
+    const after = bestBuys(
+      offers
+        .filter((o) => o !== offer)
+        .concat([{ minion: offer.minion, cost: rules.minionCost, value: expected }]),
+      goldAfter,
+    );
+    const score = after - now;
+    // При РАВНЫХ очках цель — та, которой жальче меньше. На ходу 3 part47
+    // подъём Ominous Seer и подъём Molten Rock дают одно и то же (+1.12:
+    // тир цели один, и в обоих случаях покупается поднятая карта), но Seer
+    // мы собираем в тройку — игрок и поднял Molten Rock. Без этого правило
+    // выбирало бы просто первую карту ряда.
+    const better =
+      best === null ||
+      score > best.score ||
+      (score === best.score && offer.value < best.value);
+    if (better) best = { minion: offer.minion, expected, tier, score, value: offer.value };
+  }
+  if (best === null || best.score <= 0) return null;
+
+  const name = info?.name ?? hero.heroPowerCardId;
+  const targetName = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
+  return {
+    action: 'heroPower',
+    minion: best.minion,
+    score: best.score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    // Что предложит выбор из трёх, решает игра, поэтому план после шага
+    // обрывается, как после обновления витрины (`discountRefreshRule`),
+    // а золото обещанной покупки списывается — иначе остаток числился бы
+    // сгоревшим и развилка ставила бы нажатие не туда.
+    refreshesShop: true,
+    refreshSpend: Math.min(goldAfter, rules.minionCost),
+    searchGoal: `${targetName} т${String(best.tier)} → тир ${String(best.tier + 1)}`,
+    reason:
+      `${name} за ${String(cost)} — поднять ${targetName} ` +
+      `с тира ${String(best.tier)} на ${String(best.tier + 1)} ` +
+      `(выбор из трёх, тело по пулу ≈ ${best.expected.toFixed(1)}); ` +
+      `покупки хода ${(now + best.score).toFixed(1)} против ${now.toFixed(1)} без нажатия`,
+  };
+}
+
 export function heroPowerShotRule(
   state: GameState,
   deps: TavernAdvisorDeps,
@@ -7531,6 +7685,7 @@ export function adviseTavern(
     heroPowerSpellRule(state, deps, rules),
     heroPowerGoldRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),
+    heroPowerUpgradeRule(state, deps, rules),
     ...activationRules(state, deps, rules),
     darkGiftRule(state, deps, rules),
     spinRule(state, deps, rules, buys),

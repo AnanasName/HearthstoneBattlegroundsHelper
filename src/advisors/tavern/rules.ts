@@ -642,6 +642,25 @@ export interface TavernRules {
    */
   readonly heroPowerShotWords: readonly string[];
   /**
+   * Текст силы героя, ПОДНИМАЮЩЕЙ карту витрины на тир выше, — «Choose
+   * a minion in the Tavern. Then choose a higher Tier minion to replace it»
+   * («Алчность Галакронда» `TB_BaconShop_HP_011`, part47).
+   *
+   * Класс узкий и назван: слова «higher Tier» среди 169 сил набора
+   * Battlegrounds есть у ОДНОЙ. Правило от этого не перестаёт быть общим —
+   * оно читает текст, а не идентификатор, — но и обещать, что покроет
+   * что-то ещё, не станет.
+   *
+   * Читать это обязательно, потому что молчание тут ПОЛНОЕ: сила стоит 1,
+   * активна с первого хода и не под замком, а под шаблоны «даёт миньона»
+   * не подходит ни одним словом — ни «discover», ни «get», ни «add … to your
+   * hand». На part47 игрок нажал её ПЯТЬ раз, а советник не упомянул её
+   * ни в одной из десяти точек решения. Тот же класс, что счёт словом
+   * против цифры (part38), «that much» вместо числа (part39), «from your
+   * Tier» вместо «of your» (part42) и «equal to your Tier» (part45).
+   */
+  readonly heroPowerUpgradeWords: readonly string[];
+  /**
    * Текст силы героя, ДАЮЩЕЙ СВОЕМУ МИНЬОНУ КЛЮЧЕВОЕ СЛОВО, — «Give a minion
    * Reborn until next turn» («Ритуал перерождения» Короля-лича, part32).
    *
@@ -1422,6 +1441,14 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // как `\s+`, иначе шаблон молча не совпадает (урок part16).
   healthRewindWords: ['after your hero takes damage,\\s*rewind it'],
   heroPowerShotWords: ['remove a minion[^.]*tavern'],
+  // «Choose a minion in the Tavern. Then choose a higher Tier minion
+  // to replace it.» Слова стоят в РАЗНЫХ предложениях, поэтому [\s\S],
+  // а не [^.] — та же причина, что у Зиреллы в `givesMinionWords`.
+  // Переносы строк снапшота сводятся к пробелу при загрузке (part46),
+  // но `\s+` между словами остаётся страховкой.
+  heroPowerUpgradeWords: [
+    'minion[\\s\\S]*\\bhigher\\s+tier\\b[\\s\\S]*\\breplace\\b',
+  ],
   heroPowerKeywordWords: [
     '\\bgive a (?:friendly )?minion\\s+(?:<b>)?(reborn|divine shield|taunt|windfury|poisonous|venomous|stealth)\\b',
   ],

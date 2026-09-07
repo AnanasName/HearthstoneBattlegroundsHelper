@@ -327,9 +327,16 @@ export function applyRecommendation(
       const sold = rec.sellFirst;
       const sellBoard = sold === null ? state.board : withoutEntity(state.board, sold.entityId);
       const refund = sold === null ? 0 : rules.sellGold;
+      // Сила, ПОДНИМАЮЩАЯ карту витрины на тир («Алчность Галакронда»,
+      // part47), меняет витрину так же, как её обновление: что предложит
+      // выбор из трёх, решает игра. Поэтому шаг обрывает план, а золото
+      // обещанной покупки списывается здесь же (`refreshSpend`) — очки
+      // нажатия УЖЕ посчитаны покупками хода, и без списания план потратил
+      // бы те же три золота второй раз.
+      const refreshes = rec.refreshesShop === true;
       return {
         state: paid({
-          gold: state.gold - rec.cost + refund,
+          gold: state.gold - rec.cost + refund - (refreshes ? (rec.refreshSpend ?? 0) : 0),
           // Гасится и `EXHAUSTED`, а не только «нажата в этом ходу»: с part45
           // тег СИЛЬНЕЕ признака нажатия (`heroPowerReady`), и у силы Инге он
           // стоит в `false` посреди хода — без гашения план жал бы одну и ту
@@ -345,7 +352,13 @@ export function applyRecommendation(
           // Тавиша, part29: миньон уходит в REMOVEDFROMGAME). Без этого
           // следующий шаг плана мог бы предложить купить то, чем мы только
           // что выстрелили.
-          shop: rec.minion === null ? state.shop : withoutEntity(state.shop, rec.minion.entityId),
+          // У силы, поднявшей карту, витрина стала другой целиком: место
+          // цели занял неизвестный миньон тира выше.
+          shop: refreshes
+            ? []
+            : rec.minion === null
+              ? state.shop
+              : withoutEntity(state.shop, rec.minion.entityId),
           board: grants
             ? sellBoard.map((m) => {
                 if (m.entityId !== gift.entityId) return m;
@@ -358,7 +371,7 @@ export function applyRecommendation(
             : sellBoard,
         }),
         opaque: !grants,
-        terminal: false,
+        terminal: refreshes,
       };
     }
 
