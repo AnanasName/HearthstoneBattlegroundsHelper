@@ -319,7 +319,14 @@ export function applyRecommendation(
       // как у слова. Без этого следующий шаг плана считал бы цель по старым
       // статам — та же дыра, что у заряда хранителя (`spellMagnetGain`).
       const stats = rec.grantsStats;
-      const grants = gift != null && (keyword !== undefined || stats !== undefined);
+      // Сила, делающая своего миньона ЗОЛОТЫМ («Once per game, make
+      // a friendly minion Golden», part48): прибавка известна числом
+      // с золотой карты снапшота, значит шаг прозрачен так же, как слово
+      // и статы. Без этого следующий шаг плана считал бы цель по старым
+      // статам и мог бы назвать её же жертвой продажи.
+      const golden = rec.grantsGolden;
+      const grants =
+        gift != null && (keyword !== undefined || stats !== undefined || golden !== undefined);
       // Продажа, ОПЛАЧИВАЮЩАЯ нажатие на полном борде (part40, ход 13):
       // без неё шаг стоил бы золота, которого нет, а жертва осталась бы
       // на борде — ровно та дыра, из-за которой прибавку от продажи
@@ -363,10 +370,19 @@ export function applyRecommendation(
             ? sellBoard.map((m) => {
                 if (m.entityId !== gift.entityId) return m;
                 const withWord = keyword === undefined ? m : withKeyword(m, keyword);
-                if (stats === undefined) return withWord;
+                const withGold =
+                  golden === undefined
+                    ? withWord
+                    : {
+                        ...withWord,
+                        golden: true,
+                        attack: (withWord.attack ?? 0) + golden.attack,
+                        health: (withWord.health ?? 0) + golden.health,
+                      };
+                if (stats === undefined) return withGold;
                 return stats.stat === 'attack'
-                  ? { ...withWord, attack: (withWord.attack ?? 0) + stats.amount }
-                  : { ...withWord, health: (withWord.health ?? 0) + stats.amount };
+                  ? { ...withGold, attack: (withGold.attack ?? 0) + stats.amount }
+                  : { ...withGold, health: (withGold.health ?? 0) + stats.amount };
               })
             : sellBoard,
         }),

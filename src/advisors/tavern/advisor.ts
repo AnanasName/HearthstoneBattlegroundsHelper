@@ -155,6 +155,16 @@ export interface Recommendation {
    */
   readonly grantsStats?: { readonly stat: 'attack' | 'health'; readonly amount: number };
   /**
+   * Прибавка от превращения цели в ЗОЛОТУЮ — «make a friendly minion Golden»
+   * силой Рено (part48). Числа берутся с золотой карты снапшота, а не
+   * удвоением: у двух карт пула из 379 золотая копия статы не удваивает.
+   *
+   * Нужно плану по той же причине, что `grantsStats`: шаг прозрачен, и цель
+   * обязана достаться следующему шагу уже золотой — иначе продажа посчитает
+   * её по старым статам.
+   */
+  readonly grantsGolden?: { readonly attack: number; readonly health: number };
+  /**
    * Остаток счётчика силы «после N покупок с механикой — награда» ПОСЛЕ
    * этой покупки (part34, «Бранное дело»). Заполняется у покупки, которую
    * сила засчитывает; план кладёт число в `heroPowerScriptData[0]`
@@ -3438,10 +3448,11 @@ export function freezeRule(
 /**
  * Можно ли нажать силу героя ПРЯМО СЕЙЧАС — все запреты одним местом.
  *
- * Запретов четыре, и каждый читается из лога: сила уже нажата в этом ходу
+ * Запретов пять, и каждый читается из лога: сила уже нажата в этом ходу
  * (блок PLAY на её сущности), сила временно неиграбельна
  * (`LITERALLY_UNPLAYABLE`), сила ещё не открыта (`LOCK_VISUAL` — замок
- * «Unlocks at Tier N», part37) и сила исчерпана на этот ход (`EXHAUSTED`).
+ * «Unlocks at Tier N», part37), сила исчерпана на этот ход (`EXHAUSTED`)
+ * и сила ЗАПРЕЩЕНА игрой (`HERO_POWER_DISABLED`, part48).
  *
  * Одной функцией, а не условиями в пяти правилах: первые два запрета
  * и были размножены по пяти местам, и добавление третьего в четыре из пяти
@@ -3459,14 +3470,25 @@ export function freezeRule(
  * тега нет (`null`, part8 — десять нажатий и ни одного тега) — отвечает
  * прежний признак. Обратный порядок («жать нельзя, если ЛИБО нажата,
  * ЛИБО исчерпана») вернул бы ровно ту дыру, ради которой всё и затевалось.
+ *
+ * **`HERO_POWER_DISABLED` — пятый запрет, и он про ПАРТИЮ, а не про ход
+ * (part48).** Сила Рено «Нас ждёт богатство!» жмётся ОДИН РАЗ ЗА ПАРТИЮ:
+ * на нажатии игра ставит этот тег и не снимает его больше никогда, а вот
+ * `EXHAUSTED` со сменой хода возвращается в `0`. То есть без пятого запрета
+ * потраченная сила выглядела бы готовой до самого конца партии — и правило,
+ * которое её советует, звало бы жать несуществующее. Тег читается как
+ * «сейчас нельзя», а не «потрачена навсегда»: у «Трёх желаний» (part15)
+ * он возвращается в ноль, и возможность возвращается вместе с ним.
  */
 export function heroPowerReady(hero: {
   readonly heroPowerUsedThisTurn: boolean;
   readonly heroPowerUnplayable: boolean;
   readonly heroPowerLocked: boolean;
   readonly heroPowerExhausted?: boolean | null;
+  readonly heroPowerDisabled?: boolean;
 }): boolean {
   if (hero.heroPowerUnplayable || hero.heroPowerLocked) return false;
+  if (hero.heroPowerDisabled === true) return false;
   const exhausted = hero.heroPowerExhausted ?? null;
   return exhausted === null ? !hero.heroPowerUsedThisTurn : !exhausted;
 }
@@ -4256,6 +4278,191 @@ export function heroPowerStatsRule(
       `${info?.name ?? hero.heroPowerCardId} ${cost > 0 ? `за ${String(cost)}` : 'бесплатна'} — ` +
       `+${String(amount)} ${statRu} (по тиру таверны) на ${name} ` +
       `${String(target.attack ?? '?')}/${String(target.health ?? '?')}`,
+  };
+}
+
+/**
+ * Насколько вырастет миньон, став ЗОЛОТЫМ, — по снапшоту, а не удвоением.
+ *
+ * Игра превращает цель в золотую карту и прибавляет ровно разницу базовых
+ * статов, СОХРАНЯЯ накопленные усиления: part48, 13:29:04 — Бирюзовый
+ * быстролап 35/14 становится 40/19 при базовых 5/5 и золотых 10/10.
+ *
+ * Считать «вдвое» было бы почти верно и потому опасно: по снапшоту золотая
+ * копия удваивает статы у 377 карт пула из 379, а у двух — нет (Aureate
+ * Laureate 2/2 → 2/2, Sky-hatch Runaway 4/7 → 10/14). Числа лежат в карте,
+ * и брать их надо оттуда.
+ *
+ * `null` — карты в снапшоте нет или прибавки не выходит: советовать
+ * превращение, которое ничего не даёт, нечестно.
+ */
+function goldenGain(
+  cardId: string,
+  cards: CardIndex,
+): { readonly attack: number; readonly health: number } | null {
+  const base = cards.info(cardId);
+  if (base === null) return null;
+  const golden = cards.info(`${cardId}_G`);
+  // `info` при промахе снимает суффикс и возвращает ту же карту — тогда
+  // золотой копии в снапшоте нет, и остаётся правило игры «вдвое».
+  const real = golden !== null && golden.id !== base.id;
+  const attack = (real ? (golden.attack ?? 0) : 2 * (base.attack ?? 0)) - (base.attack ?? 0);
+  const health = (real ? (golden.health ?? 0) : 2 * (base.health ?? 0)) - (base.health ?? 0);
+  if (attack + health <= 0) return null;
+  return { attack, health };
+}
+
+/**
+ * Средняя прибавка от превращения в золото по пулу тира — в СТАТАХ.
+ *
+ * Нужна цене спешки: заряд у силы один на партию, и «нажать позже» значит
+ * нажать на теле, которое у нас будет к концу партии. Каким оно будет,
+ * известно ровно с той же точностью, что у тёмного дара (part31) и лестницы
+ * цен Элизы (part42), — по пулу тира, до которого дорастём.
+ */
+function averageGoldenGain(tier: number, cards: CardIndex): number | null {
+  const pool = cards.poolOfTier(tier);
+  if (pool.length === 0) return null;
+  let sum = 0;
+  for (const card of pool) {
+    const gain = goldenGain(card.id, cards);
+    sum += (gain?.attack ?? 0) + (gain?.health ?? 0);
+  }
+  return sum / pool.length;
+}
+
+/**
+ * Правило силы героя, ДЕЛАЮЩЕЙ СВОЕГО МИНЬОНА ЗОЛОТЫМ.
+ *
+ * Рено Джексон (part48), «Нас ждёт богатство!» `TB_BaconShop_HP_046`:
+ * «Once per game, make a friendly minion Golden». Сила БЕСПЛАТНА (тега
+ * `COST` нет вовсе), активна с первого хода и не под замком — а советник
+ * не назвал её ни в одной из двенадцати точек решения партии. Игрок нажал
+ * её сам на 11-м ходу таверны и написал: «снова не видел силу героя, так
+ * как не рекомендовал её нажать».
+ *
+ * Прибавка — читаемое число (`goldenGain`), шкала общая (`perStatPoint`),
+ * своих весов у правила нет. Цель — крупнейшая прибавка среди НЕзолотых
+ * своих мимо кандидатов в продажу: усиление тут вечное, и довод тот же,
+ * что у заклинания-баффа (part17, part36).
+ *
+ * **Цена спешки обязательна, потому что заряд ОДИН НА ПАРТИЮ.** Без неё
+ * бесплатный шаг встал бы в план первым же ходом и сжёг единственное
+ * нажатие на теле 2/3: у нашей шкалы бесплатное действие с любыми
+ * положительными очками в план входит всегда (part45). Арифметика — дара
+ * (part31) при одном заряде: отложить значит нажать на ПОСЛЕДНЕМ ходу
+ * партии, тир там даёт кривая `levelling`, а тело того тира — средняя
+ * прибавка по его пулу. Спешка стоит разницу, и правило молчит, пока
+ * она эту разницу не окупает.
+ *
+ * Оценка НИЖНЯЯ, и это сказано вслух в самом совете: золотая карта — это
+ * не только двойные статы, но и усиленный ТЕКСТ (золотой Бирюзовый
+ * быстролап призывает ДВУХ жуков вместо одного), а текст наша шкала тут
+ * не считает. Занизить честнее: цена ошибки — «сила стоит ниже в списке»,
+ * тогда как выдуманная надбавка сожгла бы единственный заряд раньше срока.
+ */
+export function heroPowerGoldenRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if (!heroPowerReady(hero)) return null;
+  const cost = hero.heroPowerCost ?? 0;
+  if (cost > state.gold) return null;
+
+  const cards = deps.cards;
+  const info = cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  if (!rules.heroPowerGoldenWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+
+  // Золотого золотым не сделать — цель обязана быть незолотой; так это
+  // и написано у соседней силы пула («Swap a friendly non-Golden minion»).
+  const candidates = state.board
+    .filter((m) => !m.golden)
+    .map((m) => ({ minion: m, gain: goldenGain(m.cardId, cards) }))
+    .filter((c): c is { minion: Minion; gain: { attack: number; health: number } } =>
+      c.gain !== null,
+    );
+  if (candidates.length === 0) return null;
+  const sellCandidates = sellCandidateIds(state, deps, rules);
+  const keepers = candidates.filter((c) => !sellCandidates.has(c.minion.entityId));
+  const pool = keepers.length > 0 ? keepers : candidates;
+
+  const statsOf = (g: { attack: number; health: number }): number => g.attack + g.health;
+  const body = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+  // При равной прибавке выбирается тело покрупнее: удвоение базы у них
+  // одинаковое, а живёт в бою дольше тот, на ком уже стоят усиления.
+  const best = pool.reduce((a, b) => {
+    const diff = statsOf(b.gain) - statsOf(a.gain);
+    if (diff !== 0) return diff > 0 ? b : a;
+    return body(b.minion) > body(a.minion) ? b : a;
+  });
+
+  const now = statsOf(best.gain) * rules.value.perStatPoint;
+  const hold = goldenHoldCost(now, state, cards, rules);
+  const score = now - hold.cost - cost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  const name = cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    targetMinion: best.minion,
+    grantsGolden: best.gain,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} ${cost > 0 ? `за ${String(cost)}` : 'бесплатна'} — ` +
+      `сделать золотым ${name} ` +
+      `${String(best.minion.attack ?? '?')}/${String(best.minion.health ?? '?')} ` +
+      `(+${String(best.gain.attack)}/+${String(best.gain.health)}, ${now.toFixed(1)}); ` +
+      `${hold.note}; текст золотой карты сильнее — этого счёт не считает`,
+  };
+}
+
+/**
+ * Цена спешки у силы с ОДНИМ зарядом на партию — см. `heroPowerGoldenRule`.
+ *
+ * Считается той же арифметикой, что у тёмного дара (part31): заряд один,
+ * значит отложенное нажатие достаётся последнему ходу партии — горизонт
+ * `remainingTurns` (замер part28), тир там — кривая `levelling` (part20),
+ * тело того тира — средняя прибавка по его пулу. Оценка ВЕРХНЯЯ по той же
+ * причине, что у дара: ТЕМП не считается — золотое тело, сделанное сейчас,
+ * воюет в большем числе боёв, — поэтому совет обязан назвать и горизонт,
+ * и цену словами.
+ */
+function goldenHoldCost(
+  now: number,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { readonly cost: number; readonly note: string } {
+  const ahead = remainingTurns(state, rules);
+  if (ahead <= 0) {
+    return { cost: 0, note: 'заряд один на партию, но ходов впереди не осталось — жать' };
+  }
+  const lastTavernTurn = Math.round(tavernTurnOf(state.turn) + ahead);
+  const tier = Math.max(state.techLevel, targetTier(2 * lastTavernTurn - 1, rules));
+  const laterStats = averageGoldenGain(tier, cards);
+  if (laterStats === null) {
+    return { cost: 0, note: `заряд один на партию, впереди ещё ${ahead.toFixed(1)} ходов таверны` };
+  }
+  const later = laterStats * rules.value.perStatPoint;
+  const cost = Math.max(0, later - now);
+  return {
+    cost,
+    note:
+      cost > 0
+        ? `но заряд лучше придержать: он один на партию, впереди ещё ` +
+          `${ahead.toFixed(1)} ходов таверны, а на тире ${String(tier)} среднее тело даёт ` +
+          `${later.toFixed(1)} вместо ${now.toFixed(1)} — спешка стоит ${cost.toFixed(1)}`
+        : `заряд один на партию, но тело крупнее среднего на тире ${String(tier)} ` +
+          `(${later.toFixed(1)}) — ждать нечего`,
   };
 }
 
@@ -5533,8 +5740,130 @@ function tribeMinionRace(text: string, rules: TavernRules): string | null {
 
 /** Ценность одной ветви «Choose One» — на нашем состоянии, а не по шаблону. */
 interface BranchValue {
-  readonly score: number;
+  /**
+   * Очки ветви; `null` — «знаем, ЧТО она делает, но в очки не переводим».
+   *
+   * Третье состояние понадобилось самоцветам (part48): ветвь «каждый будущий
+   * самоцвет +1 до конца партии» стоит ровно столько, сколько самоцветов мы
+   * ещё сыграем, а этого числа у нас нет. Прежде такая ветвь была
+   * неотличима от нечитаемой и печаталась как «оценить не берёмся» — игрок
+   * видел два одинаковых прочерка там, где про одну из ветвей мы знаем всё,
+   * кроме множителя.
+   *
+   * Для РАНЖИРОВАНИЯ это по-прежнему «не оценили»: ветвь без очков выбор
+   * не выигрывает и не проигрывает, и совет называет обе (part28).
+   */
+  readonly score: number | null;
   readonly note: string;
+  /**
+   * Короткая подпись ветви, если она зависит от СОСТОЯНИЯ.
+   *
+   * Обычную подпись («+3/+1», «щит») собирает `branchLabelOf` из одного
+   * текста карты, и состояния ей не нужно. У самоцветов нужно: размер
+   * самоцвета живёт в теге игрока и за партию растёт. Подпись важнее
+   * причины — в оверлее видна строка ДЕЙСТВИЯ, а `reason` не показывается
+   * вовсе (доктрина part12 и part37).
+   */
+  readonly label?: string;
+}
+
+/**
+ * Размер ОДНОГО кровавого самоцвета сейчас — базовые +1/+1 плюс надбавка.
+ *
+ * Базу проверяет лог: у игрока без надбавок сущность самоцвета создаётся
+ * с `TAG_SCRIPT_DATA_NUM_1=1` и `_2=1` (part48, 13:12:19). Надбавку игра
+ * держит на сущности игрока (`BACON_BLOODGEMBUFFATKVALUE`), и в той же
+ * партии у соперника она доходит до восьми — то есть считать самоцвет
+ * вечными «+1/+1» значило бы ошибаться в разы.
+ */
+function bloodGemStats(state: GameState): { readonly attack: number; readonly health: number } {
+  return {
+    attack: 1 + (state.globalInfo.bloodGemAttackBuff ?? 0),
+    health: 1 + (state.globalInfo.bloodGemHealthBuff ?? 0),
+  };
+}
+
+/**
+ * Ветвь про кровавые самоцветы: обещание САМОЦВЕТОВ или усиление БУДУЩИХ.
+ *
+ * Пород две, и до part48 они были неразличимы — обе печатались как «оценить
+ * не берёмся», хотя знаем мы про них разное.
+ *
+ * ОБЕЩАНИЕ («Get {0} Blood Gems») считается точно: число из плейсхолдера,
+ * размер самоцвета из состояния, племени у цели нет (проверено фикстурами:
+ * самоцветы ложились на зверя, пирата и наг — «Give a minion» буквально).
+ * Оценка ВЕРХНЯЯ ровно в одном: карты надо ещё разыграть, а на это нужны
+ * действия хода — но самоцвет бесплатен, и ход обычно их вмещает.
+ *
+ * УСИЛЕНИЕ («Your Blood Gems give an extra +1 Attack this game», в том
+ * числе обещанное картой — «Get a Gem Day») очков не получает: его цена
+ * равна прибавке, умноженной на число самоцветов до конца партии, а такого
+ * замера у нас нет. По датасету самоцветов за партию бывает от двух
+ * до тридцати трёх (18 записей из 57), и середины у этого разброса нет —
+ * он про то, собрал ли игрок квилбоаров, а не про ход. Выдумать множитель
+ * значило бы подменить ответ: ветвь получает СЛОВА и остаётся вне
+ * ранжирования (part28).
+ */
+function bloodGemBranch(
+  text: string,
+  scriptData: readonly (number | null)[],
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): BranchValue | null {
+  for (const word of rules.bloodGemGetWords) {
+    const m = new RegExp(word, 'i').exec(text);
+    if (m === null) continue;
+    const count = placeholderValue(m[1], m[2], scriptData);
+    if (count <= 0) continue;
+    const gem = bloodGemStats(state);
+    const stats = count * (gem.attack + gem.health);
+    return {
+      score: stats * rules.value.perStatPoint,
+      label: `+${String(stats)} статов сейчас`,
+      note:
+        `${String(count)} самоцвета по +${String(gem.attack)}/+${String(gem.health)} — ` +
+        `+${String(stats)} статов своим`,
+    };
+  }
+
+  // Усиление будущих самоцветов — своим текстом или ОБЕЩАННОЙ КАРТОЙ:
+  // «Get a Gem Day» не говорит про самоцветы ни слова, а вся ветвь именно
+  // про них. Карта ищется по имени, как награда силы героя в part34.
+  const named = /\bget\s+an?\s+([^.<]+?)\s*\./i.exec(text)?.[1] ?? null;
+  const promised = named === null ? [] : deps.cards.byName(named);
+  const upgradeText = [text, ...promised.map((c) => c.text ?? '')].find((t) =>
+    rules.bloodGemUpgradeWords.some((w) => new RegExp(w, 'i').test(t)),
+  );
+  if (upgradeText === undefined) return null;
+  const amount = bloodGemUpgradeAmount(upgradeText, scriptData, rules);
+  const gem = bloodGemStats(state);
+  return {
+    score: null,
+    label: `${amount} каждому будущему самоцвету`,
+    note:
+      (named === null ? '' : `«${named}»: `) +
+      `каждый будущий самоцвет крупнее на ${amount} (сейчас +${String(gem.attack)}/+${String(gem.health)}) ` +
+      `до конца партии — сколько их будет, советник не считает`,
+  };
+}
+
+/** На сколько усиление растит самоцвет: «+{0}/+{1}» или «+1 Attack». */
+function bloodGemUpgradeAmount(
+  text: string,
+  scriptData: readonly (number | null)[],
+  rules: TavernRules,
+): string {
+  const head = rules.bloodGemUpgradeWords
+    .map((w) => new RegExp(w, 'i').exec(text))
+    .find((m) => m !== null);
+  const tail = head === null || head === undefined ? text : text.slice(head.index);
+  const pair = statPair(tail, scriptData);
+  if (pair !== null) return `+${String(pair.attack)}/+${String(pair.health)}`;
+  const single = /\+(?:\{(\d)\}|(\d+))\s+(attack|health)/i.exec(tail);
+  if (single === null) return 'величину из текста карты';
+  const value = placeholderValue(single[1], single[2], scriptData);
+  return `+${String(value)} ${single[3]?.toLowerCase() === 'attack' ? 'к атаке' : 'к здоровью'}`;
 }
 
 /**
@@ -5561,6 +5890,12 @@ function branchValue(
   const text = deps.cards.info(cardId)?.text ?? '';
   if (text === '') return null;
   const effect = spellEffect(cardId, scriptData, deps.cards, rules);
+
+  // КРОВАВЫЕ САМОЦВЕТЫ — до part48 обе ветви такой карты печатались как
+  // «оценить не берёмся», и жалоба игрока была ровно про это: «не показало
+  // лучший вариант при розыгрыше карты» (Кратерный старатель, ход 7).
+  const gems = bloodGemBranch(text, scriptData, state, deps, rules);
+  if (gems !== null) return gems;
 
   // ПРЕДЕЛ ЗОЛОТА — не монета в руке, а по золотому каждый оставшийся ход.
   if (effect !== null && effect.maxGold > 0) {
@@ -5688,14 +6023,17 @@ export function modalBranchAdvice(
       // путём — у части копий сущностей ветвей не бывает.
       const scriptData = minion.branchScriptData?.[branch.id] ?? minion.scriptData;
       const effect = spellEffect(branch.id, scriptData, deps.cards, rules);
+      const value = branchValue(branch.id, scriptData, state, deps, rules);
       return [
         {
-          value: branchValue(branch.id, scriptData, state, deps, rules),
+          value,
           effect,
           branch: {
             cardId: branch.id,
             name: branch.name,
-            label: branchLabelOf(branch.text ?? '', scriptData, effect),
+            // Подпись от оценки — там, где она зависит от состояния
+            // (самоцветы, part48); иначе обычная, из одного текста карты.
+            label: value?.label ?? branchLabelOf(branch.text ?? '', scriptData, effect),
           },
         },
       ];
@@ -5703,7 +6041,15 @@ export function modalBranchAdvice(
   if (all.length < 2) return null;
 
   const branches = all.map((b) => b.branch);
-  const judged = all.flatMap((b) => (b.value === null ? [] : [{ ...b, value: b.value }]));
+  // В ранжирование идут ветви С ОЧКАМИ. Ветвь, про которую мы знаем только
+  // словами («каждый будущий самоцвет крупнее», part48), в сравнение
+  // не входит, но её слова печатаются наравне с остальными — знание без
+  // числа лучше прочерка, а число без замера хуже обоих.
+  const judged = all.flatMap((b) =>
+    b.value === null || b.value.score === null
+      ? []
+      : [{ ...b, value: { score: b.value.score, note: b.value.note } }],
+  );
 
   // Одну из ветвей оценить не вышло — сравнивать не с чем, и «берите ту,
   // которую поняли» здесь было бы враньём: неоценённая ветвь не значит
@@ -6144,6 +6490,35 @@ export function isEffectEngine(
  * «Fortify» советовался на Water Droplet 3/3 — токен, который игрок,
  * по его словам, и так собирался продать.
  */
+/**
+ * Кандидаты в продажу — те, на кого не вешают ПОСТОЯННОЕ усиление.
+ *
+ * Их двое, и оба свои правила уже называют: слабейший свой, которого
+ * назовёт покупка на полный борд (part17), и карта, чья ценность
+ * РЕАЛИЗУЕТСЯ ПРОДАЖЕЙ — «When you sell this, …» (part18). Копия под тройку
+ * исключением не считается: её берут не телом и не продают.
+ *
+ * Отдельной функцией, а не копией в каждом правиле: спрашивают об этом
+ * и цель заклинания (`spellTargetOn`), и цель силы, делающей миньона
+ * золотым (part48), — а два определения одного и того же разъехались бы
+ * молча, ровно как расходились списки партий до `CURRENT_BUILD_PARTS`.
+ */
+function sellCandidateIds(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): Set<number> {
+  const ids = new Set<number>();
+  const victim = weakestOwn(state, deps, rules);
+  if (victim !== null) ids.add(victim.minion.entityId);
+  for (const m of state.board) {
+    const text = deps.cards.info(m.cardId)?.text ?? '';
+    if (text === '' || copiesOwned(m, state) > 0) continue;
+    if (rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))) ids.add(m.entityId);
+  }
+  return ids;
+}
+
 function spellTargetOn(
   effect: SpellEffect,
   state: GameState,
@@ -6240,16 +6615,7 @@ function spellTargetOn(
   // продать; игрок повесил щит на Tusked Camper и Sellemental продал.
   // Копия под тройку исключением не считается ровно как в `sellForGoldRule`:
   // её берут не телом и не продают.
-  const sellCandidates = new Set<number>();
-  const victim = weakestOwn(state, deps, rules);
-  if (victim !== null) sellCandidates.add(victim.minion.entityId);
-  for (const m of state.board) {
-    const text = cards.info(m.cardId)?.text ?? '';
-    if (text === '' || copiesOwned(m, state) > 0) continue;
-    if (rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))) {
-      sellCandidates.add(m.entityId);
-    }
-  }
+  const sellCandidates = sellCandidateIds(state, deps, rules);
   if (sellCandidates.size > 0) {
     const keepers = pool.filter((m) => !sellCandidates.has(m.entityId));
     // Борд целиком из кандидатов в продажу возвращает выбор им же:
@@ -7682,6 +8048,7 @@ export function adviseTavern(
     freeHeroPowerRule(state, deps, rules),
     heroPowerKeywordRule(state, deps, rules),
     heroPowerStatsRule(state, deps, rules),
+    heroPowerGoldenRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),
     heroPowerGoldRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),

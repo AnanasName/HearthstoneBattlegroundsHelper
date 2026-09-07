@@ -31,6 +31,7 @@ const HERO: Hero = {
   heroPowerLocked: false,
   heroPowerHasActivate: false,
   heroPowerExhausted: null,
+  heroPowerDisabled: false,
   heroPowerScriptData: [],
 };
 

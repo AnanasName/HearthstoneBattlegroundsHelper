@@ -215,6 +215,7 @@ describe('счёт против поля из нескольких бордов'
     heroPowerLocked: false,
   heroPowerHasActivate: false,
   heroPowerExhausted: null,
+  heroPowerDisabled: false,
   heroPowerScriptData: [],
   };
 
@@ -310,6 +311,7 @@ describe('вопрос советнику из состояния партии',
     heroPowerLocked: false,
   heroPowerHasActivate: false,
   heroPowerExhausted: null,
+  heroPowerDisabled: false,
   heroPowerScriptData: [],
   };
 

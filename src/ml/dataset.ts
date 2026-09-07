@@ -145,9 +145,17 @@ function upgradeActions(list: readonly LegacyAction[]): PlayerAction[] {
   return list.map((a) => ({ subOption: null, ...a }));
 }
 
-/** Герой старой записи: поля part34 и part37 в нём могут отсутствовать. */
-type LegacyHero = Omit<Hero, 'heroPowerScriptData' | 'heroPowerLocked' | 'heroPowerExhausted'> &
-  Partial<Pick<Hero, 'heroPowerScriptData' | 'heroPowerLocked' | 'heroPowerExhausted'>>;
+/** Герой старой записи: поля part34, part37 и part48 в нём могут отсутствовать. */
+type LegacyHero = Omit<
+  Hero,
+  'heroPowerScriptData' | 'heroPowerLocked' | 'heroPowerExhausted' | 'heroPowerDisabled'
+> &
+  Partial<
+    Pick<
+      Hero,
+      'heroPowerScriptData' | 'heroPowerLocked' | 'heroPowerExhausted' | 'heroPowerDisabled'
+    >
+  >;
 
 /** Миньон старой записи: живой цены покупки (part35) в нём может не быть. */
 type LegacyMinion = Omit<Minion, 'buyCost'> & Partial<Pick<Minion, 'buyCost'>>;
@@ -188,6 +196,10 @@ function upgradeState(state: GameState): GameState {
           heroPowerScriptData: [],
           heroPowerLocked: false,
           heroPowerExhausted: null,
+          // Умолчание «сила не запрещена» — то же рассуждение, что у замка:
+          // тег `HERO_POWER_DISABLED` редьюсер до part48 не читал вовсе,
+          // и ошибиться умолчание может лишь в сторону прежнего поведения.
+          heroPowerDisabled: false,
           ...legacyHero,
         };
   return {

@@ -28,6 +28,7 @@ interface RawCard {
   readonly attack?: unknown;
   readonly health?: unknown;
   readonly type?: unknown;
+  readonly set?: unknown;
   readonly mechanics?: unknown;
 }
 
@@ -102,6 +103,21 @@ export interface CardIndex {
    * обычная версия, а золотая — та же карта, посчитанная дважды.
    */
   readonly poolOfTier: (techLevel: number) => readonly CardInfo[];
+  /**
+   * Карты набора Battlegrounds с этим именем — регистр и лишние пробелы
+   * не важны.
+   *
+   * Нужны там, где текст карты обещает ДРУГУЮ КАРТУ по имени и без неё
+   * не читается вовсе: «Get a Gem Day» (ветвь Кратерного старателя, part48)
+   * про самоцветы не говорит ни слова, а вся ветвь именно про них. Тот же
+   * приём уже применён к награде силы героя в part34 — только там поиск
+   * шёл по пулу миньонов, а обещанной картой бывает и заклинание.
+   *
+   * Возвращается СПИСОК: имена в наборе не уникальны (1447 повторов
+   * на 5612 карт — золотые копии, токены), и выбирать между ними должен
+   * тот, кто знает, что ищет.
+   */
+  readonly byName: (name: string) => readonly CardInfo[];
   readonly size: number;
 }
 
@@ -170,6 +186,7 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
   const byId = new Map<string, CardInfo>();
   const byDbfId = new Map<number, CardInfo>();
   const byTier = new Map<number, CardInfo[]>();
+  const byName = new Map<string, CardInfo[]>();
 
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue;
@@ -195,6 +212,16 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
     byId.set(card.id, info);
     if (info.dbfId !== null) byDbfId.set(info.dbfId, info);
 
+    // Имена индексируются только по набору Battlegrounds: в снапшоте
+    // 35 тысяч карт, и «Gem Day» надо искать среди тех, что вообще могут
+    // прийти в партию режима.
+    if (card.set === 'Battlegrounds') {
+      const key = info.name.replace(/\s+/g, ' ').trim().toLowerCase();
+      const same = byName.get(key);
+      if (same === undefined) byName.set(key, [info]);
+      else same.push(info);
+    }
+
     if (info.isBaconPool && info.type === 'MINION' && info.techLevel !== null && !info.id.endsWith('_G')) {
       const tier = byTier.get(info.techLevel);
       if (tier === undefined) byTier.set(info.techLevel, [info]);
@@ -206,6 +233,7 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
     size: byId.size,
     infoByDbfId: (dbfId) => byDbfId.get(dbfId) ?? null,
     poolOfTier: (techLevel) => byTier.get(techLevel) ?? [],
+    byName: (name) => byName.get(name.replace(/\s+/g, ' ').trim().toLowerCase()) ?? [],
     info: (cardId) => {
       const direct = byId.get(cardId);
       if (direct !== undefined) return direct;
