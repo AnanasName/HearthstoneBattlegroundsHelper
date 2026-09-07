@@ -440,6 +440,47 @@ export interface GlobalInfo {
   readonly bloodGemAttackBuff: number | null;
   /** `BACON_BLOODGEMBUFFHEALTHVALUE` → `BloodGemHealthBonus`. */
   readonly bloodGemHealthBuff: number | null;
+  /**
+   * Надбавка к атаке ВСЕЙ нежити — `TAG_SCRIPT_DATA_NUM_1` на сущности
+   * «Undead Bonus Attack Player Enchant» (`BG25_011pe`) → `UndeadAttackBonus`.
+   *
+   * Это единственный счётчик, который лежит НЕ на сущности игрока, а на его
+   * ЭНЧАНТЕ, и потому берётся сканированием таблицы сущностей по контроллеру
+   * (part50). Кормят его карты со словами «Your Undead have +N Attack this
+   * game *(wherever they are)*» — `BG25_011` Nerubian Deathswarmer и
+   * заклинание `BG28_604` Butchering; в part50 игрок разыграл Butchering
+   * около тридцати раз, и число дошло до 284.
+   *
+   * Почему это важнее, чем кажется. На борде статы уже применены игрой,
+   * и без этого поля бой считался бы верно — если бы не призывы. Симулятор
+   * применяет надбавку к КАЖДОМУ телу, призванному ВНУТРИ боя
+   * (`dist/simulation/add-minion-to-board.js`, строка 247): скелетам
+   * Cadaver Caretaker, Руке Handless Forsaken, копиям перерождения. Без неё
+   * три скелета выходят 1/1 вместо 100/1 — то есть недооценивается ровно
+   * та композиция, которая на призывах и стоит.
+   */
+  readonly undeadAttackBuff: number | null;
+  /**
+   * Парная надбавка к ЗДОРОВЬЮ нежити — `TAG_SCRIPT_DATA_NUM_2` того же
+   * энчанта `BG25_011pe` → `UndeadHealthBonus`.
+   *
+   * Фикстура своя и не part50: там этот тег не приходит НИ РАЗУ, а в part32
+   * доходит до 208 при атаке 527. То есть половины пары живут в разных
+   * партиях, и проверять надо обе — иначе «в этой партии тега нет» легко
+   * принять за «тега не бывает».
+   */
+  readonly undeadHealthBuff: number | null;
+  /**
+   * Сколько своих Eternal Knight умерло за партию —
+   * `TAG_SCRIPT_DATA_NUM_1` на `BG25_008pe` → `EternalKnightsDeadThisGame`.
+   *
+   * Тем же способом и по той же причине: Eternal Knight «Has +{0}/+{1} for
+   * each friendly Eternal Knight that died this game», и симулятор считает
+   * статы призванного рыцаря по этому числу (там же, строка 368). В part50
+   * оно дошло до 20 при живом Eternal Summoner, который призывает рыцаря
+   * хрипом прямо в бою.
+   */
+  readonly eternalKnightsDead: number | null;
 }
 
 export const EMPTY_GLOBAL_INFO: GlobalInfo = {
@@ -452,6 +493,9 @@ export const EMPTY_GLOBAL_INFO: GlobalInfo = {
   elementalHealthBuff: null,
   bloodGemAttackBuff: null,
   bloodGemHealthBuff: null,
+  undeadAttackBuff: null,
+  undeadHealthBuff: null,
+  eternalKnightsDead: null,
 };
 
 /**
@@ -600,6 +644,19 @@ export interface GameState {
   readonly anomalyCardId: string | null;
   /** Накопительные счётчики игрока для симулятора. */
   readonly globalInfo: GlobalInfo;
+  /**
+   * Те же счётчики, но СОПЕРНИКА текущего боя (part50).
+   *
+   * Нужны затем, что симулятор считает обе стороны, а надбавка нежити
+   * у соперника в корпусе встречается ЧАЩЕ, чем у нас. Передавать только
+   * своё — не «половина пользы», а систематическое завышение своих шансов
+   * против нежити: наши призванные тела вырастают, чужие остаются 1/1.
+   *
+   * Заполняется только в бою (`currentOpponentPlayerId`); в таверне
+   * остаётся пустым — там боя нет, а чей борд выйдет следующим, счётчики
+   * которого нам понадобятся, заранее неизвестно.
+   */
+  readonly opponentGlobalInfo: GlobalInfo;
   /**
    * `PlayerID` следующего противника — тег `NEXT_OPPONENT_PLAYER_ID`.
    *
@@ -824,6 +881,7 @@ export const EMPTY_STATE: GameState = {
   opponentBoard: [],
   anomalyCardId: null,
   globalInfo: EMPTY_GLOBAL_INFO,
+  opponentGlobalInfo: EMPTY_GLOBAL_INFO,
   nextOpponentPlayerId: null,
   currentOpponentPlayerId: null,
   wonLastCombat: null,

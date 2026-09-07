@@ -31,6 +31,7 @@ export interface BattleEpisode {
   readonly techLevel: number;
   readonly anomalyCardId: string | null;
   readonly globalInfo: GlobalInfo;
+  readonly opponentGlobalInfo: GlobalInfo;
   readonly opponentPlayerId: number | null;
   /** Взятые тринкеты, свои и противника, как dbfId из лога. */
   readonly playerTrinketDbfIds: readonly number[];
@@ -56,6 +57,7 @@ interface Pending {
   techLevel: number;
   anomalyCardId: string | null;
   globalInfo: GlobalInfo;
+  opponentGlobalInfo: GlobalInfo;
   opponentPlayerId: number | null;
   playerTrinketDbfIds: readonly number[];
   opponentTrinketDbfIds: readonly number[];
@@ -112,6 +114,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
           techLevel: state.techLevel,
           anomalyCardId: state.anomalyCardId,
           globalInfo: state.globalInfo,
+          opponentGlobalInfo: state.opponentGlobalInfo,
           opponentPlayerId: state.currentOpponentPlayerId,
           playerTrinketDbfIds:
             state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
@@ -140,6 +143,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
         techLevel: pending.techLevel,
         anomalyCardId: pending.anomalyCardId,
         globalInfo: pending.globalInfo,
+        opponentGlobalInfo: pending.opponentGlobalInfo,
         opponentPlayerId: pending.opponentPlayerId,
         playerTrinketDbfIds: pending.playerTrinketDbfIds,
         opponentTrinketDbfIds: pending.opponentTrinketDbfIds,

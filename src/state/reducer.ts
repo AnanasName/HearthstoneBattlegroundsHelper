@@ -410,6 +410,7 @@ export function createReducer(players: Players): Reducer {
       if (cardId !== undefined && cardId !== '' && (authoritative || found.cardId === '')) {
         found.cardId = cardId;
         noteShopMinion(found);
+        noteCounterEnchant(found);
       }
       return found;
     }
@@ -424,6 +425,7 @@ export function createReducer(players: Players): Reducer {
       tags: new Map(),
     };
     entities.set(id, created);
+    noteCounterEnchant(created);
     return created;
   };
 
@@ -948,6 +950,121 @@ export function createReducer(players: Players): Reducer {
   };
 
   /**
+   * Счётчики, которые игра держит НЕ на сущности игрока, а на его ЭНЧАНТЕ.
+   *
+   * Именованные счётчики (`GLOBAL_INFO_TAGS`) приходят тегом на самого
+   * игрока, и их читает `applyGlobal`. Но два поля, которых ждёт симулятор,
+   * устроены иначе: игра заводит отдельную сущность-энчант под контроллером
+   * игрока и пишет значение в её `TAG_SCRIPT_DATA_NUM_1` (part50).
+   * Именованного тега у них нет вовсе, поэтому и путь другой — скан таблицы
+   * сущностей по контроллеру, как у кнопки подъёма ниже.
+   *
+   * Фильтр по контроллеру обязателен и не косметика: у каждого из восьми
+   * игроков лобби свой такой энчант с ЕГО числом. В part50 наш `PlayerID`
+   * равен 8 (единственный с ненулевым `GameAccountId`), и на соседней
+   * сущности с `player=16` стоит счётчик соперника.
+   *
+   * Зона `PLAY` — тоже из фактуры: отработавшие копии уходят в
+   * `REMOVEDFROMGAME`, и брать их значило бы читать число прошлой партии.
+   */
+  const PLAYER_ENCHANT_COUNTERS: Readonly<
+    Record<string, { readonly num1?: keyof GlobalInfo; readonly num2?: keyof GlobalInfo }>
+  > = {
+    // «Undead Bonus Attack Player Enchant»: Nerubian Deathswarmer и
+    // заклинание Butchering копят сюда надбавку ВСЕЙ нежити. Половины пары
+    // живут в разных партиях: атака доходит до 284 в part50, где второго
+    // тега нет ни разу, а здоровье — до 208 в part32.
+    BG25_011pe: { num1: 'undeadAttackBuff', num2: 'undeadHealthBuff' },
+    // «Eternal Knight Player Enchant»: сколько своих рыцарей умерло.
+    BG25_008pe: { num1: 'eternalKnightsDead' },
+  };
+
+  /**
+   * Узкий индекс сущностей-счётчиков.
+   *
+   * Полный обход таблицы сущностей стоит дорого не сам по себе, а потому,
+   * что снимок берётся часто: к концу партии в таблице десятки тысяч
+   * записей, а счётчиков среди них единицы. Индекс держит только их —
+   * пополняется в `touch`, когда карта опознана.
+   */
+  const counterEnchantIds = new Set<number>();
+
+  const noteCounterEnchant = (e: Entity): void => {
+    if (e.cardId !== '' && PLAYER_ENCHANT_COUNTERS[e.cardId] !== undefined) {
+      counterEnchantIds.add(e.id);
+    }
+  };
+
+  /**
+   * Контроллер соперника — НЕ `currentOpponentPlayerId`.
+   *
+   * Это два разных пространства номеров, и перепутать их легко: место
+   * в лобби (1..7) приходит тегом `PLAYER_ID` на герое, а контроллер
+   * сущности — полем `player=` дескриптора. В логе объявлены ровно ДВА
+   * `Player`: свой (в part50 `PlayerID=8`, единственный с ненулевым
+   * `GameAccountId`) и общий слот соперника (`PlayerID=16`), под которым
+   * по очереди выступают все семеро. Первая версия правки искала энчанты
+   * по месту в лобби и не находила НИ ОДНОГО — молча, потому что «нет
+   * счётчика» выглядит как «у соперника нет нежити».
+   *
+   * Слот общий, но сущность у каждого боя СВОЯ: в part50 шесть разных
+   * энчантов `BG25_011pe` под контроллером 16, по одному на бой с нежитью.
+   */
+  const opponentController = (): number | null => {
+    const self = players.selfPlayerId;
+    if (self === null) return null;
+    return players.decls.find((d) => d.playerId !== self)?.playerId ?? null;
+  };
+
+  /**
+   * Счётчики с энчантов ОДНОГО игрока, заданного номером контроллера.
+   *
+   * Параметр, а не «свой»: у каждого из восьми игроков лобби свой такой
+   * энчант со своим числом, и обе стороны боя нужны симулятору. Отдать
+   * только своё — значит стать точным к себе и слепым к сопернику, то есть
+   * систематически завышать свои шансы против нежити; чужая надбавка
+   * в корпусе встречается ЧАЩЕ своей.
+   */
+  const enchantCountersOf = (controller: number | null): Partial<GlobalInfo> => {
+    if (controller === null) return {};
+
+    // Берём НОВЕЙШУЮ сущность каждой карты: у слота соперника энчант
+    // заводится заново на каждый бой (в part50 их шесть), и полагаться
+    // на порядок обхода таблицы значило бы читать чужое число прошлого боя.
+    // Идентификаторы растут монотонно по времени создания — это уже опора
+    // для порядка энчантов на миньоне.
+    const newest = new Map<string, Entity>();
+    for (const id of counterEnchantIds) {
+      const e = entities.get(id);
+      if (e === undefined) continue;
+      if (e.controller !== controller || e.zone !== 'PLAY') continue;
+      const seen = newest.get(e.cardId);
+      if (seen === undefined || e.id > seen.id) newest.set(e.cardId, e);
+    }
+
+    const out: Partial<Record<keyof GlobalInfo, number>> = {};
+    for (const e of newest.values()) {
+      const fields = PLAYER_ENCHANT_COUNTERS[e.cardId];
+      if (fields === undefined) continue;
+      for (const [tag, field] of [
+        ['TAG_SCRIPT_DATA_NUM_1', fields.num1],
+        ['TAG_SCRIPT_DATA_NUM_2', fields.num2],
+      ] as const) {
+        if (field === undefined) continue;
+        const value = e.tags.get(tag);
+        // Ноль не отдаём: сущность заводится заранее и до первого
+        // срабатывания стоит пустой. Разница не косметическая — отсутствие
+        // поля пакет превращает в ноль сам, но «мы не знаем» и «мы уверенно
+        // говорим ноль» расходятся в тот день, когда поле начнут читать
+        // из другого источника.
+        if (value === undefined || value <= 0) continue;
+        out[field] = value;
+      }
+    }
+    return out;
+  };
+
+  /**
    * Кнопка апгрейда таверны — она же цена подъёма.
    *
    * Сущность `TB_BaconShopTechUp0N_Button` в `PLAY` под своим контроллером.
@@ -1284,7 +1401,10 @@ export function createReducer(players: Players): Reducer {
       goldTotal,
       goldSpent: goldSpent + tempSpent,
       anomalyCardId,
-      globalInfo: { ...globalInfo },
+      globalInfo: { ...globalInfo, ...enchantCountersOf(players.selfPlayerId) },
+      // Счётчики СОПЕРНИКА текущего боя — та же функция, другой контроллер.
+      // Без них правка выше была бы асимметричной (см. её шапку).
+      opponentGlobalInfo: { ...EMPTY_GLOBAL_INFO, ...enchantCountersOf(opponentController()) },
       nextOpponentPlayerId,
       currentOpponentPlayerId,
       wonLastCombat,

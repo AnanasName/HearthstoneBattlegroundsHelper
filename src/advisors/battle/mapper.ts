@@ -93,6 +93,15 @@ function toGlobalInfo(info: GlobalInfo): Record<string, number> {
   put('ElementalHealthBuff', info.elementalHealthBuff);
   put('BloodGemAttackBonus', info.bloodGemAttackBuff);
   put('BloodGemHealthBonus', info.bloodGemHealthBuff);
+  // Нежить (part50). Симулятор применяет эти два поля к телам, призванным
+  // ВНУТРИ боя: `UndeadAttackBonus` — к любому призванному миньону нежити
+  // (`add-minion-to-board.js`, строка 247), `EternalKnightsDeadThisGame` —
+  // к статам призванного Eternal Knight (там же, строка 368). На борде статы
+  // уже применены игрой, поэтому без этих полей ошибался ровно тот класс
+  // бордов, который на призывах и стоит: скелеты, Руки, копии перерождения.
+  put('UndeadAttackBonus', info.undeadAttackBuff);
+  put('UndeadHealthBonus', info.undeadHealthBuff);
+  put('EternalKnightsDeadThisGame', info.eternalKnightsDead);
 
   return out;
 }
@@ -170,6 +179,14 @@ export interface BattleSetup {
   readonly anomalyCardId: string | null;
   readonly globalInfo: GlobalInfo;
   /**
+   * Счётчики СОПЕРНИКА этого боя.
+   *
+   * Необязательное: у старых эпизодов их нет, и отсутствие честнее пустого
+   * набора. Без них бой асимметричен — свои призванные тела получают
+   * надбавку, чужие нет (part50).
+   */
+  readonly opponentGlobalInfo?: GlobalInfo;
+  /**
    * Взятые тринкеты, свои и противника, как dbfId из лога.
    *
    * Поля необязательные: старые фикстуры сыграны до тринкетов, а часть
@@ -219,7 +236,7 @@ export function toBattleInfo(
     tavernTier: episode.techLevel,
     heroPowers: [],
     questEntities: [],
-    globalInfo: toGlobalInfo(EMPTY_GLOBAL_INFO),
+    globalInfo: toGlobalInfo(episode.opponentGlobalInfo ?? EMPTY_GLOBAL_INFO),
     trinkets: toTrinkets(episode.opponentTrinketDbfIds),
   };
 
