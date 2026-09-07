@@ -540,6 +540,50 @@ timing: enchantment.timing || entity.entityId + index + 1,
 | `BACON_ELEMENTAL_BUFFATKVALUE` | `ElementalAttackBuff` |
 | `BACON_ELEMENTAL_BUFFHEALTHVALUE` | `ElementalHealthBuff` |
 
+Плюс два тега надбавки к самоцвету — `BACON_BLOODGEMBUFFATKVALUE`
+и `BACON_BLOODGEMBUFFHEALTHVALUE` (part48), там же на сущности игрока.
+
+### Второй способ: счётчик лежит на СУЩНОСТИ-ЭНЧАНТЕ (part50)
+
+Не всякий счётчик приходит тегом на игрока. Часть игра держит на отдельной
+сущности под контроллером игрока, а число пишет в `TAG_SCRIPT_DATA_NUM_1`:
+
+| сущность | что копит | поле симулятора |
+|---|---|---|
+| `BG25_011pe` «Undead Bonus Attack Player Enchant» | надбавку к атаке всей нежити | `UndeadAttackBonus` |
+| `BG25_008pe` «Eternal Knight Player Enchant» | сколько своих Eternal Knight умерло | `EternalKnightsDeadThisGame` |
+| `BG26_159pe` «Blood Gem Player Enchant» | размер самоцвета | (то же, что теги выше) |
+
+Пример строки (part50, 16:02:26):
+
+```
+TAG_CHANGE Entity=[entityName=Undead Bonus Attack Player Enchant [DNT] id=1848
+  zone=PLAY zonePos=0 cardId=BG25_011pe player=8] tag=TAG_SCRIPT_DATA_NUM_1 value=99
+```
+
+Три вещи, каждая из фактуры part50:
+
+1. **Именованного тега у этих счётчиков нет вовсе** — есть только карта
+   энчанта и `TAG_SCRIPT_DATA_NUM_1`. Поэтому таблица выше индексируется
+   по `cardId`, а не по имени тега.
+2. **`player=` обязателен.** Такой энчант есть у КАЖДОГО из восьми игроков
+   лобби со своим числом: в part50 у нас (`player=8`, единственный
+   с ненулевым `GameAccountId`) надбавка доходит до 284, у соперника
+   (`player=16`) — до 36, а счётчик рыцарей наоборот: 20 у нас против 81
+   у него. Без фильтра по контроллеру читалось бы чужое число, и это была бы
+   не пустота, а ложь.
+3. **Число ЖИВОЕ и растёт внутри хода.** По точкам решения part50 надбавка
+   идёт 1 → 3 → 6 → 40 → 73 → 127 → 167 → 204 → 242, а к концу лога 284:
+   сорок два очка набраны уже после последнего снимка. Значит и читать её
+   надо на момент решения, а не «на конец партии».
+
+Кормят надбавку нежити `BG25_011` Nerubian Deathswarmer («Your Undead have
++1 Attack this game *(wherever they are)*») и заклинание `BG28_604`
+Butchering («Destroy a friendly Undead. Your Undead have +{0} Attack this
+game»). У золотого Butchering прибавка парная («+{0}/+{1}»), то есть должен
+существовать и `UndeadHealthBonus`, — но золотой копии в фикстурах нет
+ни разу, и вслепую его не вносили.
+
 Остальные счётчики симулятора в логе приходят **безымянными числовыми тегами** —
 на сущности игрока их 62 штуки за партию. Сопоставить их с полями без
 дополнительных данных нельзя, поэтому не гадали. Набор именованных тегов
