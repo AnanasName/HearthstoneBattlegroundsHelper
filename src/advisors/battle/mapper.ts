@@ -91,6 +91,8 @@ function toGlobalInfo(info: GlobalInfo): Record<string, number> {
   put('TavernSpellHealthBuff', info.tavernSpellHealthBuff);
   put('ElementalAttackBuff', info.elementalAttackBuff);
   put('ElementalHealthBuff', info.elementalHealthBuff);
+  put('BloodGemAttackBonus', info.bloodGemAttackBuff);
+  put('BloodGemHealthBonus', info.bloodGemHealthBuff);
 
   return out;
 }

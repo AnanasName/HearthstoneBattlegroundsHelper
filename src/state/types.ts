@@ -365,6 +365,30 @@ export interface Hero {
    */
   readonly heroPowerExhausted: boolean | null;
   /**
+   * Тег `HERO_POWER_DISABLED` на силе: игра говорит «нажать нельзя»
+   * причиной, которой не видно ни в одном другом теге.
+   *
+   * Заведено ради сил «ОДИН РАЗ ЗА ПАРТИЮ» (part48, Рено Джексон, «Нас ждёт
+   * богатство!» `TB_BaconShop_HP_046`: «Once per game, make a friendly
+   * minion Golden»). На нажатии игра ставит `HERO_POWER_DISABLED=1`
+   * и БОЛЬШЕ НЕ СНИМАЕТ, а `EXHAUSTED` возвращает в `0` со сменой хода
+   * (13:29:04 против 13:29:46) — то есть по всем прежним признакам
+   * потраченная сила выглядит готовой к нажатию до конца партии.
+   * `LITERALLY_UNPLAYABLE` на ней не появляется ни разу.
+   *
+   * Читать тег надо как «сейчас нельзя», а не «потрачена навсегда»:
+   * по 48 фикстурам он приходит у четырёх сил, и у двух из них
+   * возвращается в ноль — «Три желания» `TB_BaconShop_HP_102` (part15:
+   * 1 и 0 на одной сущности) и «Бранное дело» `TB_BaconShop_HP_048`
+   * (part34, там же, где отработала награда за четыре кличевые покупки).
+   * Различать эти случаи нам незачем: и там и там нажимать в этот момент
+   * нельзя, а вернётся возможность — вернётся и ноль в теге.
+   *
+   * Умолчание `false` честное: у сил, которые игра не запрещала, тега нет
+   * вовсе (part8, part13, part45).
+   */
+  readonly heroPowerDisabled: boolean;
+  /**
    * Плейсхолдеры силы — теги `TAG_SCRIPT_DATA_NUM_1..4` на её сущности,
    * как `scriptData` у миньона. У сил «после N покупок…» первый из них —
    * живой остаток счётчика: «Бранное дело» (part34, «After you buy 4
@@ -403,6 +427,19 @@ export interface GlobalInfo {
   readonly elementalAttackBuff: number | null;
   /** `BACON_ELEMENTAL_BUFFHEALTHVALUE` → `ElementalHealthBuff`. */
   readonly elementalHealthBuff: number | null;
+  /**
+   * `BACON_BLOODGEMBUFFATKVALUE` → `BloodGemAttackBonus`.
+   *
+   * НАДБАВКА к самоцвету, а не его размер: базовый самоцвет даёт +1/+1
+   * (part48, 13:12:19 — `TAG_SCRIPT_DATA_NUM_1` и `_2` по единице
+   * у игрока без надбавок), а «День самоцветов» и подобные карты растят
+   * это число до конца партии (в той же партии у соперника оно доходит
+   * до 8). Тег приходит на сущность игрока, как и элементальная пара
+   * рядом, и берётся только со СВОЕГО игрока.
+   */
+  readonly bloodGemAttackBuff: number | null;
+  /** `BACON_BLOODGEMBUFFHEALTHVALUE` → `BloodGemHealthBonus`. */
+  readonly bloodGemHealthBuff: number | null;
 }
 
 export const EMPTY_GLOBAL_INFO: GlobalInfo = {
@@ -413,6 +450,8 @@ export const EMPTY_GLOBAL_INFO: GlobalInfo = {
   tavernSpellHealthBuff: null,
   elementalAttackBuff: null,
   elementalHealthBuff: null,
+  bloodGemAttackBuff: null,
+  bloodGemHealthBuff: null,
 };
 
 /**

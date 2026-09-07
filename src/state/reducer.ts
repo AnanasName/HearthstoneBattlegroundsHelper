@@ -240,6 +240,10 @@ export function createReducer(players: Players): Reducer {
     TAVERN_SPELL_HEALTH_INCREASE: 'tavernSpellHealthBuff',
     BACON_ELEMENTAL_BUFFATKVALUE: 'elementalAttackBuff',
     BACON_ELEMENTAL_BUFFHEALTHVALUE: 'elementalHealthBuff',
+    // Надбавка к кровавому самоцвету (part48): та же пара тегов, что
+    // у элементалей, и живёт она у игрока до конца партии.
+    BACON_BLOODGEMBUFFATKVALUE: 'bloodGemAttackBuff',
+    BACON_BLOODGEMBUFFHEALTHVALUE: 'bloodGemHealthBuff',
   };
 
   const globalInfo: Record<keyof GlobalInfo, number | null> = { ...EMPTY_GLOBAL_INFO };
@@ -978,6 +982,7 @@ export function createReducer(players: Players): Reducer {
     heroPowerLocked: boolean;
     heroPowerHasActivate: boolean;
     heroPowerExhausted: boolean | null;
+    heroPowerDisabled: boolean;
     heroPowerScriptData: readonly (number | null)[];
   }
 
@@ -993,6 +998,7 @@ export function createReducer(players: Players): Reducer {
       heroPowerLocked: false,
       heroPowerHasActivate: false,
       heroPowerExhausted: null,
+      heroPowerDisabled: false,
       heroPowerScriptData: [],
     };
     if (self === null) return none;
@@ -1018,6 +1024,11 @@ export function createReducer(players: Players): Reducer {
         // Тега может не быть вовсе (part8), и тогда `null`: молчание игры
         // нельзя читать ни как «можно», ни как «нельзя».
         heroPowerExhausted: e.tags.has('EXHAUSTED') ? flag(e, 'EXHAUSTED') : null,
+        // «Один раз за партию» — part48, сила Рено: на нажатии игра ставит
+        // `HERO_POWER_DISABLED=1` и не снимает его больше никогда, тогда как
+        // `EXHAUSTED` возвращается в ноль со сменой хода. Без этого тега
+        // потраченная сила до конца партии выглядит готовой.
+        heroPowerDisabled: flag(e, 'HERO_POWER_DISABLED'),
         // Счётчик «после N покупок» (part34, «Бранное дело»): NUM_1 — остаток,
         // тега при создании нет вовсе, дальше 3 → 2 → 1 → 0.
         heroPowerScriptData: [1, 2, 3, 4].map(
