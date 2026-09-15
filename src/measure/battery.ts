@@ -26,7 +26,15 @@ import { join } from 'node:path';
 
 import { CURRENT_BUILD_PARTS } from '../data/fixtureGames.js';
 import { partsArg, seedArg } from './args.js';
-import { comparable, noiseBand, renderMarkdown, type BatteryRun, type MeasurementRun, type NoiseBand } from './report.js';
+import {
+  comparable,
+  durationLabel,
+  noiseBand,
+  renderMarkdown,
+  type BatteryRun,
+  type MeasurementRun,
+  type NoiseBand,
+} from './report.js';
 import { parseResult } from './result.js';
 
 interface Measurement {
@@ -54,6 +62,17 @@ const TSX_CLI = 'node_modules/tsx/dist/cli.mjs';
 
 function git(args: readonly string[]): string {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
+}
+
+/**
+ * Незакоммиченные пути в `src/`. Вывод porcelain не обрезается целиком:
+ * у первой строки ведущий пробел — часть кода статуса (« M»), и общий trim
+ * сдвигал её относительно остальных.
+ */
+function dirtySrc(): string[] {
+  return execFileSync('git', ['status', '--porcelain', '--', 'src'], { encoding: 'utf8' })
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== '');
 }
 
 function flag(argv: readonly string[], name: string): string | null {
@@ -139,7 +158,7 @@ async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   if (argv.includes('--status')) return status();
 
-  const dirty = git(['status', '--porcelain', '--', 'src']).split(/\r?\n/).filter((l) => l.trim() !== '');
+  const dirty = dirtySrc();
   if (dirty.length > 0 && !argv.includes('--allow-dirty')) {
     console.log('в src/ есть незакоммиченные изменения — число с них не воспроизвести:');
     for (const line of dirty.slice(0, 12)) console.log(`  ${line}`);
@@ -179,7 +198,7 @@ async function main(): Promise<number> {
       const logPath = join(LOG_DIR, `${stamp}_${sha}_seed${String(seed)}_${m.name.replace(':', '-')}.txt`);
       const run = await runScript(m, seed, parts, full, logPath);
       measurements[m.name] = run;
-      console.log(`  ${m.name}: ${String(Math.round(run.durationSec / 60))} мин, код ${String(run.exitCode)}${run.result === null ? ', ИТОГА НЕТ' : ''}`);
+      console.log(`  ${m.name}: ${durationLabel(run.durationSec)}, код ${String(run.exitCode)}${run.result === null ? ', ИТОГА НЕТ' : ''}`);
     }
     const run: BatteryRun = { startedAt, sha, dirty: dirty.length > 0, seed, parts, full, measurements };
     runs.push(run);

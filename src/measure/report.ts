@@ -75,11 +75,24 @@ export function noiseBand(runs: readonly BatteryRun[]): NoiseBand | null {
   return { sha: first.sha, seeds: runs.map((r) => r.seed), parts: first.parts, sd };
 }
 
+/**
+ * Три знака после запятой: у Brier score значимы тысячные (0.046 против
+ * 0.079 — это целый замер part48), и два знака превращали его в ноль.
+ */
 const fmt = (value: number | null | undefined): string =>
-  value === null || value === undefined ? '—' : String(Math.round(value * 100) / 100);
+  value === null || value === undefined ? '—' : String(Math.round(value * 1000) / 1000);
 
-const partsLabel = (parts: readonly number[]): string =>
-  parts.length === 0 ? 'нет' : `${String(parts.length)} (part${String(parts[0])}–part${String(parts[parts.length - 1])})`;
+const partsLabel = (parts: readonly number[]): string => {
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  if (first === undefined || last === undefined) return 'нет';
+  return first === last ? `1 (part${String(first)})` : `${String(parts.length)} (part${String(first)}–part${String(last)})`;
+};
+
+/** Длительность замера: секунды до полутора минут, дальше минуты. */
+export function durationLabel(seconds: number): string {
+  return seconds < 90 ? `${String(seconds)} с` : `${String(Math.round(seconds / 60))} мин`;
+}
 
 function runLabel(run: BatteryRun): string {
   const when = run.startedAt.replace('T', ' ').slice(0, 16);
@@ -107,7 +120,9 @@ export function renderMarkdown(current: BatteryRun, previous: BatteryRun | null,
     '(не в git). В записях о партиях числа не переписываются: там стоит',
     'вердикт и ссылка сюда.',
     '',
-    `**Последний полный прогон:** ${runLabel(current)}.`,
+    current.full
+      ? `**Последний полный прогон:** ${runLabel(current)}.`
+      : `**Прогон на подмножестве партий** (проверка правки, не итог): ${runLabel(current)}.`,
     previous === null
       ? '**Сравнимого прошлого прогона нет** — с тем же зерном и тем же набором партий.'
       : `**Сравнивается с:** ${runLabel(previous)}.`,
@@ -117,7 +132,7 @@ export function renderMarkdown(current: BatteryRun, previous: BatteryRun | null,
   ];
 
   for (const [name, run] of Object.entries(current.measurements)) {
-    lines.push('', `## ${name} · ${String(Math.round(run.durationSec / 60))} мин`, '');
+    lines.push('', `## ${name} · ${durationLabel(run.durationSec)}`, '');
     if (run.result === null) {
       lines.push(`Скрипт не дошёл до итога (код выхода ${String(run.exitCode)}); вывод — в логе прогона.`);
       continue;
@@ -127,7 +142,7 @@ export function renderMarkdown(current: BatteryRun, previous: BatteryRun | null,
     lines.push('| метрика | было | стало | Δ | шум (SD) | |', '|---|---:|---:|---:|---:|---|');
     for (const [key, value] of Object.entries(run.result.metrics)) {
       const old = before === null ? null : (before[key] ?? null);
-      const delta = value === null || old === null ? null : Math.round((value - old) * 100) / 100;
+      const delta = value === null || old === null ? null : Math.round((value - old) * 1000) / 1000;
       lines.push(
         `| ${key} | ${fmt(old)} | ${fmt(value)} | ${fmt(delta)} | ${fmt(sdRow[key])} | ${verdict(delta, sdRow[key])} |`,
       );

@@ -56,8 +56,21 @@ describe('сравнение прогонов батареи', () => {
   it('таблица называет дельту и судит её по полосе шума', () => {
     const band = noiseBand([run(1, [4], 74), run(2, [4], 76)]);
     const table = renderMarkdown(run(1, [4], 78), run(1, [4], 74, '2026-09-14T20:00:00.000Z'), band);
-    expect(table).toContain('| agreementPct | 74 | 78 | 4 | 1.41 | ВНЕ шума |');
+    expect(table).toContain('| agreementPct | 74 | 78 | 4 | 1.414 | ВНЕ шума |');
     expect(table).toContain('| turns | 380 | 380 | 0 | 0 | без изменений |');
+  });
+
+  it('тысячные не теряются: Brier 0.003 остаётся 0.003, а не 0', () => {
+    const tiny = { ...run(1, [4], 74), measurements: { calibrate: { exitCode: 0, durationSec: 34, result: { seed: 1, parts: null, metrics: { brier: 0.003 } } } } };
+    const table = renderMarkdown(tiny, null, null);
+    expect(table).toContain('| brier | — | 0.003 |');
+    expect(table).toContain('## calibrate · 34 с');
+  });
+
+  it('прогон на подмножестве не выдаёт себя за полный', () => {
+    const quick = { ...run(1, [4], 74), full: false };
+    expect(renderMarkdown(quick, null, null)).toContain('Прогон на подмножестве партий');
+    expect(renderMarkdown(run(1, [4], 74), null, null)).toContain('Последний полный прогон');
   });
 
   it('без прошлого прогона таблица об этом говорит, а не рисует нули', () => {
