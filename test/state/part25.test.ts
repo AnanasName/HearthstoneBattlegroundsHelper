@@ -8,6 +8,7 @@ import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
+import { createBreather } from '../breather.js';
 import { part25Game } from '../fixtures.js';
 
 /**
@@ -25,12 +26,16 @@ describe('part25: карта, которая платит продажей', () 
   let turn7: GameState | null = null;
   let finalState: GameState;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     const text = part25Game();
     cards = loadCardIndex();
 
+    // Снимок на КАЖДОМ событии — намеренно (test/snapshots.ts), и цикл идёт
+    // минутами; поток отдаётся раннеру, иначе vitest падает таймаутом RPC.
+    const breather = createBreather();
     const reducer = createReducer(readPlayers(text));
     for (const event of readPowerEvents(text)) {
+      if (breather.due()) await breather.pause();
       reducer.step(event);
       const s = reducer.snapshot();
       if (s.phase !== 'tavern') continue;

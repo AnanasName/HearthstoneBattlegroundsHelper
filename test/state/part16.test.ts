@@ -10,6 +10,7 @@ import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
+import { createBreather } from '../breather.js';
 import { part16Game } from '../fixtures.js';
 import { changesAdvisorState } from '../snapshots.js';
 
@@ -32,13 +33,17 @@ describe('part16: прокрутка, бафф соседям, нецелево�
   let stuckTurn21: GameState | null = null;
   let finalState: GameState;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     text = part16Game();
     cards = loadCardIndex();
     turns = readTavernTurns(text);
 
+    // Поток отдаётся раннеру: весь beforeAll шёл больше минуты подряд,
+    // и vitest падал таймаутом RPC при зелёных тестах.
+    const breather = createBreather();
     const reducer = createReducer(readPlayers(text));
     for (const event of readPowerEvents(text)) {
+      if (breather.due()) await breather.pause();
       reducer.step(event);
       const { content } = event.line;
       if (!changesAdvisorState(content)) continue;
