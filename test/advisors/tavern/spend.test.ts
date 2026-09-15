@@ -462,3 +462,52 @@ describe('счётчик силы «после N покупок» в плане 
     expect(applied?.state.hero).toBe(s.hero);
   });
 });
+
+describe('усиление всего борда в плане ждёт тел (part51)', () => {
+  const idx = createCardIndex([
+    { id: 'RING', name: 'Кольцо', text: 'Give your minions +{0}/+{1}.' },
+    { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    { id: 'OTHER', name: 'Другое тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+  ]);
+  const ring = {
+    entityId: 70,
+    cardId: 'RING',
+    cost: 0,
+    scriptData: [2, 2],
+    zonePos: 1,
+    unplayable: false,
+    costsHealth: false,
+  };
+  const board = [1, 2].map((i) => minion(i, { cardId: 'BODY', techLevel: 3, attack: 4, health: 4 }));
+
+  it('сначала выставить тело, потом раздать усиление всем — тогда оно достанется и купленному', () => {
+    const s = state({
+      gold: 3,
+      goldTotal: 3,
+      board,
+      handSpells: [ring],
+      shop: [minion(9, { cardId: 'OTHER', techLevel: 3, attack: 6, health: 6 })],
+    });
+    // В списке кольцо впереди: три тела по +2/+2 — дороже одной покупки.
+    const plan = spendPlan(s, { cards: idx });
+    const actions = plan.steps.map((st) => st.recommendation.spellCardId ?? st.recommendation.action);
+    expect(actions).toEqual(['buy', 'RING']);
+    // И считается кольцо уже на трёх телах, а не на двух.
+    expect(plan.steps[1]?.recommendation.reason).toContain('тел 3');
+  });
+
+  it('не откладывается, если после тела его уже не оплатить', () => {
+    // +10/+10 на двух телах — сорок статов, заведомо впереди покупки; после
+    // тела за три остаётся ноль, и кольцо за два уже не оплатить.
+    const shopRing = { ...ring, entityId: 71, cost: 2, scriptData: [10, 10] };
+    const s = state({
+      gold: 3,
+      goldTotal: 3,
+      board,
+      shopSpells: [shopRing],
+      shop: [minion(9, { cardId: 'OTHER', techLevel: 3, attack: 6, health: 6 })],
+    });
+    const first = spendPlan(s, { cards: idx }).steps[0]?.recommendation;
+    expect(first?.spellCardId).toBe('RING');
+  });
+});

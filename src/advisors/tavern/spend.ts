@@ -511,7 +511,34 @@ function planSteps(
   // Иначе план обрывался бы на ней, не потратив ни монеты: очки заморозки
   // считаются по своей шкале и легко обгоняют покупку.
   const spending = usable.filter((rec) => rec.action !== 'freeze');
-  return spending.length > 0 ? spending : usable.slice(0, 1);
+  if (spending.length === 0) return usable.slice(0, 1);
+
+  // Усиление ВСЕГО борда ждёт, пока есть что делать до него (part51).
+  // Сыгранное раньше покупки, оно купленному не достанется, а жадная цепочка
+  // ставила его первым именно потому, что оно стало дорогим: на part44
+  // (ход 19) Time Management шёл до трёх выставленных миньонов, на part50
+  // (ход 13) — до Persistent Poet.
+  //
+  // Правило — ровно заморозки строкой выше, а не «сначала купи тело»:
+  // первая версия выдвигала вперёд именно покупку тела и тем самым тратила
+  // золото на тело, которого план без неё не брал, — на part31 (ход 21)
+  // из плана из-за этого выпал тёмный дар. Здесь вперёд идёт следующий
+  // по очкам шаг, какой бы он ни был, и только если после него усиление
+  // всё ещё оплачивается: переставить законно, потерять нельзя. Перед шагом,
+  // который обрывает план (обновление, заморозка, заклинание-обновление),
+  // оно не откладывается — за обрывом его в плане уже не будет.
+  const head = spending[0];
+  if (head?.buffsWholeBoard === true) {
+    const ends = (rec: Recommendation): boolean =>
+      rec.action === 'reroll' || rec.action === 'freeze' || rec.refreshesShop === true;
+    const before = spending.find((rec) => {
+      if (rec === head || rec.buffsWholeBoard === true || ends(rec)) return false;
+      const net = rec.cost - (rec.sellFirst === null ? 0 : rules.sellGold) - (rec.grantsGold ?? 0);
+      return state.gold - net >= head.cost;
+    });
+    if (before !== undefined) return [before, ...spending.filter((rec) => rec !== before)];
+  }
+  return spending;
 }
 
 function planNextStep(

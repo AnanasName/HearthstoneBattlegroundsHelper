@@ -1781,6 +1781,8 @@ describe('заклинания руки', () => {
       grantsWindfury: false,
       targetRace: null,
       untargeted: false,
+      // Весь борд — только «Give your minions +X/+Y» (part51).
+      boardWide: false,
       givesMinion: false,
       goldNextTurn: 0,
       buffsShop: false,
@@ -1792,6 +1794,7 @@ describe('заклинания руки', () => {
       // заклинания их нет, и выбирать нечего.
       branches: [],
       chosen: null,
+      branchEffects: [],
     };
     expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
     expect(spellEffect('PH', [10, null], idx)).toEqual({
@@ -1858,6 +1861,7 @@ describe('заклинания руки', () => {
       // У «Destroy a friendly Undead» такого адресата нет.
       targetRace: null,
       untargeted: false,
+      boardWide: false,
       givesMinion: false,
       buffsShop: false,
       buffsShopAllGame: false,
@@ -1866,6 +1870,7 @@ describe('заклинания руки', () => {
       maxGold: 0,
       branches: [],
       chosen: null,
+      branchEffects: [],
     });
     expect(spellEffect('ANYKILL', [], idx)).toMatchObject({
       destroysFriendly: true,
@@ -1905,6 +1910,92 @@ describe('заклинания руки', () => {
     expect(rec).toBeDefined();
     expect(rec?.targetMinion).toBeNull();
     expect(rec?.reason).toContain('не выбирается');
+  });
+
+  it('«Give your minions +X/+Y» бьёт весь борд: статы умножаются на число своих (part51)', () => {
+    // Shiny Ring при шести своих читался «+2 статов»; раздаёт он каждому.
+    const idx = createCardIndex([
+      { id: 'RING', name: 'Кольцо', text: 'Give your minions +{0}/+{1}.' },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    ]);
+    const board = [1, 2, 3].map((i) => minion(i, { cardId: 'BODY', attack: 5, health: 5 }));
+    const rec = spellRules(
+      state({ board, handSpells: [{ ...handSpell('RING'), scriptData: [1, 1] }] }),
+      { cards: idx },
+    )[0];
+    expect(spellEffect('RING', [1, 1], idx)?.boardWide).toBe(true);
+    expect(rec?.score).toBeCloseTo(3 * 2 * DEFAULT_TAVERN_RULES.value.perStatPoint, 5);
+    expect(rec?.reason).toContain('+6 статов: весь борд, тел 3');
+
+    // Одно тело — одно тело: множитель не выдумывает получателей.
+    const single = spellRules(
+      state({ board: board.slice(0, 1), handSpells: [{ ...handSpell('RING'), scriptData: [1, 1] }] }),
+      { cards: idx },
+    )[0];
+    expect(single?.score).toBeCloseTo(2 * DEFAULT_TAVERN_RULES.value.perStatPoint, 5);
+  });
+
+  it('весь борд — только простая форма: уточнение, повтор, «another» и «random» не умножаются', () => {
+    const idx = createCardIndex([
+      { id: 'SANCT', text: 'Give your minions with <b>Divine Shield</b> +{0} Attack.' },
+      { id: 'WAVE', text: 'Give your minions +{0}/+{1}. Give Golden ones another +{0}/+{1}.' },
+      { id: 'MENAG', text: 'Give your minions +{0}/+{1}. Repeat for each different friendly minion type.' },
+      { id: 'RANDOM', text: 'Give a random friendly minion +{0}/+{1}.' },
+      { id: 'FOUR', text: 'Give four friendly minions +{1} Health.' },
+      { id: 'ALL', text: 'Give all friendly minions +{0}/+{1}.' },
+    ]);
+    const wide = (id: string): boolean | undefined => spellEffect(id, [1, 1], idx)?.boardWide;
+    expect(wide('SANCT')).toBe(false);
+    expect(wide('WAVE')).toBe(false);
+    expect(wide('MENAG')).toBe(false);
+    expect(wide('RANDOM')).toBe(false);
+    expect(wide('FOUR')).toBe(false);
+    expect(wide('ALL')).toBe(true);
+  });
+
+  it('«twice» удваивает немедленное усиление; «в начале следующего хода» не оценивается (part51)', () => {
+    const idx = createCardIndex([
+      { id: 'TWICE', text: 'Give a minion +{0}/+{1} twice.' },
+      { id: 'LATER', text: 'At the start of your next turn, give your minions +{0}/+{1} twice.' },
+      { id: 'BRANN', text: 'Your Battlecries trigger twice until next turn.' },
+    ]);
+    expect(spellEffect('TWICE', [2, 3], idx)?.stats).toBe(10);
+    expect(spellEffect('LATER', [2, 3], idx)).toBeNull();
+    // «Twice» без плюса — удвоение механики, а не статов.
+    expect(spellEffect('BRANN', [], idx)).toBeNull();
+  });
+
+  it('ветвь «один дважды» против «весь борд» выбирается ПО БОРДУ (part51, Forest\'s Bounty)', () => {
+    const idx = createCardIndex([
+      {
+        id: 'BOUNTY',
+        name: 'Лесная щедрость',
+        text: 'Choose One - Give a minion +{0}/+{1} twice; or Give your minions +{2}/+{3}.',
+        mechanics: ['CHOOSE_ONE'],
+      },
+      { id: 'BOUNTYt', name: 'Все за одного', text: 'Give a minion +{0}/+{1} twice.' },
+      { id: 'BOUNTYt2', name: 'Один за всех', text: 'Give your minions +{2}/+{3}.' },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+    ]);
+    const data = [6, 6, 3, 3];
+    // Разбор борда не знает — выбор отложен, а не сделан наугад.
+    expect(spellEffect('BOUNTY', data, idx)?.chosen).toBeNull();
+    expect(spellEffect('BOUNTY', data, idx)?.branchEffects).toHaveLength(2);
+
+    const pick = (bodies: number): string | undefined =>
+      spellRules(
+        state({
+          board: Array.from({ length: bodies }, (_, i) =>
+            minion(i + 1, { cardId: 'BODY', attack: 5, health: 5 }),
+          ),
+          handSpells: [{ ...handSpell('BOUNTY'), scriptData: data }],
+        }),
+        { cards: idx },
+      )[0]?.spellBranches?.map((b) => b.name).join('/');
+    // Шесть тел: +3/+3 каждому = 36 статов против 24 у «дважды одному».
+    expect(pick(6)).toBe('Один за всех');
+    // Одно тело: 6 против 24.
+    expect(pick(1)).toBe('Все за одного');
   });
 
   it('провокация не вешается на миньона-«движка» (part15, Slimy Shield)', () => {

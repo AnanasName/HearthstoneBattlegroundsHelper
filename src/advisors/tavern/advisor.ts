@@ -195,6 +195,13 @@ export interface Recommendation {
    */
   readonly spellDiscountAfter?: number;
   /**
+   * Заклинание усиливает КАЖДОГО своего миньона (`SpellEffect.boardWide`,
+   * part51): его ценность растёт с числом тел, и сыгранное ДО покупки тела
+   * оно купленному не достанется. Нужно плану — он откладывает такой шаг,
+   * пока есть кого выставить (`spend.ts`), как откладывает заморозку.
+   */
+  readonly buffsWholeBoard?: boolean;
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется у подъёма таверны и у прокрутки — у обоих по одной причине:
@@ -5537,6 +5544,16 @@ export interface SpellEffect {
    */
   readonly untargeted: boolean;
   /**
+   * Усиление получает КАЖДЫЙ свой миньон (`boardWideBuffWords`, part51):
+   * `stats` здесь — на одно тело, а на борд это число надо умножить.
+   *
+   * Умножение живёт не в разборе, а в `effectOnBoard`: разбор кэшируется
+   * по карте и борда не знает. Отдельным полем, а не выводом из
+   * `untargeted`, потому что безадресные формы раздают РАЗНОМУ числу тел
+   * («random» — одному, «of each type» — по племенам).
+   */
+  readonly boardWide: boolean;
+  /**
    * Заклинание ДАЁТ МИНЬОНА — то же, что покупка, только дешевле трёх
    * (`givesMinionWords`). «Enchanted Lasso» за 2: «Steal a random minion
    * from the Tavern» (part17, ход 1). Ни статов, ни золота в тексте нет,
@@ -5568,6 +5585,14 @@ export interface SpellEffect {
    * а совет честно называет обе.
    */
   readonly chosen: number | null;
+  /**
+   * Разобранные ветви — только когда выбрать между ними можно лишь ПО
+   * БОРДУ: одна бьёт весь борд, другая нет (Forest's Bounty: «Give
+   * a minion +{0}/+{1} twice; or Give your minions +{2}/+{3}», part51).
+   * Разбор борда не знает, поэтому `chosen` тут `null`, а выбор делает
+   * `effectOnBoard` на состоянии. В остальных случаях пусто.
+   */
+  readonly branchEffects: readonly SpellEffect[];
 }
 
 /** Ветвь «Choose One» — отдельная карта снапшота (`…t` и `…t2`). */
@@ -5706,6 +5731,79 @@ function branchScore(effect: SpellEffect, rules: TavernRules): number {
 }
 
 /**
+ * Усиление на НАШЕМ борде: сколько тел его получат и какую ветвь брать.
+ *
+ * Разбор эффекта (`spellEffect`) кэшируется по карте и борда не знает,
+ * а у усиления «Give your minions +X/+Y» половина ответа именно в борде:
+ * Shiny Ring при шести своих — это +12 статов, а не +2 (part51, ход 11),
+ * Time Management при семи — +112, а не +16 (ход 25). Здесь `stats`
+ * умножается на число своих миньонов, и только здесь: мест, где считается
+ * усиление своего борда, три (покупка заклинания витрины, розыгрыш
+ * из руки, вариант модального выбора), и множитель, вписанный в каждое
+ * отдельно, разъехался бы молча — урок общих таблиц.
+ *
+ * Тел не больше размера борда: в склеенных сегментах part41 борд читается
+ * длиннее семи, и множитель на артефакте склейки был бы враньём сверху.
+ *
+ * Модальный выбор, отложенный разбором (`branchEffects`: одна ветвь бьёт
+ * весь борд, другая нет), делается тут же той же шкалой, что у
+ * `chooseOneEffect`, но со статами на борд. Равенство оставляет `chosen:
+ * null` — совет назовёт обе ветви, как и прежде.
+ *
+ * Оценка остаётся НИЖНЕЙ в одном месте, и это названо: план может продать
+ * одного из усиленных позже в том же ходу, и тогда бафф на нём пропадёт —
+ * шаги плана считаются по борду своего момента, как у всех правил.
+ */
+export function effectOnBoard(
+  effect: SpellEffect,
+  board: readonly Minion[],
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly effect: SpellEffect; readonly bodies: number; readonly wide: boolean } {
+  const bodiesOf = (e: SpellEffect): number =>
+    e.boardWide ? Math.max(1, Math.min(board.length, rules.boardSize)) : 1;
+
+  let picked = effect;
+  if (effect.chosen === null && effect.branchEffects.length > 1) {
+    const scores = effect.branchEffects.map(
+      (e) => branchScore(e, rules) + (bodiesOf(e) - 1) * e.stats * rules.value.perStatPoint,
+    );
+    const best = Math.max(...scores);
+    const leaders = scores.flatMap((s, i) => (s === best ? [i] : []));
+    const only = leaders.length === 1 ? leaders[0] : undefined;
+    const branch = only === undefined ? undefined : effect.branchEffects[only];
+    if (only !== undefined && branch !== undefined) {
+      picked = {
+        ...branch,
+        branches: effect.branches,
+        chosen: only,
+        branchEffects: effect.branchEffects,
+      };
+    }
+  }
+
+  const bodies = bodiesOf(picked);
+  const wide = picked.boardWide;
+  if (bodies === 1) return { effect: picked, bodies, wide };
+  return {
+    wide,
+    // `boardWide` снимается с умноженного эффекта: второй вызов на нём
+    // не должен умножить ещё раз.
+    effect: {
+      ...picked,
+      stats: picked.stats * bodies,
+      temporaryStats: picked.temporaryStats * bodies,
+      boardWide: false,
+    },
+    bodies,
+  };
+}
+
+/** Приписка к «+N статов», когда их получает весь борд. */
+function bodiesNote(bodies: number): string {
+  return bodies > 1 ? `: весь борд, тел ${String(bodies)}` : '';
+}
+
+/**
  * Модальное заклинание «Choose One»: какую ветвь советовать.
  *
  * Ветви лежат в снапшоте отдельными картами с теми же плейсхолдерами:
@@ -5762,6 +5860,17 @@ function chooseOneEffect(
   // берутся от разобранной — иначе заклинание пропало бы из советов вовсе.
   if (parsed.length < all.length) {
     return { ...first.effect, branches, chosen: branches.length === 1 ? 0 : null };
+  }
+  // Одна ветвь бьёт весь борд, другая нет (Forest's Bounty, part51): кто
+  // из них больше, решает число своих миньонов, а его разбор не знает —
+  // кэш ключуется картой. Выбор откладывается до `effectOnBoard`.
+  if (parsed.some((p) => p.effect.boardWide) && !parsed.every((p) => p.effect.boardWide)) {
+    return {
+      ...first.effect,
+      branches,
+      chosen: null,
+      branchEffects: parsed.map((p) => p.effect),
+    };
   }
   const scores = parsed.map((p) => branchScore(p.effect, rules));
   const bestScore = Math.max(...scores);
@@ -6444,6 +6553,14 @@ function computeSpellEffect(
   // самоцветной ветвью вторая обязана остаться видимой.
   if (rules.bloodGemWords.some((w) => new RegExp(w, 'i').test(text))) return null;
 
+  // «At the start of your next turn, give your minions +{0}/+{1} twice» —
+  // ветвь Do It Later (Time Management, part51). Статы придут только
+  // к СЛЕДУЮЩЕМУ бою, а горизонта «статы завтра против статов сегодня»
+  // у шкалы нет; прочитанные как сегодняшние, они уравнивали ветви, которые
+  // на деле не равны ни в какую сторону. Неоценённая ветвь — честное
+  // «не берёмся» (part28, part48): совет назовёт обе.
+  if (/^(?:\[x\])?\s*at\s+the\s+start\s+of\s+your\s+next\s+turn\b/i.test(text)) return null;
+
   // «Gain 2 Gold next turn» / «Gain 4 Gold in two turns» — золото
   // ОТЛОЖЕННОЕ, и складывать его с живым нельзя (part30, ход 9).
   const gold = /gain\s+(\d+)\s+gold(\s+next\s+turn|\s+in\s+two\s+turns)?/i.exec(text);
@@ -6465,6 +6582,16 @@ function computeSpellEffect(
           : 0;
     stats += value;
     if (isTemporaryClause(text, m.index, rules)) temporaryStats += value;
+  }
+  // «Give your minions +{0}/+{1} twice» (Azerite Empowerment), «Give
+  // a minion +{0}/+{1} twice» (ветвь All For One): усиление ложится ДВАЖДЫ
+  // сразу же, и число в тексте — половина настоящего. Считалось один раз,
+  // и ветви Forest's Bounty сравнивались на заниженной первой (part51).
+  // «Twice» без плюса рядом («Your Battlecries trigger twice») сюда
+  // не попадает: удвоение механики — отдельная история (part22).
+  if (/\+(?:\{\d\}|\d+)(?:\s*\/\s*\+(?:\{\d\}|\d+))?\s+twice\b/i.test(text)) {
+    stats *= 2;
+    temporaryStats *= 2;
   }
   const shield = /divine shield/i.test(text);
 
@@ -6515,6 +6642,13 @@ function computeSpellEffect(
   const untargeted =
     buffsShop ||
     (destroy === null && rules.untargetedSpellWords.some((w) => new RegExp(w, 'i').test(text)));
+  // Весь борд — только простая форма (part51); уточнение, условная вторая
+  // половина и отложенность выводят карту из неё.
+  const boardWide =
+    !buffsShop &&
+    stats > 0 &&
+    rules.boardWideBuffWords.some((w) => new RegExp(w, 'i').test(text)) &&
+    !rules.boardWideBuffExcludeWords.some((w) => new RegExp(w, 'i').test(text));
 
   // «Даёт миньона» — та же таблица шаблонов, что у силы героя: факт записан
   // в тексте, а не в том, кто его произносит. Замена («…destroy … to get
@@ -6557,6 +6691,7 @@ function computeSpellEffect(
     grantsWindfury,
     targetRace,
     untargeted,
+    boardWide,
     givesMinion,
     buffsShop,
     buffsShopAllGame,
@@ -6565,6 +6700,7 @@ function computeSpellEffect(
     maxGold,
     branches: [],
     chosen: null,
+    branchEffects: [],
   };
 }
 
@@ -6886,6 +7022,7 @@ export function buffTarget(
     grantsWindfury: false,
     targetRace: null,
     untargeted: false,
+    boardWide: false,
     givesMinion: false,
     buffsShop: false,
     buffsShopAllGame: false,
@@ -6894,6 +7031,7 @@ export function buffTarget(
     maxGold: 0,
     branches: [],
     chosen: null,
+    branchEffects: [],
   };
   return spellTargetOn(buff, state, deps, rules)?.target ?? null;
 }
@@ -7054,16 +7192,19 @@ export function spellRules(
 
     // Усиление или замена: бесплатная ценность перед боем.
     if (spell.cost > state.gold || state.board.length === 0) return [];
+    // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
+    const onBoard = effectOnBoard(effect, state.board, rules);
+    const boosted = onBoard.effect;
     const score =
-      (effect.transforms
+      (boosted.transforms
         ? rules.value.transform
-        : effect.stats * rules.value.perStatPoint + grantedKeywordScore(effect, rules)) -
+        : boosted.stats * rules.value.perStatPoint + grantedKeywordScore(boosted, rules)) -
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
 
-    const aimed = spellTargetOn(effect, state, deps, rules, spell.cardId);
+    const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
     if (aimed === null) return [];
-    const branch = branchAdvice(effect);
+    const branch = branchAdvice(boosted);
 
     return [
       {
@@ -7073,14 +7214,17 @@ export function spellRules(
         spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
         spellBranches: branch.branches,
+        buffsWholeBoard: onBoard.wide,
         score,
         cost: spell.cost,
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} — ${effect.transforms ? 'замена' : 'усиление перед боем'}` +
-          (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
-          (effect.divineShield ? ' и щит' : '') +
+          `${name} — ${boosted.transforms ? 'замена' : 'усиление перед боем'}` +
+          (boosted.stats > 0
+            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})`
+            : '') +
+          (boosted.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
           `, ${aimed.note}`,
       },
@@ -7444,13 +7588,16 @@ export function shopSpellRules(
     }
 
     if (state.board.length === 0) return [];
-    const score = effect.transforms
+    // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
+    const onBoard = effectOnBoard(effect, state.board, rules);
+    const boosted = onBoard.effect;
+    const score = boosted.transforms
       ? rules.value.transform
-      : effect.stats * rules.value.perStatPoint + grantedKeywordScore(effect, rules);
+      : boosted.stats * rules.value.perStatPoint + grantedKeywordScore(boosted, rules);
     if (score <= 0) return [];
-    const aimed = spellTargetOn(effect, state, deps, rules, spell.cardId);
+    const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
     if (aimed === null) return [];
-    const branch = branchAdvice(effect);
+    const branch = branchAdvice(boosted);
     return [
       {
         action: 'buy' as const,
@@ -7459,14 +7606,17 @@ export function shopSpellRules(
         spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
         spellBranches: branch.branches,
+        buffsWholeBoard: onBoard.wide,
         score,
         cost: goldCost,
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} за ${price} — ${effect.transforms ? 'замена' : 'усиление'}` +
-          (effect.stats > 0 ? ` (+${String(effect.stats)} статов)` : '') +
-          (effect.divineShield ? ' и щит' : '') +
+          `${name} за ${price} — ${boosted.transforms ? 'замена' : 'усиление'}` +
+          (boosted.stats > 0
+            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})`
+            : '') +
+          (boosted.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
           `, ${aimed.note}`,
       },
@@ -8059,10 +8209,13 @@ export function choiceAdvice(
 
     if (info === null || info.type !== 'MINION') {
       // Заклинание: оценка эффекта из текста и тегов варианта.
-      const effect =
+      const parsed =
         info !== null && (info.type?.includes('SPELL') ?? false)
           ? spellEffect(option.cardId, option.scriptData ?? [], deps.cards, rules)
           : null;
+      // Статы на весь борд — той же функцией, что у покупки и розыгрыша (part51).
+      const onBoard = parsed === null ? null : effectOnBoard(parsed, state.board, rules);
+      const effect = onBoard?.effect ?? null;
       if (effect === null || (effect.stats === 0 && !effect.divineShield && effect.gold === 0)) {
         return { option, name, value: null, score: null, reason: 'оценить не берёмся' };
       }
@@ -8071,7 +8224,9 @@ export function choiceAdvice(
         (effect.divineShield ? rules.value.divineShield : 0) +
         effect.gold * rules.goldPointValue;
       const parts = [
-        effect.stats > 0 ? `+${String(effect.stats)} статов` : '',
+        effect.stats > 0
+          ? `+${String(effect.stats)} статов${bodiesNote(onBoard?.bodies ?? 1)}`
+          : '',
         effect.divineShield ? 'щит' : '',
         effect.gold > 0 ? `${String(effect.gold)} золота` : '',
       ].filter((p) => p !== '');

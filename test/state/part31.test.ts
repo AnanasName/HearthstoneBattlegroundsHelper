@@ -148,9 +148,15 @@ describe('part31: цена придержанного заряда дара, м�
       expect(rec).not.toBeNull();
       expect(rec?.reason).toContain('сильнее предложение уже не станет');
       expect(rec?.reason).toContain('тир 5 или 6');
-      // Верхняя строка списка — дар: ровно на этих ходах игрок и жал.
+      // Дар — верхнее ПЛАТНОЕ действие и шаг плана: ровно на этих ходах игрок
+      // и жал. Верхней строкой всего списка с part51 стоит бесплатный Shiny
+      // Ring из руки: он раздаёт +6/+6 каждому из шести-семи своих (+84 и +120
+      // статов), а считался на одного — и за золото с даром не спорит.
       const advice = adviseTavern(s, { cards });
-      expect(advice?.recommendations[0]?.action).toBe('darkGift');
+      const paid = advice?.recommendations.filter((r) => r.cost > 0);
+      expect(paid?.[0]?.action).toBe('darkGift');
+      const plan = spendPlan(s, { cards });
+      expect(plan.steps.some((st) => st.recommendation.action === 'darkGift')).toBe(true);
     }
   });
 

@@ -805,6 +805,35 @@ export interface TavernRules {
   readonly untargetedSpellWords: readonly string[];
 
   /**
+   * Усиление, которое получает КАЖДЫЙ свой миньон: «Give your minions
+   * +{0}/+{1}» (Shiny Ring), «Give all friendly minions +{0}/+{1}».
+   *
+   * Случай part51, ход 11: Shiny Ring при шести своих читался «+2 статов»
+   * (одно очко), а раздаёт +1/+1 каждому — двенадцать; Time Management
+   * на ходу 25 — «+16» при семи своих вместо ста двенадцати. Что это
+   * именно КАЖДОМУ, показывает лог part6: один розыгрыш `BG31_881`
+   * создаёт семь энчантов на семь разных миньонов.
+   *
+   * Это НЕ `untargetedSpellWords`: тот флаг объединяет формы с РАЗНЫМ
+   * числом получателей («random» и «left-most» — одно тело, «of each
+   * type» — число племён, «four friendly» — до четырёх), и множитель
+   * «весь борд» на нём раздул бы одиночный бафф всемеро. Поэтому шаблон
+   * требует ПЛЮС сразу после «minions»: уточнение между ними («with
+   * Divine Shield», Sanctify) усиливает не всех.
+   */
+  readonly boardWideBuffWords: readonly string[];
+  /**
+   * Что выводит карту из простой формы, даже если шаблон выше совпал.
+   *
+   * У таких карт `stats` уже складывает вторую, условную половину («Give
+   * Golden ones another +{0}/+{1}», «Repeat for your Dragons»), и множитель
+   * «весь борд» соврал бы вдвое-втрое (скан пула — part51). «Next turn»
+   * и «start of» — отложенные статы (Do It Later), «improves» — растущее
+   * значение, для которого живого числа у нас нет.
+   */
+  readonly boardWideBuffExcludeWords: readonly string[];
+
+  /**
    * Признаки заклинания, бьющего ПО ВИТРИНЕ: «Give minions in the Tavern
    * +{0}/+{1}» (Them Apples, part30).
    *
@@ -1570,6 +1599,19 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     // числительное перед friendly — заклинание раздаёт само, а совет писал
     // «→ на Aureate Laureate». Одиночное «a friendly» остаётся целевым.
     '\\b(?:two|three|four|five|six|seven|\\d+) (?:friendly|of your)\\b',
+  ],
+
+  // Весь борд — только простая форма, и плюс СРАЗУ после «minions»
+  // (part51). Пул Battlegrounds: Shiny Ring, Azerite Empowerment, ветви
+  // Hurry Up (Time Management) и One For All (Forest's Bounty).
+  boardWideBuffWords: ['\\bgive\\s+(?:your|all\\s+(?:your|friendly))\\s+minions\\s+\\+'],
+  boardWideBuffExcludeWords: [
+    '\\banother\\b',
+    '\\brepeat\\b',
+    '\\bfor\\s+each\\b',
+    '\\bnext\\s+turn\\b',
+    '\\bstart\\s+of\\b',
+    '\\bimproves?\\b',
   ],
 
   // «Give minions in the Tavern +{0}/+{1}» — Them Apples, part30; между
