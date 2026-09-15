@@ -59,7 +59,8 @@
     "lint:fix": "eslint . --fix",
     "spike:bufftarget": "tsx src/advisors/tavern/spikeBuffTarget.ts",
     "spike:taunttarget": "tsx src/advisors/tavern/spikeTauntTarget.ts",
-    "spike:undead": "tsx src/advisors/battle/spikeUndead.ts"
+    "spike:undead": "tsx src/advisors/battle/spikeUndead.ts",
+    "spike:plandiff": "tsx src/advisors/tavern/spikePlanDiff.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

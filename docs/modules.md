@@ -140,6 +140,7 @@ npm run spike:bufftarget            КОМУ усиление: крупнейш�
 npm run spike:level                 подъём: частота совета и согласие с игроком
 npm run spike:taunt                 вредит ли провокация носителю ралли
 npm run spike:taunttarget           КОМУ заклинание со статами и провокацией
+npm run spike:plandiff -- dump|compare  где правка меняет план хода и чей итоговый борд сильнее
 npm run spike:hand                  что даёт розыгрыш карты, живущей в руке
 npm run spike:horizon               сколько ходов таверны и покупок остаётся впереди
 npm run spike:arena                 чей ход лучше по ближайшему бою: игрок, советник, оракул
