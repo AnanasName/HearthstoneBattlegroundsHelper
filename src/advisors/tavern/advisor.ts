@@ -1925,6 +1925,50 @@ export function weakestOwn(
 }
 
 /**
+ * Жертва продажи ПО ВЫБОРУ — на неполном борде, ради золотого (part51).
+ *
+ * На полном борде продажа вынуждена: место под покупку взять неоткуда,
+ * и `weakestOwn` честно возвращает кого-нибудь даже из пар и аур. Здесь
+ * место есть, продажа лишь добывает монету, и подчиняется она правилам
+ * продажи по выбору — тем же, что у `sellForGoldRule` (part18): копия,
+ * из которой собирается тройка, не продаётся. Без этого жертвой на кадре
+ * part51 выходил Fleeing Fugitive 6/3 (11.0 против 11.5 у Mini-Myrmidon)
+ * — одна из ДВУХ его копий на борде, то есть живая ставка на тройку.
+ * Ауры на чужих не продаются по той же причине, что и в `weakestOwn`.
+ *
+ * **Миньон с триггером в тексте тоже не продаётся** («After you…»,
+ * «Whenever…», «At the start/end of…» — `engineTextWords`), и это взято
+ * из корпусного A/B, а не из рассуждения. Первая версия правила меняла
+ * план в 17 точках 14 партий, и восемь из них поле бордов оценило ХУЖЕ;
+ * две — ровно этим: жертвой уходили Prodigious Tusker (part44, «Whenever
+ * another friendly minion attacks, this plays a Blood Gem on it», 7.5 по
+ * шкале) и растущий Molten Rock (part9). Шкала меряет их телом, а цена
+ * у них в тексте — тот же довод, что у аур (part19). На полном борде
+ * такой запрет был бы опасен (part44: продать Kalecgos ради Hired Mount),
+ * а здесь продажа не вынуждена: некого — значит, размена нет вовсе.
+ *
+ * Некого — `null`: продажа не вынуждена, и «откуда-то взять» не нужно.
+ */
+function electiveVictim(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { minion: Minion; value: number } | null {
+  const triggered = (m: Minion): boolean => {
+    const text = deps.cards.info(m.cardId)?.text ?? '';
+    return rules.engineTextWords.some((w) => new RegExp(w, 'i').test(text));
+  };
+  const pool = state.board.filter(
+    (m) =>
+      !isAuraOverOthers(m, deps.cards, rules) && copiesOwned(m, state) === 0 && !triggered(m),
+  );
+  if (pool.length === 0) return null;
+  return pool
+    .map((m) => ({ minion: m, value: ownValue(m, state, deps, rules) }))
+    .reduce((a, b) => (b.value < a.value ? b : a));
+}
+
+/**
  * Во что обходится миньон, приходящий В РУКУ, когда борд ПОЛОН, — и как
  * это назвать в причине совета.
  *
@@ -1977,7 +2021,45 @@ export function buyRules(
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): Recommendation[] {
   const full = state.board.length >= rules.boardSize;
-  const victim = full ? weakestOwn(state, deps, rules) : null;
+  // На НЕполном борде продажа тоже бывает оплатой — когда без её золотого
+  // покупка закрыта (part51, ход 11: золото 2 при витрине по три). Жертва
+  // ищется только тогда: в остальных точках она не нужна, а считать её
+  // каждый раз — лишний проход `ownValue` по борду.
+  //
+  // «Закрыта» значит закрыта ДАРОМ тоже: монета или «Gain 1 Gold» в руке
+  // приносят тот же золотой, не отдавая тела. Без этой проверки план
+  // part24 (ход 9) продавал миньона вместо бесплатного Hasty Excavation
+  // из руки — жадный первый шаг брал размен, и золото уже не горело.
+  const freeGold = state.handSpells.reduce((best, s) => {
+    if (s.unplayable || s.cost > state.gold) return best;
+    const e = spellEffect(s.cardId, s.scriptData, deps.cards, rules);
+    return e === null ? best : Math.max(best, e.gold - s.cost);
+  }, 0);
+  //
+  // И молчит, когда на борде есть карта, чья ценность САМА в продаже
+  // («When you sell this…», `sellForGoldRule`, part18): тот же вопрос
+  // «продать ради ещё одной покупки» она решает лучше — продаёт то, что
+  // за продажу платит. Без этой границы корпусный A/B показал два хода
+  // part36, где план вместо Sellemental продавал Risen Rider и терял
+  // по полю 2.8 и 7.4 п.п.
+  const sellValueOnBoard = state.board.some((m) => {
+    const text = deps.cards.info(m.cardId)?.text ?? '';
+    return (
+      copiesOwned(m, state) === 0 &&
+      rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))
+    );
+  });
+  const saleOpensBuy =
+    !full &&
+    state.board.length > 0 &&
+    freeGold < rules.sellGold &&
+    !sellValueOnBoard &&
+    state.shop.some((m) => {
+      const cost = buyCostOf(m, rules);
+      return cost > state.gold && cost <= state.gold + rules.sellGold;
+    });
+  const elective = saleOpensBuy ? electiveVictim(state, deps, rules) : null;
+  const victim = full ? weakestOwn(state, deps, rules) : elective;
   const budget = state.gold + (victim === null ? 0 : rules.sellGold);
   // Скидка на силу от покупки своего племени (Патчес, part40): считается
   // здесь, где есть справочник, и едет в план полем `heroPowerCostAfter`.
@@ -2055,6 +2137,32 @@ export function buyRules(
         } else {
           notes.push('борд полон');
         }
+      }
+
+      // Неполный борд, и на покупку не хватает ровно золотого от продажи
+      // (part51, ход 11). Место тут есть, поэтому это не «освободить слот»,
+      // а размен тела на тело: сколько миньонов было, столько и останется,
+      // а два золотых сверх цены жертвы уходят. Судится он той же арифметикой,
+      // что продажа на полном борде, — кандидат против борда БЕЗ жертвы
+      // и с запасом `sellMargin`, — и советуется только там, где иначе
+      // покупки нет вовсе: если золота хватает, `cost > gold` не выполнится.
+      //
+      // Магнитный миньон сюда не идёт: он садится на носителя и слота
+      // не занимает, то есть продажа ради него теряла бы тело. Копия самого
+      // кандидата жертвой не бывает — `electiveVictim` пары не отдаёт.
+      if (!full && cost > state.gold) {
+        if (elective === null || host !== null) return [];
+        const without = state.board.filter((x) => x.entityId !== elective.minion.entityId);
+        const replacing = minionValue(minion, { ...state, board: without }, deps, rules);
+        if (replacing.total <= elective.value + rules.sellMargin) return [];
+        value = replacing;
+        sellFirst = elective.minion;
+        const victimName =
+          deps.cards.info(elective.minion.cardId)?.name ?? elective.minion.cardId;
+        notes.push(
+          `золота ${String(state.gold)} при цене ${String(cost)} — ` +
+            `продать ${victimName} (${elective.value.toFixed(1)})`,
+        );
       }
 
       // Золотой продажи хватает только тому, кто продажу и делает: у прочих

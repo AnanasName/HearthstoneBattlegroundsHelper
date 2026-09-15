@@ -410,6 +410,100 @@ describe('правило покупки', () => {
     // равного на равного с доплатой хода — потеря (part10, ход 11).
     expect(buys.find((b) => b.minion?.attack === 3)).toBeUndefined();
   });
+
+  it('на НЕполном борде продажа оплачивает покупку, если без её золотого покупка закрыта (part51)', () => {
+    // Кадр part51, ход 11: золото 2 при витрине по три, борд 6 из 7.
+    const board = [
+      shopMinion(1, 'NEUTRAL', { attack: 2, health: 2 }),
+      shopMinion(2, 'DRAGON_1', { attack: 20, health: 20 }),
+    ];
+    const strong = shopMinion(9, 'MURLOC_5', { attack: 15, health: 15 });
+    const buys = buyRules(state({ gold: 2, board, shop: [strong] }), deps);
+    expect(buys).toHaveLength(1);
+    expect(buys[0]?.sellFirst?.cardId).toBe('NEUTRAL');
+    expect(buys[0]?.requiresSlot).toBe(false);
+    expect(buys[0]?.reason).toContain('золота 2 при цене 3');
+
+    // Хватает золота — продажи нет: размен советуется только там, где
+    // иначе покупки нет вовсе.
+    const rich = buyRules(state({ gold: 3, board, shop: [strong] }), deps);
+    expect(rich[0]?.sellFirst).toBeNull();
+
+    // Равный жертве кандидат не проходит `sellMargin`, как на полном борде.
+    const equal = shopMinion(10, 'NEUTRAL_2', { attack: 2, health: 2 });
+    expect(buyRules(state({ gold: 2, board, shop: [equal] }), deps)).toHaveLength(0);
+
+    // Двумя золотыми сверх цены жертвы не накрыть: витрина по 4 закрыта и с продажей.
+    const dear = { ...strong, buyCost: 4 };
+    expect(buyRules(state({ gold: 2, board, shop: [dear] }), deps)).toHaveLength(0);
+  });
+
+  it('монета в руке даёт тот же золотой даром — тело ради него не продаётся (part24 → part51)', () => {
+    // part24, ход 9: Hasty Excavation в руке; без этой границы план продавал
+    // миньона вместо того, чтобы разыграть бесплатное «Gain 1 Gold».
+    const idx = createCardIndex([
+      { id: 'COIN', name: 'Монетка', text: 'Gain 1 Gold.' },
+      { id: 'WEAK', name: 'Слабый', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
+      { id: 'BIG', name: 'Крупный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+      { id: 'SHOP', name: 'Витрина', type: 'Minion', techLevel: 5, races: [], isBaconPool: true },
+    ]);
+    const board = [
+      shopMinion(1, 'WEAK', { attack: 1, health: 1 }),
+      shopMinion(2, 'BIG', { attack: 20, health: 20 }),
+    ];
+    const shop = [shopMinion(9, 'SHOP', { attack: 15, health: 15 })];
+    const coin = { entityId: 50, cardId: 'COIN', cost: 0, scriptData: [], zonePos: 1, unplayable: false, costsHealth: false };
+
+    const without = buyRules(state({ gold: 2, board, shop }), { cards: idx });
+    expect(without[0]?.sellFirst?.cardId).toBe('WEAK');
+    const withCoin = buyRules(state({ gold: 2, board, shop, handSpells: [coin] }), { cards: idx });
+    expect(withCoin).toHaveLength(0);
+  });
+
+  it('по выбору не продаются миньоны с триггером, а карта «When you sell this» забирает решение себе (part51)', () => {
+    // Корпусный A/B первой версии: жертвой уходили Prodigious Tusker (part44)
+    // и растущий Molten Rock (part9) — шкала меряет их телом, цена в тексте;
+    // а на part36 план продавал Risen Rider вместо Sellemental.
+    const idx = createCardIndex([
+      { id: 'ENGINE', name: 'Двигатель', type: 'Minion', techLevel: 1, races: [], isBaconPool: true,
+        text: 'Whenever another friendly minion attacks, give it +1/+1.' },
+      { id: 'SELLER', name: 'Продавец', type: 'Minion', techLevel: 1, races: [], isBaconPool: true,
+        text: 'When you sell this, get a 3/3 Elemental.' },
+      { id: 'PLAIN', name: 'Простой', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
+      { id: 'BIG', name: 'Крупный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+      { id: 'SHOP', name: 'Витрина', type: 'Minion', techLevel: 5, races: [], isBaconPool: true },
+    ]);
+    const shop = [shopMinion(9, 'SHOP', { attack: 15, health: 15 })];
+    const big = shopMinion(2, 'BIG', { attack: 20, health: 20 });
+
+    // Слабейший — двигатель, но продаётся простое тело.
+    const engineBoard = [shopMinion(1, 'ENGINE', { attack: 1, health: 1 }), shopMinion(3, 'PLAIN', { attack: 2, health: 2 }), big];
+    expect(buyRules(state({ gold: 2, board: engineBoard, shop }), { cards: idx })[0]?.sellFirst?.cardId).toBe('PLAIN');
+    // Кроме двигателя продавать некого по выбору — размена нет вовсе.
+    const onlyEngine = [shopMinion(1, 'ENGINE', { attack: 1, health: 1 })];
+    expect(buyRules(state({ gold: 2, board: onlyEngine, shop }), { cards: idx })).toHaveLength(0);
+
+    // Карта с ценностью в продаже на борде — продажа по выбору молчит.
+    const sellerBoard = [shopMinion(1, 'SELLER', { attack: 3, health: 3 }), shopMinion(3, 'PLAIN', { attack: 1, health: 1 }), big];
+    expect(buyRules(state({ gold: 2, board: sellerBoard, shop }), { cards: idx })).toHaveLength(0);
+  });
+
+  it('продажа по выбору не разбивает пару под тройку: копии в жертвы не идут (part51)', () => {
+    // Слабейшие по шкале — две копии NEUTRAL. На полном борде продажа
+    // вынуждена; тут она ВЫБОР и следует правилу `sellForGoldRule`.
+    const board = [
+      shopMinion(1, 'NEUTRAL', { attack: 1, health: 1 }),
+      shopMinion(2, 'NEUTRAL', { attack: 1, health: 1 }),
+      shopMinion(3, 'DRAGON_1', { attack: 6, health: 6 }),
+    ];
+    const strong = shopMinion(9, 'MURLOC_5', { attack: 30, health: 30 });
+    const buys = buyRules(state({ gold: 2, board, shop: [strong] }), deps);
+    expect(buys[0]?.sellFirst?.cardId).toBe('DRAGON_1');
+
+    // Весь борд из пар — продавать некого, и покупки по выбору нет.
+    const pairs = board.slice(0, 2);
+    expect(buyRules(state({ gold: 2, board: pairs, shop: [strong] }), deps)).toHaveLength(0);
+  });
 });
 
 describe('правило продажи', () => {

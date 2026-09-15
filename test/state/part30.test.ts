@@ -206,8 +206,12 @@ describe('part30: сила-Discover, заклинание по витрине, �
     // Дар за 3 при двух золотых в план не входит — золото инвестиции
     // придёт только следующим ходом.
     expect(plan.steps.some((st) => st.recommendation.action === 'darkGift')).toBe(false);
+    // Шаг с продажей платит за себя её золотым — тот же счёт, что у плана
+    // (`spend.ts`). С part51 такой шаг бывает и на неполном борде: здесь это
+    // «КУПИТЬ Treasure Parrot 5/5, продав Water Droplet 3/3» при двух золотых.
     for (const st of plan.steps) {
-      expect(st.goldBefore).toBeGreaterThanOrEqual(st.recommendation.cost);
+      const refund = st.recommendation.sellFirst === null ? 0 : DEFAULT_TAVERN_RULES.sellGold;
+      expect(st.goldBefore + refund).toBeGreaterThanOrEqual(st.recommendation.cost);
     }
   });
 
