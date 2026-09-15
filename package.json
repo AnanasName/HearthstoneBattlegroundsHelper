@@ -52,6 +52,7 @@
     "test:fixtures": "vitest run --project fixtures",
     "test:watch": "vitest",
     "check": "tsc --noEmit && eslint . && vitest run --project unit",
+    "fixture:at": "tsx src/ui/fixtureAt.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "spike:bufftarget": "tsx src/advisors/tavern/spikeBuffTarget.ts",
