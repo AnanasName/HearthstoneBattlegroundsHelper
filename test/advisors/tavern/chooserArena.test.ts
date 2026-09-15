@@ -36,14 +36,15 @@ describe('перечисление точек арены', () => {
   beforeAll(async () => {
     cards = loadCardIndex();
     simulator = createBattleSimulator();
-    // Три прохода по логу на партию: около 40 с на part19 в одиночку, и под
-    // нагрузкой полного прогона без пауз это не укладывалось в 180 с —
-    // поток держался дольше минуты, и vitest ронял прогон тайм-аутом RPC.
+    // Три прохода по логу на партию: 41 с на part19 и 26 с на part32
+    // в одиночку. Паузы нужны, чтобы поток не держался дольше минуты
+    // (тайм-аут RPC у vitest), а бюджет — на нагрузку полного прогона,
+    // где тяжёлые файлы идут в 2–4 раза дольше: 180 с не хватало (16.09.2026).
     const breather = createBreather();
     part19Enumeration = await enumerateArenaDecisionsAsync(part19Game(), { cards, simulator }, breather);
     part19 = part19Enumeration.decisions;
     part32 = (await enumerateArenaDecisionsAsync(part32Game(), { cards, simulator }, breather)).decisions;
-  }, 180_000);
+  }, 600_000);
 
   it('находит точки в обеих партиях', () => {
     expect(part19.length).toBeGreaterThan(0);
