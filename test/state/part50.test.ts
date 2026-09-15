@@ -1,10 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { toPlayerEntity } from '../../src/advisors/battle/mapper.js';
-import { readTavernTurns } from '../../src/advisors/tavern/turns.js';
+import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, normalizeCardText, type CardIndex } from '../../src/data/cards.js';
 import { reduceLog } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
+import { createBreather } from '../breather.js';
 import { part50Game } from '../fixtures.js';
 
 /**
@@ -25,12 +26,13 @@ import { part50Game } from '../fixtures.js';
 describe('part50: надбавка к атаке нежити и счётчик вечных рыцарей', () => {
   let text: string;
   let cards: CardIndex;
-  let turns: ReturnType<typeof readTavernTurns>;
+  let turns: TavernTurn[];
 
-  beforeAll(() => {
+  // Лог 79 МБ: с паузами разбор не держит поток воркера дольше пары секунд.
+  beforeAll(async () => {
     text = part50Game();
     cards = loadCardIndex();
-    turns = readTavernTurns(text);
+    turns = await readTavernTurnsAsync(text, createBreather());
   }, 300_000);
 
   /** Состояние на момент времени — срезом лога (метод part40, part43–part48). */

@@ -7,10 +7,11 @@ import {
 } from '../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../src/advisors/tavern/rules.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
-import { readTavernTurns } from '../../src/advisors/tavern/turns.js';
+import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { reduceLog } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
+import { createBreather } from '../breather.js';
 import { part45Game } from '../fixtures.js';
 
 /**
@@ -24,12 +25,14 @@ import { part45Game } from '../fixtures.js';
 describe('part45: сила героя на два нажатия и величина словом', () => {
   let text: string;
   let cards: CardIndex;
-  let turns: ReturnType<typeof readTavernTurns>;
+  let turns: TavernTurn[];
 
-  beforeAll(() => {
+  // Разбор этой партии — до 33 секунд подряд в одиночку; с паузами поток
+  // не держится дольше пары секунд, и vitest не падает таймаутом RPC.
+  beforeAll(async () => {
     text = part45Game();
     cards = loadCardIndex();
-    turns = readTavernTurns(text);
+    turns = await readTavernTurnsAsync(text, createBreather());
   }, 240_000);
 
   /** Состояние партии на момент времени кадра — срезом лога. */

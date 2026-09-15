@@ -4,7 +4,7 @@ import type { AllCardsService } from '@firestone-hs/reference-data';
 
 import { endOfTurnAuraGains } from '../../src/advisors/battle/endOfTurn.js';
 import { adviseTavern, playRules, spellRules } from '../../src/advisors/tavern/advisor.js';
-import { readTavernTurns, type TavernTurn } from '../../src/advisors/tavern/turns.js';
+import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
@@ -36,11 +36,11 @@ describe('part16: прокрутка, бафф соседям, нецелево�
   beforeAll(async () => {
     text = part16Game();
     cards = loadCardIndex();
-    turns = readTavernTurns(text);
-
-    // Поток отдаётся раннеру: весь beforeAll шёл больше минуты подряд,
-    // и vitest падал таймаутом RPC при зелёных тестах.
+    // Поток отдаётся раннеру и при разборе точек, и в цикле ниже: весь
+    // beforeAll шёл больше минуты подряд, и vitest падал таймаутом RPC
+    // при зелёных тестах.
     const breather = createBreather();
+    turns = await readTavernTurnsAsync(text, breather);
     const reducer = createReducer(readPlayers(text));
     for (const event of readPowerEvents(text)) {
       if (breather.due()) await breather.pause();

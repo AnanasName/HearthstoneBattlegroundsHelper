@@ -1,4 +1,4 @@
-import { readPowerEvents, type BlockContext } from '../../parser/blocks.js';
+import { readPowerEvents, type BlockContext, type PowerEvent } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
 import { isBattlegroundsGame, type GameState } from '../../state/types.js';
@@ -86,6 +86,40 @@ export interface TavernTurn {
  *    потраченным».
  */
 export function readTavernTurns(text: string): TavernTurn[] {
+  const collector = createTurnsCollector(text);
+  for (const event of readPowerEvents(text)) collector.push(event);
+  return collector.finish();
+}
+
+/**
+ * Кто отдаёт поток посреди долгого чтения. Тип структурный: тестам хватает
+ * `createBreather` из test/breather.ts, а src от тестов не зависит.
+ */
+export interface Yielder {
+  due(): boolean;
+  pause(): Promise<void>;
+}
+
+/**
+ * Те же точки решения, но с паузами между событиями.
+ *
+ * Разбор партии держит поток до 33 секунд в одиночку (part45, замер
+ * 15.09.2026), а под нагрузкой соседних процессов — дольше минуты, и воркер
+ * vitest падает таймаутом RPC при зелёных тестах. Результат побайтно тот же,
+ * что у `readTavernTurns`: накопитель у двух путей один, и это проверено
+ * отпечатками точек на девяти партиях, включая сегментные.
+ */
+export async function readTavernTurnsAsync(text: string, yielder: Yielder): Promise<TavernTurn[]> {
+  const collector = createTurnsCollector(text);
+  for (const event of readPowerEvents(text)) {
+    if (yielder.due()) await yielder.pause();
+    collector.push(event);
+  }
+  return collector.finish();
+}
+
+/** Накопитель точек решения — по событию за раз, один на оба пути чтения. */
+function createTurnsCollector(text: string): { push(event: PowerEvent): void; finish(): TavernTurn[] } {
   const reducer = createReducer(readPlayers(text));
   const turns: TavernTurn[] = [];
 
@@ -104,7 +138,7 @@ export function readTavernTurns(text: string): TavernTurn[] {
     pending = null;
   };
 
-  for (const event of readPowerEvents(text)) {
+  const push = (event: PowerEvent): void => {
     const { content } = event.line;
     const notable =
       content.includes('ZONE') || content.includes('RESOURCES') || content.includes('BOARD_VISUAL_STATE');
@@ -121,7 +155,7 @@ export function readTavernTurns(text: string): TavernTurn[] {
     topBlock = outer;
 
     reducer.step(event);
-    if (!notable) continue;
+    if (!notable) return;
 
     const state = reducer.snapshot();
 
@@ -130,7 +164,7 @@ export function readTavernTurns(text: string): TavernTurn[] {
     // на живом логе 05.09: шесть `GT_RANKED` давали шесть «точек»).
     if (!isBattlegroundsGame(state) || state.phase !== 'tavern' || state.turn === 0 || state.hero === null) {
       commit();
-      continue;
+      return;
     }
     if (pending !== null && pending.turn !== state.turn) commit();
 
@@ -157,14 +191,19 @@ export function readTavernTurns(text: string): TavernTurn[] {
         pending = { turn: state.turn, state: beforeAction };
       }
       spentThisTurn = true;
-      continue;
+      return;
     }
-    if (state.goldSpent > 0) continue;
-    if (state.goldTotal === 0) continue;
+    if (state.goldSpent > 0) return;
+    if (state.goldTotal === 0) return;
 
     pending = { turn: state.turn, state };
-  }
+  };
 
-  commit();
-  return turns;
+  return {
+    push,
+    finish(): TavernTurn[] {
+      commit();
+      return turns;
+    },
+  };
 }
