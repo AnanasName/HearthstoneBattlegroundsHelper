@@ -19,8 +19,11 @@ import { readFileSync } from 'node:fs';
 
 import type { SimulationResult } from '@firestone-hs/simulate-bgs-battle/dist/simulation-result.js';
 
+import { positionalArgs, seedArg } from '../../measure/args.js';
+import { emitResult, round } from '../../measure/result.js';
 import { readBattleEpisodes, type BattleEpisode, type Outcome } from './episodes.js';
 import { toBattleInfo } from './mapper.js';
+import { seededSimulator } from './seeded.js';
 import { createBattleSimulator } from './simulator.js';
 
 /**
@@ -53,7 +56,9 @@ function predicted(result: SimulationResult, outcome: Outcome): number {
 }
 
 function main(): void {
-  const simulator = createBattleSimulator();
+  const seed = seedArg(process.argv);
+  const simulator = seededSimulator(createBattleSimulator(), seed);
+  console.log(`зерно ${String(seed)}`);
 
   const rows: {
     fixture: string;
@@ -62,7 +67,8 @@ function main(): void {
     p: number;
   }[] = [];
 
-  const fixtures = process.argv.slice(2).length > 0 ? process.argv.slice(2) : FIXTURES;
+  const paths = positionalArgs(process.argv.slice(2));
+  const fixtures = paths.length > 0 ? paths : FIXTURES;
   for (const path of fixtures) {
     const episodes = readBattleEpisodes(readFileSync(path, 'utf8'));
     const short = path.split('/')[2] ?? path;
@@ -106,6 +112,19 @@ function main(): void {
     }, 0) / rows.length;
 
   const outliers = rows.filter((r) => r.p < OUTLIER);
+
+  emitResult({
+    seed,
+    parts: null,
+    metrics: {
+      battles: rows.length,
+      actualWinPct: round(actualWinRate * 100, 1),
+      meanPredictedWinPct: round(meanPredictedWin * 100, 1),
+      calibrationGapPp: round(Math.abs(meanPredictedWin - actualWinRate) * 100, 1),
+      brier: round(brier, 3),
+      outliers: outliers.length,
+    },
+  });
 
   console.log(`\n═══ итог по ${String(rows.length)} боям ═══`);
   console.log(`  фактическая доля побед:      ${(actualWinRate * 100).toFixed(1)}%`);

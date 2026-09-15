@@ -2,13 +2,20 @@
  * Проверка эвристик таверны симулятором.
  *
  *   npm run validate:tavern
+ *   npm run validate:tavern -- --parts=4-7 --seed=2
  *
  * Печатает то, что меряет `measureBuyQuality`: совпадает ли покупка, которую
  * советуют эвристики, с той, что реально лучше в ближайшем бою. Устройство
  * и оговорки — в buyQuality.ts, числа и выводы — в docs/tavern.md.
+ *
+ * Симулятор сеяный (`seededSimulator`): два прогона одного кода дают один
+ * и тот же вывод, и дельта между версиями — это разница кода, а не броска.
  */
+import { seededSimulator } from '../battle/seeded.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import { loadCardIndex } from '../../data/cards.js';
+import { partsArg, seedArg } from '../../measure/args.js';
+import { emitResult, round } from '../../measure/result.js';
 import type { Minion } from '../../state/types.js';
 import {
   agreementRate,
@@ -23,7 +30,8 @@ import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js
 // 14.08 набор расширен с part4–7 на все десять партий билда 248348:
 // на 13 решающих ходах выборка была слишком мала, чтобы отличать
 // системную слепоту от случайности.
-const FIXTURES = CURRENT_BUILD_PARTS;
+const FIXTURES = partsArg(process.argv, CURRENT_BUILD_PARTS);
+const SEED = seedArg(process.argv);
 
 /**
  * Граница «внутри выборки / вне её». По part4–part26 эта сверка гонялась
@@ -36,7 +44,8 @@ const IN_SAMPLE_UNTIL = 26;
 
 function main(): void {
   const cards = loadCardIndex();
-  const simulator = createBattleSimulator();
+  const simulator = seededSimulator(createBattleSimulator(), SEED);
+  console.log(`зерно ${String(SEED)}, партий ${String(FIXTURES.length)}`);
 
   const all: BuyComparison[] = [];
   const decisive: BuyComparison[] = [];
@@ -76,6 +85,31 @@ function main(): void {
       );
     }
   }
+
+  const percent = (rows: readonly BuyComparison[]): number | null =>
+    rows.length === 0 ? null : round(agreementRate(rows) * 100, 1);
+  const cost = (rows: readonly BuyComparison[]): number | null =>
+    rows.length === 0 ? null : round(averageCost(rows), 2);
+  emitResult({
+    seed: SEED,
+    parts: FIXTURES,
+    metrics: {
+      turns: all.length,
+      agreementPct: percent(all),
+      costPp: cost(all),
+      decisiveTurns: decisive.length,
+      decisiveAgreementPct: percent(decisive),
+      decisiveCostPp: cost(decisive),
+      inSampleTurns: inSample.length,
+      inSampleAgreementPct: percent(inSample),
+      inSampleCostPp: cost(inSample),
+      outOfSampleTurns: outOfSample.length,
+      outOfSampleAgreementPct: percent(outOfSample),
+      outOfSampleCostPp: cost(outOfSample),
+      skippedNoBattle,
+      skippedNoChoice,
+    },
+  });
 
   console.log('\n═══ итог ═══');
   if (all.length === 0) {

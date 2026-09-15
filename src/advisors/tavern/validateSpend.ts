@@ -2,13 +2,19 @@
  * Проверка плана трат хода перебором корзин.
  *
  *   npm run validate:spend
+ *   npm run validate:spend -- --parts=4-7 --seed=2
  *
  * Отвечает на вопрос, отложенный в CLAUDE.md: довольно ли жадной цепочки
  * правил или нужен полный оптимизатор трат. Устройство и оговорки —
  * в spendQuality.ts, числа и выводы — в docs/tavern.md.
+ *
+ * Симулятор сеяный — см. `seededSimulator` и `validate.ts`.
  */
+import { seededSimulator } from '../battle/seeded.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import { loadCardIndex } from '../../data/cards.js';
+import { partsArg, seedArg } from '../../measure/args.js';
+import { emitResult, round } from '../../measure/result.js';
 import {
   averageGoldLeft,
   measureSpendQuality,
@@ -18,14 +24,16 @@ import {
 } from './spendQuality.js';
 import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 
-const FIXTURES = CURRENT_BUILD_PARTS;
+const FIXTURES = partsArg(process.argv, CURRENT_BUILD_PARTS);
+const SEED = seedArg(process.argv);
 
 /** Граница «внутри выборки / вне её» — см. пояснение в `validate.ts`. */
 const IN_SAMPLE_UNTIL = 26;
 
 function main(): void {
   const cards = loadCardIndex();
-  const simulator = createBattleSimulator();
+  const simulator = seededSimulator(createBattleSimulator(), SEED);
+  console.log(`зерно ${String(SEED)}, партий ${String(FIXTURES.length)}`);
 
   const all: SpendComparison[] = [];
   const decisive: SpendComparison[] = [];
@@ -65,6 +73,34 @@ function main(): void {
       );
     }
   }
+
+  const percent = (rows: readonly SpendComparison[]): number | null =>
+    rows.length === 0 ? null : round(spendAgreement(rows) * 100, 1);
+  const cost = (rows: readonly SpendComparison[]): number | null =>
+    rows.length === 0 ? null : round(spendCost(rows), 2);
+  const shapeDecisiveRows = sameShape.filter((r) => r.spread > 5);
+  emitResult({
+    seed: SEED,
+    parts: FIXTURES,
+    metrics: {
+      turns: all.length,
+      agreementPct: percent(all),
+      costPp: cost(all),
+      decisiveTurns: decisive.length,
+      sameShapeTurns: sameShape.length,
+      sameShapeAgreementPct: percent(sameShape),
+      sameShapeCostPp: cost(sameShape),
+      sameShapeDecisiveTurns: shapeDecisiveRows.length,
+      goldLeftPlan: all.length === 0 ? null : round(averageGoldLeft(all, (r) => r.planGoldLeft), 2),
+      goldLeftBest: all.length === 0 ? null : round(averageGoldLeft(all, (r) => r.bestGoldLeft), 2),
+      inSampleTurns: inSample.length,
+      inSampleAgreementPct: percent(inSample),
+      outOfSampleTurns: outOfSample.length,
+      outOfSampleAgreementPct: percent(outOfSample),
+      skippedNoBattle,
+      skippedNoChoice,
+    },
+  });
 
   console.log('\n═══ итог ═══');
   if (all.length === 0) {
