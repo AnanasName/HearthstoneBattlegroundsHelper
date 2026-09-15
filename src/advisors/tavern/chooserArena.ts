@@ -61,7 +61,11 @@
  * бою, и не переводить в места.
  */
 
-import { readBattleEpisodes } from '../battle/episodes.js';
+import {
+  readBattleEpisodes,
+  readBattleEpisodesAsync,
+  type BattleEpisode,
+} from '../battle/episodes.js';
 import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mapper.js';
 import type { BattleSimulator } from '../battle/simulator.js';
 import { battleQuestion } from '../position/advisor.js';
@@ -72,11 +76,12 @@ import {
   DEFAULT_BUY_CHECK_OPTIONS,
 } from './simulated.js';
 import type { CardIndex } from '../../data/cards.js';
+import type { Yielder } from '../../parser/blocks.js';
 import { reduceLog } from '../../state/reducer.js';
 import type { GameState, Minion, PlayerAction } from '../../state/types.js';
 import { adviseTavern, buyCostOf, weakestOwn } from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
-import { readTavernTurns } from './turns.js';
+import { readTavernTurns, readTavernTurnsAsync } from './turns.js';
 
 /** Действия, которые тратят золото. Заморозка и розыгрыш из руки — не тратят. */
 const SPENDING_ACTIONS = new Set<PlayerAction['type']>([
@@ -143,15 +148,53 @@ export function enumerateArenaDecisions(
   deps: { readonly cards: CardIndex; readonly simulator: BattleSimulator },
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): ArenaEnumeration {
-  const battles = new Map(readBattleEpisodes(text).map((e) => [e.turn, e.opponentBoard]));
+  const collector = createArenaCollector(readBattleEpisodes(text), reduceLog(text).actions, deps, rules);
+  for (const { state } of readTavernTurns(text)) collector.push(state);
+  return collector.finish();
+}
+
+/**
+ * То же перечисление, но с паузами: для тестов, где один поток не должен
+ * держаться дольше минуты (тайм-аут RPC у vitest — 60 с).
+ *
+ * На part19 перечисление целиком держит поток 41 с даже в одиночку (разбор
+ * боёв 17 с, точки решения 8 с, счёт по ходам около секунды на ход, замер
+ * 16.09.2026), а под нагрузкой полного прогона — в разы дольше: две партии
+ * не укладывались в 180 с `beforeAll`. Оба прохода по логу отдают поток
+ * по часам; между ходами пауза безусловная — ходов полтора десятка,
+ * и `due()`, читающий часы раз в сотни вызовов, до них бы не дошёл.
+ */
+export async function enumerateArenaDecisionsAsync(
+  text: string,
+  deps: { readonly cards: CardIndex; readonly simulator: BattleSimulator },
+  yielder: Yielder,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Promise<ArenaEnumeration> {
+  const episodes = await readBattleEpisodesAsync(text, yielder);
+  const turns = await readTavernTurnsAsync(text, yielder);
+  const collector = createArenaCollector(episodes, reduceLog(text).actions, deps, rules);
+  for (const { state } of turns) {
+    await yielder.pause();
+    collector.push(state);
+  }
+  return collector.finish();
+}
+
+/** Накопитель точек арены — по точке решения за раз, один на оба пути. */
+function createArenaCollector(
+  episodes: readonly BattleEpisode[],
+  actions: readonly PlayerAction[],
+  deps: { readonly cards: CardIndex; readonly simulator: BattleSimulator },
+  rules: TavernRules,
+): { push(state: GameState): void; finish(): ArenaEnumeration } {
+  const battles = new Map(episodes.map((e) => [e.turn, e.opponentBoard]));
 
   // Журнал берётся ПОЛНЫМ прогоном, а не из последней точки решения: точка
   // несёт лишь то, что случилось ДО неё, и действия последнего хода таверны
   // в неё не попадают вовсе — годная точка ушла бы в «не тратил ничего».
   // Лишний проход по логу стоит около 0.2 с на 40 МБ, и это честная цена.
   const actionsByTurn = new Map<number, PlayerAction[]>();
-  const turns = readTavernTurns(text);
-  for (const action of reduceLog(text).actions) {
+  for (const action of actions) {
     const list = actionsByTurn.get(action.turn);
     if (list === undefined) actionsByTurn.set(action.turn, [action]);
     else list.push(action);
@@ -167,29 +210,29 @@ export function enumerateArenaDecisions(
     noSacrifice: 0,
   };
 
-  for (const { state } of turns) {
-    if (state.hero === null) continue;
+  const push = (state: GameState): void => {
+    if (state.hero === null) return;
 
     const ofTurn = actionsByTurn.get(state.turn) ?? [];
     const first = ofTurn.find((a) => SPENDING_ACTIONS.has(a.type));
     if (first === undefined) {
       skips.noSpending += 1;
-      continue;
+      return;
     }
     if (first.type !== 'buy') {
       skips.notBuyFirst += 1;
-      continue;
+      return;
     }
     const bought = state.shop.find((m) => m.entityId === first.entityId);
     if (bought === undefined) {
       skips.buyOffShop += 1;
-      continue;
+      return;
     }
 
     const opponentBoard = battles.get(state.turn + 1);
     if (opponentBoard === undefined || opponentBoard.length === 0) {
       skips.noBattle += 1;
-      continue;
+      return;
     }
 
     // Кандидаты — витрина по карману, по одному представителю на карту.
@@ -210,11 +253,11 @@ export function enumerateArenaDecisions(
     // а не точка для выбрасывания; считаем вслух.
     if (playerIndex < 0) {
       skips.buyOffShop += 1;
-      continue;
+      return;
     }
     if (affordable.length < 2) {
       skips.noChoice += 1;
-      continue;
+      return;
     }
 
     // Место под покупку: продажа нужна только на полном борде.
@@ -228,7 +271,7 @@ export function enumerateArenaDecisions(
       sacrifice = actual ?? weakestOwn(state, deps, rules)?.minion ?? null;
       if (sacrifice === null) {
         skips.noSacrifice += 1;
-        continue;
+        return;
       }
     }
 
@@ -258,9 +301,9 @@ export function enumerateArenaDecisions(
       playerIndex,
       sacrifice,
     });
-  }
+  };
 
-  return { decisions, skips };
+  return { push, finish: () => ({ decisions, skips }) };
 }
 
 /**

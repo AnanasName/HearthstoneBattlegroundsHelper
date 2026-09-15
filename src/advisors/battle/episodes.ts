@@ -1,4 +1,4 @@
-import { insideBlock, readPowerEvents } from '../../parser/blocks.js';
+import { insideBlock, readPowerEvents, type PowerEvent, type Yielder } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
 import type { GameState, GlobalInfo, Hero, Minion } from '../../state/types.js';
@@ -74,6 +74,28 @@ interface Pending {
  * а к выходу в таверну чужие вообще убраны из `PLAY`.
  */
 export function readBattleEpisodes(text: string): BattleEpisode[] {
+  const collector = createEpisodesCollector(text);
+  for (const event of readPowerEvents(text)) collector.push(event);
+  return collector.finish();
+}
+
+/**
+ * Те же бои, но с паузами между событиями — для тестов, где поток воркера
+ * не должен держаться дольше минуты. Разбор боёв part19 занимает 17 с
+ * в одиночку (замер 16.09.2026), под нагрузкой полного прогона — в разы
+ * дольше. Накопитель у двух путей один, поэтому и результат один.
+ */
+export async function readBattleEpisodesAsync(text: string, yielder: Yielder): Promise<BattleEpisode[]> {
+  const collector = createEpisodesCollector(text);
+  for (const event of readPowerEvents(text)) {
+    if (yielder.due()) await yielder.pause();
+    collector.push(event);
+  }
+  return collector.finish();
+}
+
+/** Накопитель боёв — по событию за раз, один на оба пути чтения. */
+function createEpisodesCollector(text: string): { push(event: PowerEvent): void; finish(): BattleEpisode[] } {
   const reducer = createReducer(readPlayers(text));
   const episodes: BattleEpisode[] = [];
 
@@ -82,7 +104,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
   let frozen = false;
   let hpBeforeCombat = 0;
 
-  for (const event of readPowerEvents(text)) {
+  const push = (event: PowerEvent): void => {
     reducer.step(event);
 
     const combatStarting = event.line.content.includes('BOARD_VISUAL_STATE');
@@ -90,7 +112,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
 
     // Снимок дорогой, поэтому берётся только там, где он может понадобиться:
     // на переключении фазы и внутри боя до первого размена.
-    if (!combatStarting && !(phase === 'combat' && !frozen) && !inAttack) continue;
+    if (!combatStarting && !(phase === 'combat' && !frozen) && !inAttack) return;
 
     const state = reducer.snapshot();
 
@@ -154,7 +176,7 @@ export function readBattleEpisodes(text: string): BattleEpisode[] {
     }
 
     phase = state.phase;
-  }
+  };
 
-  return episodes;
+  return { push, finish: () => episodes };
 }

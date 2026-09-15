@@ -1,4 +1,4 @@
-import { readPowerEvents, type BlockContext, type PowerEvent } from '../../parser/blocks.js';
+import { readPowerEvents, type BlockContext, type PowerEvent, type Yielder } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
 import { isBattlegroundsGame, type GameState } from '../../state/types.js';
@@ -89,15 +89,6 @@ export function readTavernTurns(text: string): TavernTurn[] {
   const collector = createTurnsCollector(text);
   for (const event of readPowerEvents(text)) collector.push(event);
   return collector.finish();
-}
-
-/**
- * Кто отдаёт поток посреди долгого чтения. Тип структурный: тестам хватает
- * `createBreather` из test/breather.ts, а src от тестов не зависит.
- */
-export interface Yielder {
-  due(): boolean;
-  pause(): Promise<void>;
 }
 
 /**

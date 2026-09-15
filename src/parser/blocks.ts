@@ -198,6 +198,19 @@ export function* readPowerEvents(text: string): Generator<PowerEvent> {
   }
 }
 
+/**
+ * Кто отдаёт поток посреди долгого чтения лога. Тип структурный: тестам
+ * хватает `createBreather` из test/breather.ts, а src от тестов не зависит.
+ *
+ * Нужен читателям, которые проходят партию целиком (точки решения, бои):
+ * разбор держит поток десятки секунд, а воркер vitest падает таймаутом RPC,
+ * если поток занят дольше минуты.
+ */
+export interface Yielder {
+  due(): boolean;
+  pause(): Promise<void>;
+}
+
 /** Тип самого внутреннего блока — например, ATTACK для событий боя. */
 export function innermostBlockType(event: PowerEvent): string | null {
   return event.blocks[event.blocks.length - 1]?.blockType ?? null;

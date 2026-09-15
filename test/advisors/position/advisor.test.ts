@@ -8,6 +8,7 @@ import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../../../src/ad
 import { createBattleSimulator, type BattleSimulator } from '../../../src/advisors/battle/simulator.js';
 import { advisePosition, positionQuestion } from '../../../src/advisors/position/advisor.js';
 import { withSeededRandom } from '../../../src/advisors/position/rng.js';
+import { DEFAULT_SEARCH_OPTIONS } from '../../../src/advisors/position/search.js';
 import { winRate } from '../../../src/advisors/position/score.js';
 import {
   EMPTY_GLOBAL_INFO,
@@ -111,14 +112,20 @@ describe('советник расстановки на фикстурах', () =
     'финалисты и текущая расстановка досчитаны до полной точности',
     () => {
       const episode = episodeOn(8);
-      const advice = advisePosition(episode, { simulator });
+      // Бюджет снят намеренно: финал сжимается под ОСТАВШЕЕСЯ время по
+      // наблюдённой скорости, и под нагрузкой полного прогона победитель
+      // получал 2188 симуляций вместо 2550 — тест падал на часах, а не на
+      // поиске (16.09.2026). Сжатие — свойство бюджета, его держит тест выше;
+      // здесь проверяется, что финальные раунды вообще доходят до победителя.
+      const advice = advisePosition(episode, { simulator }, { budgetMs: 600_000 });
 
-      // Точное число зависит от того, насколько финал пришлось сжать под
-      // бюджет, но победитель обязан быть измерен на порядок точнее отбора.
-      const screened = advice.report.simulations / advice.report.evaluated;
-      expect(advice.top[0]?.estimate.sims ?? 0).toBeGreaterThan(1000);
-      expect(advice.top[0]?.estimate.sims ?? 0).toBeGreaterThan(4 * screened);
-      expect(advice.current.estimate.sims).toBeGreaterThan(1000);
+      // Победитель прошёл как минимум последний раунд (войти в него можно
+      // и прямо из отбора), текущая расстановка — все раунды принудительно.
+      const { screenSims, finalRounds } = DEFAULT_SEARCH_OPTIONS;
+      const lastRound = finalRounds[finalRounds.length - 1]?.sims ?? 0;
+      const allRounds = finalRounds.reduce((sum, r) => sum + r.sims, 0);
+      expect(advice.top[0]?.estimate.sims ?? 0).toBeGreaterThanOrEqual(screenSims + lastRound);
+      expect(advice.current.estimate.sims).toBeGreaterThanOrEqual(screenSims + allRounds);
     },
     180_000,
   );

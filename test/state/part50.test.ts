@@ -261,8 +261,10 @@ describe('part50: вторая половина надбавки и симмет
    * надбавка в корпусе встречается чаще своей.
    */
   it('счётчики соперника читаются отдельно и не смешиваются со своими', async () => {
-    const { readBattleEpisodes } = await import('../../src/advisors/battle/episodes.js');
-    const episodes = readBattleEpisodes(part50Game());
+    // Разбор боёв по логу в 79 МБ — с паузами, иначе поток держится
+    // дольше минуты и vitest роняет прогон при зелёных тестах.
+    const { readBattleEpisodesAsync } = await import('../../src/advisors/battle/episodes.js');
+    const episodes = await readBattleEpisodesAsync(part50Game(), createBreather());
 
     // Слот соперника ОБЩИЙ на всех семерых, но сущность энчанта у каждого
     // боя своя, и читается именно она. Проверка на этом и стоит: у соперника

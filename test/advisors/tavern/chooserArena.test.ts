@@ -2,8 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   contrastAgainstPlayer,
-  enumerateArenaDecisions,
+  enumerateArenaDecisionsAsync,
   type ArenaDecision,
+  type ArenaEnumeration,
   type ArenaRow,
 } from '../../../src/advisors/tavern/chooserArena.js';
 import {
@@ -13,6 +14,7 @@ import {
 import { buyCostOf } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../../src/advisors/tavern/rules.js';
 import { loadCardIndex, type CardIndex } from '../../../src/data/cards.js';
+import { createBreather } from '../../breather.js';
 import { part19Game, part32Game } from '../../fixtures.js';
 
 /**
@@ -27,15 +29,20 @@ const base = (id: string): string => (id.endsWith('_G') ? id.slice(0, -2) : id);
 describe('перечисление точек арены', () => {
   let cards: CardIndex;
   let simulator: BattleSimulator;
+  let part19Enumeration: ArenaEnumeration;
   let part19: readonly ArenaDecision[] = [];
   let part32: readonly ArenaDecision[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     cards = loadCardIndex();
     simulator = createBattleSimulator();
-    part19 = enumerateArenaDecisions(part19Game(), { cards, simulator }).decisions;
-    part32 = enumerateArenaDecisions(part32Game(), { cards, simulator }).decisions;
-    // Снапшот карт плюс три прохода по двум логам на партию: десятки секунд.
+    // Три прохода по логу на партию: около 40 с на part19 в одиночку, и под
+    // нагрузкой полного прогона без пауз это не укладывалось в 180 с —
+    // поток держался дольше минуты, и vitest ронял прогон тайм-аутом RPC.
+    const breather = createBreather();
+    part19Enumeration = await enumerateArenaDecisionsAsync(part19Game(), { cards, simulator }, breather);
+    part19 = part19Enumeration.decisions;
+    part32 = (await enumerateArenaDecisionsAsync(part32Game(), { cards, simulator }, breather)).decisions;
   }, 180_000);
 
   it('находит точки в обеих партиях', () => {
@@ -87,12 +94,10 @@ describe('перечисление точек арены', () => {
     }
   });
 
-  // Свой бюджет времени: тест перечитывает part19 целиком (17 с в одиночку),
-  // и умолчания в 30 с ему хватает, только пока файл идёт один. В полном
-  // прогоне 84 файлов он падал по таймауту — не на утверждении, а на часах,
-  // как и `beforeAll` выше со своими 180 с.
+  // Отсев берётся из того же перечисления, что и `beforeAll`: прежде тест
+  // перечитывал part19 заново и держал поток ещё 40 с без пауз.
   it('отсев считается по причинам, и сумма сходится с числом точек решения', () => {
-    const { decisions, skips } = enumerateArenaDecisions(part19Game(), { cards, simulator });
+    const { decisions, skips } = part19Enumeration;
     const dropped =
       skips.notBuyFirst +
       skips.buyOffShop +
@@ -102,7 +107,7 @@ describe('перечисление точек арены', () => {
       skips.noSacrifice;
     // Точек решения у part19 четырнадцать (см. замер выборки в docs/ml.md).
     expect(decisions.length + dropped).toBe(14);
-  }, 180_000);
+  });
 });
 
 describe('парный контраст против игрока', () => {
