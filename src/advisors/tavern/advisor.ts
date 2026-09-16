@@ -4627,12 +4627,14 @@ function givesMinionValue(
   // Третий источник — пул НАЗВАННОГО ПЛЕМЕНИ (part30, «Discover a Mech»):
   // тиры от первого до своего, фильтр по расе, а `discover` меняет само
   // ожидание — Discover это ВЫБОР, и берётся лучший из трёх, а не средний.
-  pool: readonly Minion[] | TierPoolSource | { readonly tier: number } = state.shop,
+  pool: readonly Minion[] | TierPoolSource | { readonly tier: number; readonly discover?: boolean } = state.shop,
 ): { readonly score: number; readonly average: number; readonly discounted: boolean } {
   const fallback = rules.value.perTechLevel * state.techLevel;
   const average =
     'tier' in pool
-      ? (averagePoolValue([pool.tier], state, deps, rules) ?? fallback)
+      ? ((pool.discover === true
+          ? discoverPoolValue([pool.tier], state, deps, rules)
+          : averagePoolValue([pool.tier], state, deps, rules)) ?? fallback)
       : 'tiers' in pool
         ? ((pool.discover
             ? discoverPoolValue(pool.tiers, state, deps, rules, pool.race)
@@ -4753,14 +4755,23 @@ function namedTierPool(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
-): { readonly pool: readonly Minion[]; readonly tier: number } | null {
+): NamedTierSource | null {
   const numbered = new RegExp(rules.namedTierWords.numbered, 'i').exec(text);
   const own = rules.namedTierWords.ownTier.some((w) => new RegExp(w, 'i').test(text));
   const tier = numbered?.[1] !== undefined ? Number(numbered[1]) : own ? state.techLevel : null;
   if (tier === null || !Number.isFinite(tier)) return null;
 
   const pool = tierPool(tier, deps);
-  return pool.length === 0 ? null : { pool, tier };
+  // «Discover a minion of your Tier» — ВЫБОР, как у пула племени (part30):
+  // ожидание лучшего из трёх, а не среднее (долг part42, сила Элизы).
+  return pool.length === 0 ? null : { pool, tier, discover: /\bdiscover\b/i.test(text) };
+}
+
+/** Пул тира, названного в тексте: `discover` — выбор из трёх, иначе случайная карта. */
+interface NamedTierSource {
+  readonly pool: readonly Minion[];
+  readonly tier: number;
+  readonly discover?: boolean;
 }
 
 /**
@@ -5107,7 +5118,7 @@ export function heroPowerRule(
  */
 function heroPowerHurryCost(
   text: string,
-  source: readonly Minion[] | TierPoolSource | { readonly tier: number } | null,
+  source: readonly Minion[] | TierPoolSource | { readonly tier: number; readonly discover?: boolean } | null,
   body: number,
   state: GameState,
   deps: TavernAdvisorDeps,
@@ -5120,7 +5131,13 @@ function heroPowerHurryCost(
   const ahead = remainingTurns(state, rules);
   const lastTavernTurn = Math.round(tavernTurnOf(state.turn) + ahead);
   const topTier = Math.max(source.tier, targetTier(2 * lastTavernTurn - 1, rules));
-  const later = topTier > source.tier ? averagePoolValue([topTier], state, deps, rules) : null;
+  // Та же мера, что у тела сейчас: у Discover — лучший из трёх с обеих сторон.
+  const later =
+    topTier <= source.tier
+      ? null
+      : source.discover === true
+        ? discoverPoolValue([topTier], state, deps, rules)
+        : averagePoolValue([topTier], state, deps, rules);
   if (later === null) {
     return {
       cost: 0,
@@ -5149,7 +5166,7 @@ function heroPowerHurryCost(
  * тире разница между ними и есть весь вопрос (part23, ход 11).
  */
 function minionSourceNote(
-  tiered: { readonly tier: number } | TierPoolSource | null,
+  tiered: { readonly tier: number; readonly discover?: boolean } | TierPoolSource | null,
   average: number,
 ): string {
   if (tiered === null) return `как средний из витрины (${average.toFixed(1)})`;
@@ -5161,7 +5178,9 @@ function minionSourceNote(
       ? `как лучший из трёх ${tiered.race} ${range} (${average.toFixed(1)})`
       : `как случайный ${tiered.race} ${range} (${average.toFixed(1)})`;
   }
-  return `как средний миньон тира ${String(tiered.tier)} (${average.toFixed(1)})`;
+  return tiered.discover === true
+    ? `как лучший из трёх тира ${String(tiered.tier)} (${average.toFixed(1)})`
+    : `как средний миньон тира ${String(tiered.tier)} (${average.toFixed(1)})`;
 }
 
 /**

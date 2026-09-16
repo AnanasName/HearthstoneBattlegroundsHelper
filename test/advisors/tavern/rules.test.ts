@@ -4706,7 +4706,8 @@ describe('заклинание витрины «даёт миньона» на �
     const room = state({ gold: 9, techLevel: 4, board: strong.slice(0, 6), shopSpells: [sprout] });
     const rec = shopSpellRules(room, sproutDeps).find((r) => r.spellCardId === 'SPROUT');
     expect(rec).not.toBeUndefined();
-    expect(rec?.reason).toContain('средний миньон тира 1');
+    // Discover — выбор из трёх (D014, долг part42): не средний, а лучший.
+    expect(rec?.reason).toContain('лучший из трёх тира 1');
     expect(rec?.reason).not.toContain('борд полон');
   });
 
