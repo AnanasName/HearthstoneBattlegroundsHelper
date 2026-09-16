@@ -236,14 +236,20 @@ describe('part40: пираты Патчеса — активации, прода
     // До чтения `CHANGE_ENTITY` (part46) рука числилась вечным
     // «Unplayable» (`BG36_520t`), и этого шага не было: за партию сейф
     // открывался ЧЕТЫРЕ раза (20:08:37, 20:12:37, 20:15:51, 20:16:38).
+    //
+    // С D232 (part55) на этом борде стоит Hooktusk, и тёмный дар после силы
+    // кормит пиратов своим Discover — он встаёт вторым шагом вместо монетки
+    // и подъёма. Для пункта 4 важно другое, и оно не сдвинулось: сила стоит
+    // полные 3 — скидки без пиратов в витрине нет.
     expect(plan.steps.map((s) => s.recommendation.action)).toEqual([
       'heroPower',
+      'darkGift',
       'play',
-      'levelUp',
-      'play',
+      'buy',
+      'reroll',
     ]);
     expect(plan.steps[0]?.recommendation.cost).toBe(3);
-    expect(plan.steps[3]?.recommendation.cost).toBe(0);
-    expect(plan.steps[3]?.recommendation.minion?.golden).toBe(true);
+    expect(plan.steps[2]?.recommendation.cost).toBe(0);
+    expect(plan.steps[2]?.recommendation.minion?.golden).toBe(true);
   });
 });

@@ -236,7 +236,10 @@ describe('part51: продажа ради покупки на неполном �
       expect(wide('BG35_922')).toBe(false); // Queen's Command: «Give all your Naga another»
       expect(wide('BG34_272')).toBe(false); // Menagerie Tableware: «Repeat for each»
       expect(wide('BG36_246')).toBe(false); // Mighty Dragonbreath: «Repeat for your Dragons»
-      expect(wide('BG33_811')).toBe(false); // Healthy Bounty: «four friendly minions»
+      // Healthy Bounty: «four friendly minions» — множитель из фразы с потолком
+      // в четыре тела (D227, part55), а не весь борд.
+      expect(wide('BG33_811')).toBe(true);
+      expect(spellEffect('BG33_811', [1, 1, 1, 1], cards)?.boardCount).toBe(4);
       expect(wide('BG23_000t')).toBe(false); // Mini-Trident: одна цель
     });
 
