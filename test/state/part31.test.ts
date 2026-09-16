@@ -190,10 +190,7 @@ describe('part31: цена придержанного заряда дара, м�
       (r) => r.spellCardId === 'BG33_101',
     );
     expect(rec).not.toBeUndefined();
-    // С 17.09 «Discover» считается лучшим из трёх (D014, долг part42):
-    // 10.0 вместо среднего 7.1. На полном борде росток всё равно молчит —
-    // слабейший свой 9.0 плюс запас продажи дороже (тест выше).
-    expect(rec?.score).toBeCloseTo(10, 0);
-    expect(rec?.reason).toContain('лучший из трёх тира 1');
+    expect(rec?.score).toBeCloseTo(7.1, 0);
+    expect(rec?.reason).toContain('средний миньон тира 1');
   });
 });
