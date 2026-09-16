@@ -24,7 +24,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CURRENT_BUILD_PARTS } from '../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, fixtureLogPaths } from '../data/fixtureGames.js';
 import { partsArg, seedArg } from './args.js';
 import {
   comparable,
@@ -40,8 +40,20 @@ import { parseResult } from './result.js';
 interface Measurement {
   readonly name: string;
   readonly script: string;
-  /** Принимает ли скрипт `--parts`: калибровка читает свои пути. */
+  /** Принимает ли скрипт `--parts` номерами партий. */
   readonly takesParts: boolean;
+  /**
+   * Принимает ли скрипт ПУТИ к логам позиционными аргументами.
+   *
+   * Калибровка устроена так, и до 16.09.2026 батарея ей ничего не давала —
+   * а её собственное умолчание это ОДНА партия (part4). Полный прогон
+   * 16.09 это и показал: два первых замера шли по 30 минут на 49 партиях,
+   * а калибровка закончилась за 6 секунд на ВОСЬМИ боях, и её «расхождение
+   * 1.5 п.п. при Brier 0.003» относилось к одной партии, а не к корпусу.
+   * Умолчание самого скрипта не тронуто: `npm run calibrate` остаётся
+   * быстрой командой разработчика.
+   */
+  readonly takesPaths?: boolean;
 }
 
 /**
@@ -51,7 +63,7 @@ interface Measurement {
 const MEASUREMENTS: readonly Measurement[] = [
   { name: 'validate:tavern', script: 'src/advisors/tavern/validate.ts', takesParts: true },
   { name: 'validate:spend', script: 'src/advisors/tavern/validateSpend.ts', takesParts: true },
-  { name: 'calibrate', script: 'src/advisors/battle/calibrate.ts', takesParts: false },
+  { name: 'calibrate', script: 'src/advisors/battle/calibrate.ts', takesParts: false, takesPaths: true },
 ];
 
 const OUT_DIR = 'data/measurements';
@@ -101,6 +113,9 @@ function runScript(m: Measurement, seed: number, parts: readonly number[], full:
   return new Promise((resolve) => {
     const args = [TSX_CLI, m.script, `--seed=${String(seed)}`];
     if (m.takesParts && !full) args.push(`--parts=${parts.join(',')}`);
+    // Пути передаются ВСЕГДА, в том числе при полном прогоне: у скрипта,
+    // читающего пути, умолчание — своё и узкое (см. `takesPaths`).
+    if (m.takesPaths === true) args.push(...parts.flatMap((p) => fixtureLogPaths(p)));
     const started = Date.now();
     const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     const log = createWriteStream(logPath);
