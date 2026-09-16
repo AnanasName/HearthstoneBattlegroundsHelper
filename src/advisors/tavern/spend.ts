@@ -766,11 +766,19 @@ export function spendPlan(
   // подъёма целиком: ровно тот выбор, который делает игрок.
   const withoutLevelUp = levelStep !== undefined;
 
+  // Остаток после ОБНОВЛЕНИЯ, которым цепочка обрывается, не сгорает: его
+  // тратят на новую витрину (D228). Но и оценки ему нет, поэтому без штрафа
+  // сравниваются только две оборванные цепочки. Смешанная пара судится
+  // по-прежнему: иначе «просто обновить» с нетронутым золотом обходило бы
+  // любой ход, где остаток честно сгорает (part16, ход 17: план терял дар).
+  const valueOf = (plan: SpendPlan, rival: SpendPlan): number =>
+    chainValue(plan, state, deps, rules, !(plan.truncated && rival.truncated));
+
   let best = greedy;
-  let bestValue = chainValue(greedy, state, deps, rules);
   for (const first of alternatives) {
     const chain = buildChain(state, deps, rules, options, first, withoutLevelUp);
-    const value = chainValue(chain, state, deps, rules);
+    const value = valueOf(chain, best);
+    const bestValue = valueOf(best, chain);
     // Строгое превосходство: при равенстве остаётся жадная цепочка, чтобы
     // порядок советов и план не расходились без причины.
     //
@@ -787,10 +795,7 @@ export function spendPlan(
     const better = value > bestValue + 1e-9;
     const tieButLearnsSooner =
       Math.abs(value - bestValue) <= 1e-9 && (first.grantsGold ?? 0) > 0;
-    if (better || tieButLearnsSooner) {
-      best = chain;
-      bestValue = value;
-    }
+    if (better || tieButLearnsSooner) best = chain;
   }
   return best;
 }
@@ -814,6 +819,8 @@ function chainValue(
   start: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules,
+  // Считать ли остаток после обрывающего обновления сгоревшим (D228).
+  pendingIsBurnt = true,
 ): number {
   const gained =
     plan.steps
@@ -827,7 +834,9 @@ function chainValue(
   // прогон это и показал: на part52 (ход 21) из плана выпадал тёмный дар
   // (19.3), на part51 (ход 23) — покупка, и оба раза ради хвоста.
   // Хвост — утешение остатку, а не аргумент его копить.
-  return gained - burningGold(plan) * rules.goldPointValue;
+  const burning =
+    plan.truncated && !pendingIsBurnt ? burningGold(plan) - plan.goldLeft : burningGold(plan);
+  return gained - burning * rules.goldPointValue;
 }
 
 /**

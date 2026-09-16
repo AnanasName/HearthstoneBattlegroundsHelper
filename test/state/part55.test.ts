@@ -166,6 +166,66 @@ describe('part55: Юдора, раскопки золотых и пираты', 
     expect(dig(29)).toBeUndefined();
   });
 
+  /**
+   * Кадр 17:19 (скриншот из чата): ход 23, тир 6, золото 8/10, 11 здоровья,
+   * шесть пиратов борда со статами в сотнях, в витрине En-Djinn Blazer 5/5,
+   * Auto Assembler 2/2 и Captain Cookie 5/3. Между 17:19:38 (продан Patient
+   * Scout) и 17:19:44 (разыгран Flighty Scout) игрок ничего не делал.
+   */
+  it('кадр хода 23 совпадает со скриншотом', () => {
+    const frame = at('17:19:40');
+    expect(frame.turn).toBe(23);
+    expect(frame.techLevel).toBe(6);
+    expect(frame.gold).toBe(8);
+    expect(frame.goldTotal).toBe(10);
+    expect((frame.hero?.health ?? 0) - (frame.hero?.damage ?? 0) + (frame.hero?.armor ?? 0)).toBe(11);
+    expect(label(frame.board)).toEqual([
+      'Blade Collector 130/209',
+      'Maritime Extortionist 270/258',
+      'Sky Admiral Rogers 118/102',
+      'Hooktusk, Master Marauder 52/42',
+      'Enterprising Escapee 118/108',
+      'Brann Bronzebeard 22/4',
+    ]);
+    expect(frame.board.map((m) => m.golden)).toEqual([false, true, true, false, true, false]);
+    expect(label(frame.shop)).toEqual(['En-Djinn Blazer 5/5', 'Auto Assembler 2/2', 'Captain Cookie 5/3']);
+    expect(label(frame.hand)).toEqual(['Blade Collector 3/2', 'Flighty Scout 3/3']);
+    expect(frame.handSpells.map((s) => cards.info(s.cardId)?.name).sort()).toEqual([
+      'Lockbox',
+      'Selfish Bounty',
+      'Wealthy Bounty',
+    ]);
+  });
+
+  /**
+   * Жалоба игрока №2: «предлагает купить элементаля, который не выглядит
+   * полезным». План кадра был «КУПИТЬ En-Djinn Blazer → КУПИТЬ Captain Cookie,
+   * продав En-Djinn Blazer → Selfish Bounty → ОБНОВИТЬ». Клич En-Djinn
+   * («After the Tavern is Refreshed this game, give a random minion in it
+   * +{0}/+{1}») советник не оценивает, все его 14.5 — тело, выброшенное
+   * тем же ходом.
+   *
+   * Причин было две. Отменённый шаг кличевой карты считался оплаченным
+   * по дороге (исправлено в D224). И остаток после обновления, которым план
+   * обрывается, считался сгоревшим (D227): цепочка «Cookie → Selfish →
+   * обновить» оставляла 4 золота и стоила 26 − 12 = 14, а цепочка
+   * с En-Djinn оставляла 2 и стоила 41.5 − 20.5 − 6 = 15.
+   */
+  it('ход 23: план не покупает En-Djinn Blazer, чтобы продать его тем же ходом', () => {
+    for (const [label23, state] of [
+      ['кадр 17:19:40', at('17:19:40')],
+      ['точка решения', decisionPoint(23)],
+    ] as const) {
+      const plan = spendPlan(state, { cards });
+      const bought = plan.steps.filter(
+        (s) => s.recommendation.action === 'buy' && s.recommendation.minion?.cardId === 'BG34_865',
+      );
+      expect(bought, label23).toEqual([]);
+    }
+    const frameFirst = spendPlan(at('17:19:40'), { cards }).steps[0]?.recommendation;
+    expect(frameFirst?.minion?.cardId).toBe('BG36_760');
+  });
+
   it('план берёт силу, когда золото иначе остаётся: ходы 5 и 9', () => {
     for (const turn of [5, 9]) {
       const plan = spendPlan(decisionPoint(turn), { cards });
