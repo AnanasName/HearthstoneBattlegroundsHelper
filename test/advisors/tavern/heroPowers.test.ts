@@ -87,10 +87,11 @@ describe('покрытие сил героя правилами советник
     const count = (name: string): number =>
       pool.filter((id) => channelsOf(id).includes(name)).length;
 
-    expect(pool).toHaveLength(174);
+    // 174 → 177 после обновления снапшота под баланс 251952 (16.09).
+    expect(pool).toHaveLength(177);
     expect(count('tribe')).toBe(24);
     expect(count('sell')).toBe(3);
-    expect(count('minion')).toBe(17);
+    expect(count('minion')).toBe(18);
     expect(count('refresh')).toBe(3);
     expect(count('spell')).toBe(2);
     // Два канала от 26.08, и каждый закрывает ровно одну карту пула:
@@ -122,9 +123,9 @@ describe('покрытие сил героя правилами советник
     expect(count('gold')).toBe(2);
   });
 
-  it('из 174 сил пула советник не берёт ничего у 119', () => {
+  it('из 177 сил пула советник не берёт ничего у 121', () => {
     const mute = pool.filter((id) => channelsOf(id).length === 0);
-    expect(mute).toHaveLength(119);
+    expect(mute).toHaveLength(121);
 
     // Число большое, и прятать его незачем: сила героя определяет стиль
     // партии, а мы читаем меньше трети пула. Что из этого стоит вносить —

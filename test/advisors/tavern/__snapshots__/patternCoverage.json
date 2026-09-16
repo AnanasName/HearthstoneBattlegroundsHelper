@@ -1,9 +1,9 @@
 {
- "pool": 4612,
+ "pool": 4778,
  "coverage": {
-  "battlecryGetCountWords": 261,
-  "battlecryGetWords": 101,
-  "battleTextWords": 370,
+  "battlecryGetCountWords": 278,
+  "battlecryGetWords": 108,
+  "battleTextWords": 383,
   "bloodGemGetWords": 51,
   "bloodGemUpgradeWords": [
    "BG20_205",
@@ -44,11 +44,11 @@
    "BG35_437_G",
    "BG35_MagicItem_431t"
   ],
-  "bloodGemWords": 198,
-  "boardWideBuffExcludeWords": 747,
-  "boardWideBuffWords": 114,
-  "buffsShopAllGameWords": 270,
-  "buffsShopWords": 68,
+  "bloodGemWords": 199,
+  "boardWideBuffExcludeWords": 773,
+  "boardWideBuffWords": 120,
+  "buffsShopAllGameWords": 288,
+  "buffsShopWords": 70,
   "consumeTavernWords": [
    "BG21_005",
    "BG21_005_G",
@@ -59,8 +59,8 @@
    "BG35_MagicItem_755",
    "BG35_MagicItem_755t"
   ],
-  "doubledMechanicWords.BATTLECRY": 393,
-  "doubledMechanicWords.DEATHRATTLE": 495,
+  "doubledMechanicWords.BATTLECRY": 406,
+  "doubledMechanicWords.DEATHRATTLE": 517,
   "doubledMechanicWords.END_OF_TURN": [
    "BG23_Spellcraft_e",
    "BG24_Reward_130",
@@ -108,8 +108,8 @@
    "BG35_MagicItem_838t",
    "BG36_503_G"
   ],
-  "economyTextWords": 137,
-  "engineTextWords": 1182,
+  "economyTextWords": 144,
+  "engineTextWords": 1231,
   "freeRefreshWords": [
    "BG28_827",
    "BG32_MagicItem_901",
@@ -132,7 +132,7 @@
    "TB_BaconShop_HP_040",
    "TB_BaconShop_HP_049"
   ],
-  "givesMinionWords": 235,
+  "givesMinionWords": 242,
   "goldSinkTriggerWords": [
    "BG20_206",
    "BG20_206_G",
@@ -169,6 +169,7 @@
    "BG36_523",
    "BG36_523_G",
    "BG36_MagicItem_300",
+   "BG36_MagicItem_408",
    "TB_BaconShop_HP_037a"
   ],
   "handFeederWords": 57,
@@ -271,11 +272,11 @@
    "TB_BaconShop_HP_028",
    "TB_BaconShop_HP_077"
   ],
-  "heroPowerSellWords": 81,
+  "heroPowerSellWords": 89,
   "heroPowerShotWords": [
    "BG22_HERO_000p_Alt"
   ],
-  "heroPowerSpellWords": 74,
+  "heroPowerSpellWords": 79,
   "heroPowerTierStatsWords": [
    "BG26_HERO_102p",
    "BG26_HERO_102p2"
@@ -283,16 +284,14 @@
   "heroPowerUpgradeWords": [
    "TB_BaconShop_HP_011"
   ],
-  "magnetDoubleWords": [
+  "magnetDoubleWords": [],
+  "magnetExtraTimesWords": [
    "BG36_506",
    "BG36_506_G"
   ],
-  "magnetMultiplierWords.doubled": [
-   "BG36_506"
-  ],
+  "magnetMultiplierWords.doubled": [],
   "magnetMultiplierWords.tripled": [
-   "BG33_890t",
-   "BG36_506_G"
+   "BG33_890t"
   ],
   "maxGoldWords": [
    "BG28_805",
@@ -307,6 +306,7 @@
    "BG34_PreMadeChamp_067",
    "BG34_PreMadeChamp_067_G",
    "BG34_Treasure_932",
+   "BG36_303",
    "BG36_332",
    "BG36_332_G",
    "BG36_332_Gt2",
@@ -340,6 +340,8 @@
    "BG33_Reward_021",
    "BG34_Giant_376",
    "BG36_MagicItem_215",
+   "BG36_MidGameEffect_000t78",
+   "BG36_MidGameEffect_000t78e",
    "BGS_Treasures_030",
    "BGS_Treasures_030e",
    "BG_LOE_077",
@@ -349,11 +351,11 @@
    "TB_BaconShop_HERO_35_Buddy_t1e",
    "TB_BaconShop_HP_022e"
   ],
-  "mechanicTextWords.DEATHRATTLE": 495,
-  "mechanicTextWords.BACON_RALLY": 171,
-  "mechanicTextWords.BACON_SPELLCRAFT_ID": 411,
-  "mechanicTextWords.BATTLECRY": 393,
-  "namedTierWords.numbered": 122,
+  "mechanicTextWords.DEATHRATTLE": 517,
+  "mechanicTextWords.BACON_RALLY": 176,
+  "mechanicTextWords.BACON_SPELLCRAFT_ID": 433,
+  "mechanicTextWords.BATTLECRY": 406,
+  "namedTierWords.numbered": 124,
   "namedTierWords.ownTier": [
    "BG20_HERO_283p_t3",
    "BG23_014",
@@ -372,7 +374,6 @@
    "BG34_Giant_594",
    "BG34_Giant_594_G",
    "BG34_Treasure_903",
-   "BG36_MidGameEffect_000",
    "BGDUO_HERO_222_Buddy",
    "BGDUO_HERO_222_Buddy_G",
    "BGDUO_HERO_223_Buddy",
@@ -387,9 +388,9 @@
    "TB_BaconShop_HP_101",
    "TB_BaconShop_HP_103"
   ],
-  "selfAuraWords": 45,
-  "selfTriggerWords": 60,
-  "sellValueWords": 55,
+  "selfAuraWords": 51,
+  "selfTriggerWords": 65,
+  "sellValueWords": 61,
   "setStatsWords": [
    "BG28_838",
    "BG36_356",
@@ -419,7 +420,7 @@
    "BG33_870",
    "BG33_870_G"
   ],
-  "spellMagnetGainWords": 146,
+  "spellMagnetGainWords": 150,
   "spellMagnetPermanentWords": [
    "BG23_009",
    "BG23_009_G",
@@ -450,60 +451,19 @@
    "BG36_921",
    "BG36_921_G"
   ],
-  "tavernTriggerWords": 685,
+  "tavernTriggerWords": 704,
   "temporaryBuffWords": 134,
-  "tribeTextWords.MURLOC": 86,
+  "tribeTextWords.MURLOC": 88,
   "tribeTextWords.DEMON": 83,
   "tribeTextWords.MECH": 92,
   "tribeTextWords.ELEMENTAL": 115,
-  "tribeTextWords.BEAST": 106,
-  "tribeTextWords.PIRATE": 86,
-  "tribeTextWords.DRAGON": 84,
-  "tribeTextWords.QUILBOAR": [
-   "BG20_203",
-   "BG20_203_G",
-   "BG20_GEM_DivineShield",
-   "BG20_GEM_Reborn",
-   "BG20_GEM_Taunt",
-   "BG23_018",
-   "BG23_018_G",
-   "BG26_157",
-   "BG26_157_G",
-   "BG26_867",
-   "BG26_867_G",
-   "BG27_Anomaly_104t8",
-   "BG30_MagicItem_411",
-   "BG30_MagicItem_442",
-   "BG30_MagicItem_546",
-   "BG31_323",
-   "BG31_323_G",
-   "BG32_430",
-   "BG32_430_G",
-   "BG33_884",
-   "BG33_884_G",
-   "BG33_888",
-   "BG33_888_G",
-   "BG34_Giant_002",
-   "BG34_Giant_002_G",
-   "BG34_Giant_104",
-   "BG34_Giant_104_G",
-   "BG34_Giant_608",
-   "BG34_Giant_608_G",
-   "BG35_432",
-   "BG35_432_G",
-   "BG35_433",
-   "BG35_433_G",
-   "BG35_MagicItem_434",
-   "BG36_332",
-   "BG36_332_G",
-   "BG36_332_Gt",
-   "BG36_332t",
-   "BG_ShopBuff_Quilboar",
-   "TB_BaconShop_HP_041i"
-  ],
+  "tribeTextWords.BEAST": 107,
+  "tribeTextWords.PIRATE": 87,
+  "tribeTextWords.DRAGON": 85,
+  "tribeTextWords.QUILBOAR": 41,
   "tribeTextWords.NAGA": 54,
-  "tribeTextWords.UNDEAD": 89,
-  "triggerGetWords": 259,
+  "tribeTextWords.UNDEAD": 90,
+  "triggerGetWords": 269,
   "tripleCopiesWords": [
    "BG23_192",
    "BG24_Reward_350",
@@ -511,6 +471,6 @@
    "BG30_MagicItem_439",
    "BG34_HERO_002p"
   ],
-  "untargetedSpellWords": 842
+  "untargetedSpellWords": 893
  }
 }

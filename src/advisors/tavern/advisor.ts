@@ -1486,6 +1486,14 @@ export function magnetDoublerOf(
     const word = m?.[1]?.toLowerCase();
     if (word !== undefined) return rules.magnetMultiplierWords[word] ?? null;
   }
+  // Вторая формулировка той же активации — через число ЛИШНИХ раз
+  // (баланс 251952): «happens an extra time» — это два раза, а не один.
+  for (const w of rules.magnetExtraTimesWords) {
+    const raw = new RegExp(w, 'i').exec(text)?.[1]?.toLowerCase();
+    if (raw === undefined) continue;
+    const extra = raw === 'an' ? 1 : Number(raw);
+    if (Number.isFinite(extra) && extra > 0) return 1 + extra;
+  }
   return null;
 }
 

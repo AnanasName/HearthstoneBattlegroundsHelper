@@ -524,10 +524,31 @@ export interface TavernRules {
    *
    * Класс узкий и назван: во всём снапшоте таких карт две (обычная
    * и золотая), в пуле — ОДНА.
+   *
+   * **Баланс 251952 переписал ФОРМУЛИРОВКУ, и правило умерло молча**
+   * (16.09.2026): вместо «is doubled/tripled» карта теперь говорит
+   * «happens an extra time» и «happens 2 extra times». Шаблон перестал
+   * совпадать, `magnetDoublerOf` вернул `null`, и вся правка part44
+   * (D183) выключилась — при зелёных тестах. Поймал это снимок охвата
+   * (`patternCoverage.test.ts`): список `magnetDoubleWords` стал ПУСТЫМ.
+   * Отсюда вторая форма ниже — она читает ЧИСЛО ЛИШНИХ РАЗ, а множитель
+   * считается как «единица плюс лишние»: «an extra time» → 2,
+   * «2 extra times» → 3.
+   *
+   * Старая форма ОСТАВЛЕНА, хотя в нынешнем снапшоте не совпадает ни с одной
+   * картой (её список в снимке охвата пуст — так и должно быть): фраза
+   * вернётся с любым следующим переписыванием, а цена хранения — одна
+   * строка. Тексты карт советник берёт из снапшота, а не из лога, поэтому
+   * на старых фикстурах читается тоже новая формулировка.
    */
   readonly magnetDoubleWords: readonly string[];
   /** Слово множителя из текста → во сколько раз ляжет модуль. */
   readonly magnetMultiplierWords: Readonly<Record<string, number>>;
+  /**
+   * Та же активация, записанная ЧИСЛОМ ЛИШНИХ РАЗ: группа 1 — «an» или
+   * цифра, множитель = 1 + это число.
+   */
+  readonly magnetExtraTimesWords: readonly string[];
 
   /**
    * Сила, ДЕШЕВЕЮЩАЯ от покупок своего племени: «Get a Pirate. After you buy
@@ -1499,6 +1520,12 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\bnext\\s*(?:<[^>]*>\\s*)*magnetization\\b[^.]*\\b(doubled|tripled)\\b',
   ],
   magnetMultiplierWords: { doubled: 2, tripled: 3 },
+
+  // «The next Magnetization to this minion this turn happens an extra time»
+  // (Дрон-дубликатор после баланса 251952; у золотой — «2 extra times»).
+  magnetExtraTimesWords: [
+    '\\bnext\\s*(?:<[^>]*>\\s*)*magnetization\\b[^.]*\\bhappens\\s+(an|\\d+)\\s+extra\\s+times?\\b',
+  ],
 
   // «After you buy a Pirate, your next Hero Power costs (1) less.» (Патчес).
   // Группа 1 — племя, группа 2 — величина скидки.

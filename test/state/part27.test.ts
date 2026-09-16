@@ -183,12 +183,13 @@ describe('part27: заморозка после покупки, цель про�
         if (isEffectEngine(minion(1, { cardId: info.id }), cards)) combat += 1;
       }
     }
-    // 129 голов триггера; движками остаются 46 — в том числе слушатели
+    // 138 голов триггера (было 129 до снапшота под баланс 251952);
+    // движками остаются 52 — в том числе слушатели
     // заклинаний («Whenever you cast a Tavern spell»: Timecap'n Hooktail,
     // Charging Czarina) и добычи в руку (Timewarped Peggy): и то и другое
     // случается в бою через Rally, и симулятор это моделирует.
-    expect(withHead).toBe(129);
-    expect(combat).toBe(46);
+    expect(withHead).toBe(138);
+    expect(combat).toBe(52);
   });
 
   it('пункт 2: Slimy Shield целится в крупнейшее тело, а не в отработавший генератор', () => {

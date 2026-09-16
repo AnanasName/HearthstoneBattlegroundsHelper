@@ -47,14 +47,16 @@ describe('платный край борда', () => {
     trinketsByPlayer: { 4: dbfIds },
   });
 
-  it('край называют 24 тринкета, а «каждый ход» из них — семь', () => {
+  // Числа пересняты 16.09 после обновления снапшота под баланс 251952:
+  // тринкетов в наборе стало 234 вместо 230, и край называет на один больше.
+  it('край называют 25 тринкетов, а «каждый ход» из них — восемь', () => {
     const edge = /(left|right)-?\s*most/i;
     const eot = /at\s+the\s+end\s+of\s+(?:your|each)\s+turn/i;
     const named = trinkets.filter((id) => edge.test(normalizeCardText(cards.info(id)?.text ?? '')));
-    expect(named).toHaveLength(24);
+    expect(named).toHaveLength(25);
 
     const repeating = named.filter((id) => eot.test(normalizeCardText(cards.info(id)?.text ?? '')));
-    expect(repeating).toHaveLength(7);
+    expect(repeating).toHaveLength(8);
     // Берётся ТОЛЬКО повторяющийся класс: про «Start of Combat» обещать
     // «расстановка не считает» нельзя — часть таких эффектов симулятор
     // считает сам.

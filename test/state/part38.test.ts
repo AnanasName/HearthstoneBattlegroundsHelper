@@ -121,7 +121,9 @@ describe("part38: прокрутка генератора со счётом ЦИ
       .filter((c) =>
         /battlecry:?[^.]*\b(?:get|discover|add)s?\b/i.test(c.text ?? ""),
       );
-    expect(generators).toHaveLength(22);
+    // 22 → 24 после обновления снапшота под баланс 251952 (16.09): пул
+    // пересобран, и кличевых генераторов стало на два больше.
+    expect(generators).toHaveLength(24);
     expect(
       generators.filter((c) =>
         /\b(?:get|discover|add)s?\s+(?:two|three|four)\b/i.test(c.text ?? ""),
