@@ -400,6 +400,32 @@ export interface TavernRules {
   readonly delayedRewardWords: readonly string[];
 
   /**
+   * Признак «цель заклинания — СВОЙ миньон, которого выбирает игрок».
+   *
+   * ПОЗИТИВНЫЙ, и это главное. Флаг `untargeted` построен на отрицательном
+   * списке слов, и D211 уже запретил выводить из него число получателей:
+   * условие `!untargeted` ловит 111 заклинаний пула, из которых у 53 цели
+   * нет вовсе (Meditation, Pristine Lilies, Guzzle the Goop…). Шаблон
+   * проверяется по ПЕРВОМУ предложению текста без тегов разметки,
+   * `{tribe}` подставляется из `tribeTextWords`. Замер по пулу: 58 карт,
+   * все с целью.
+   */
+  readonly targetsFriendlyWords: readonly string[];
+
+  /**
+   * Свой миньон, который ПОВТОРЯЕТ заклинания по своим миньонам, — и во сколько
+   * раз. Группа 1 — слово множителя.
+   *
+   * Balinda Stonehearth `BG35_883`: «Your spells that target friendly minions
+   * cast twice», золотая — «three times» (part53, D219). Лог показывает это
+   * прямо: один блок PLAY и ДВА блока POWER того же заклинания (у золотой —
+   * ТРИ, part53 01:30:51). Фраза дословная, cardId в код не зашит;
+   * у тринкета Spitescale Sushi Roll похожий текст со счётчиком и лимитом,
+   * и он сюда не попадает намеренно.
+   */
+  readonly friendlyTargetCastWords: readonly string[];
+
+  /**
    * Признак «миньон придёт ИЗ ВИТРИНЫ, а не из пула»: «Steal a random minion
    * from the Tavern» (Enchanted Lasso).
    *
@@ -1530,6 +1556,15 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // приставки игра пишет по-разному у разных карт, поэтому начало фразы
   // не закрепляется: важно само «следующим боем», где бы оно ни стояло.
   delayedRewardWords: ['\\bnext combat\\b', '\\bat the start of (?:your\\s+)?next combat\\b'],
+
+  // «Give a minion +{0}/+{1}», «Choose a friendly Beast», «Choose One - Give
+  // a minion…» — цель по выбору игрока, названная в первом предложении.
+  targetsFriendlyWords: [
+    '^\\s*(?:\\[x\\])?\\s*(?:choose\\s+one\\s*[-—]\\s*)?(?:give|choose)\\s+an?\\s+(?:friendly\\s+)?(?:minion|{tribe})\\b',
+  ],
+  friendlyTargetCastWords: [
+    '\\byour\\s+spells\\s+that\\s+target\\s+friendly\\s+minions\\s+cast\\s+(twice|three\\s+times)\\b',
+  ],
 
   givesMinionFromShopWords: ['from\\s+the\\s+tavern'],
 

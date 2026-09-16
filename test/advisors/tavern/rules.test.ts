@@ -9,7 +9,9 @@ import {
   copiesForTriple,
   copiesOwned,
   darkGiftRule,
+  effectOnBoard,
   freeHeroPowerRule,
+  friendlyCastMultiplier,
   heroPowerBuyReward,
   heroPowerKeywordRule,
   heroPowerShotRule,
@@ -1799,14 +1801,28 @@ describe('заклинания руки', () => {
       chosen: null,
       branchEffects: [],
     };
-    expect(spellEffect('LIT', [], idx)).toEqual({ gold: 0, stats: 2, divineShield: false, ...plain });
+    // Цель по выбору — «Give a (friendly) minion» в первом предложении (D219).
+    expect(spellEffect('LIT', [], idx)).toEqual({
+      gold: 0,
+      stats: 2,
+      divineShield: false,
+      targetsFriendly: true,
+      ...plain,
+    });
     expect(spellEffect('PH', [10, null], idx)).toEqual({
       gold: 0,
       stats: 10,
       divineShield: true,
+      targetsFriendly: true,
       ...plain,
     });
-    expect(spellEffect('GOLD', [], idx)).toEqual({ gold: 2, stats: 0, divineShield: false, ...plain });
+    expect(spellEffect('GOLD', [], idx)).toEqual({
+      gold: 2,
+      stats: 0,
+      divineShield: false,
+      targetsFriendly: false,
+      ...plain,
+    });
     expect(spellEffect('NONE', [], idx)).toBeNull();
   });
 
@@ -1899,6 +1915,9 @@ describe('заклинания руки', () => {
       targetRace: null,
       untargeted: false,
       boardWide: false,
+      // Жертву игрок выбирает, но «Destroy» — не «Give a minion»: повтор
+      // заклинания жертвой не считается (D219).
+      targetsFriendly: false,
       givesMinion: false,
       givesCards: 0,
       givesCardId: null,
@@ -2035,6 +2054,85 @@ describe('заклинания руки', () => {
     expect(pick(6)).toBe('Один за всех');
     // Одно тело: 6 против 24.
     expect(pick(1)).toBe('Все за одного');
+  });
+
+  it('Balinda повторяет заклинание по своему миньону — и только его (part53, D219)', () => {
+    // Текст дословно из снапшота, с разметкой и переносами: шаблон обязан
+    // их терпеть.
+    const idx = createCardIndex([
+      {
+        id: 'BOUNTY',
+        name: 'Лесная щедрость',
+        text: 'Choose One - Give a minion +{0}/+{1} twice; or Give your minions +{2}/+{3}.',
+        mechanics: ['CHOOSE_ONE'],
+      },
+      { id: 'BOUNTYt', name: 'Все за одного', text: 'Give a minion +{0}/+{1} twice.' },
+      { id: 'BOUNTYt2', name: 'Один за всех', text: 'Give your minions +{2}/+{3}.' },
+      { id: 'RING', name: 'Кольцо', text: 'Give your minions +{0}/+{1}.' },
+      { id: 'TEASET', name: 'Сервиз', text: 'Give a friendly minion of each type +2/+2.' },
+      { id: 'ARROW', name: 'Стрела', text: 'Give a minion +{0} Attack.' },
+      { id: 'BODY', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+      {
+        id: 'BALINDA',
+        name: 'Балинда',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        text: '[x]Your spells that target\nfriendly minions cast\ntwice.',
+      },
+      {
+        id: 'BALINDA_G',
+        name: 'Балинда',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        text: '[x]Your spells that target\nfriendly minions cast\nthree times.',
+      },
+    ]);
+    const bodies = (n: number): Minion[] =>
+      Array.from({ length: n }, (_, i) => minion(i + 1, { cardId: 'BODY', attack: 5, health: 5 }));
+    const withBalinda = (golden = false): Minion[] => [
+      ...bodies(5),
+      minion(9, { cardId: golden ? 'BALINDA_G' : 'BALINDA', attack: 4, health: 4 }),
+    ];
+
+    expect(friendlyCastMultiplier(bodies(6), idx)).toBe(1);
+    expect(friendlyCastMultiplier(withBalinda(), idx)).toBe(2);
+    expect(friendlyCastMultiplier(withBalinda(true), idx)).toBe(3);
+
+    // Выбор ветви на шести телах переворачивается: 2 каста × 24 = 48
+    // против 6 × 6 = 36 у «всем» — ровно то, что игрок делал пять раз из пяти.
+    const pick = (board: Minion[]): string | undefined =>
+      spellRules(state({ board, handSpells: [{ ...handSpell('BOUNTY'), scriptData: [6, 6, 3, 3] }] }), {
+        cards: idx,
+      })[0]?.spellBranches?.map((b) => b.name).join('/');
+    expect(pick(bodies(6))).toBe('Один за всех');
+    expect(pick(withBalinda())).toBe('Все за одного');
+
+    // Направленная стрела: статы повторяются, и совет говорит это вслух.
+    const arrow = effectOnBoard(spellEffect('ARROW', [4], idx)!, withBalinda(), undefined, idx);
+    expect(arrow.casts).toBe(2);
+    expect(arrow.effect.stats).toBe(8);
+    const golden = effectOnBoard(spellEffect('ARROW', [4], idx)!, withBalinda(true), undefined, idx);
+    expect(golden.effect.stats).toBe(12);
+    const rec = spellRules(state({ board: withBalinda(), handSpells: [{ ...handSpell('ARROW'), scriptData: [4] }] }), {
+      cards: idx,
+    })[0];
+    expect(rec?.reason).toContain('сработает дважды');
+
+    // Безадресное не повторяется: лог даёт Shiny Ring под Balinda один блок
+    // POWER, а сервиз раздаёт цели сам, хотя начинается как направленное.
+    const ring = effectOnBoard(spellEffect('RING', [1, 1], idx)!, withBalinda(), undefined, idx);
+    expect(ring.casts).toBe(1);
+    expect(ring.effect.stats).toBe(12);
+    const tea = spellEffect('TEASET', [], idx)!;
+    expect(tea.untargeted).toBe(true);
+    expect(effectOnBoard(tea, withBalinda(), undefined, idx).casts).toBe(1);
+
+    // Без индекса карт повтор не читается — прежние вызовы не меняются.
+    expect(effectOnBoard(spellEffect('ARROW', [4], idx)!, withBalinda()).casts).toBe(1);
   });
 
   it('провокация не вешается на миньона-«движка» (part15, Slimy Shield)', () => {

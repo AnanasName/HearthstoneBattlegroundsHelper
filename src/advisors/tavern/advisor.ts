@@ -5757,6 +5757,15 @@ export interface SpellEffect {
    */
   readonly boardWide: boolean;
   /**
+   * Цель — СВОЙ миньон по выбору игрока (`targetsFriendlyWords`, D219).
+   *
+   * Нужен ровно удвоителю заклинаний по своим (Balinda Stonehearth): лог
+   * повторяет такие заклинания, а безадресные — нет (Shiny Ring и Hostile
+   * Bounty под Balinda дают по одному блоку POWER). Признак положительный
+   * и не выводится из `untargeted`: см. таблицу правил.
+   */
+  readonly targetsFriendly: boolean;
+  /**
    * Заклинание ДАЁТ МИНЬОНА — то же, что покупка, только дешевле трёх
    * (`givesMinionWords`). «Enchanted Lasso» за 2: «Steal a random minion
    * from the Tavern» (part17, ход 1). Ни статов, ни золота в тексте нет,
@@ -5986,19 +5995,54 @@ function branchScore(effect: SpellEffect, rules: TavernRules): number {
  * Оценка остаётся НИЖНЕЙ в одном месте, и это названо: план может продать
  * одного из усиленных позже в том же ходу, и тогда бафф на нём пропадёт —
  * шаги плана считаются по борду своего момента, как у всех правил.
+ *
+ * **Второй множитель — ПОВТОР заклинания по своему миньону** (D219, part53).
+ * Balinda Stonehearth на своём борде («Your spells that target friendly
+ * minions cast twice») повторяет направленное заклинание целиком: в логе
+ * один блок PLAY и два блока POWER, цель Forest's Bounty получала
+ * 2 каста × 2 раза × 9/9 = 72 стата. Советник же сравнивал ветви без
+ * повтора — 36 против 60 — и звал «всем», тогда как игрок пять раз из пяти
+ * брал цель. Множитель ложится ТОЛЬКО на статы и ТОЛЬКО у заклинаний
+ * с положительным признаком цели: ключевое слово второй раз не даётся,
+ * безадресные заклинания лог не повторяет (Shiny Ring — один блок),
+ * а золото, «даёт миньона» и слушатели каста — отдельный долг. Две Balinda
+ * дают максимум, а не произведение: фактуры на сложение нет. `cards`
+ * необязателен только ради прежних вызовов в тестах: без него повтор
+ * не читается.
  */
 export function effectOnBoard(
   effect: SpellEffect,
   board: readonly Minion[],
   rules: TavernRules = DEFAULT_TAVERN_RULES,
-): { readonly effect: SpellEffect; readonly bodies: number; readonly wide: boolean } {
+  cards?: CardIndex,
+): {
+  readonly effect: SpellEffect;
+  readonly bodies: number;
+  readonly wide: boolean;
+  readonly casts: number;
+} {
   const bodiesOf = (e: SpellEffect): number =>
     e.boardWide ? Math.max(1, Math.min(board.length, rules.boardSize)) : 1;
+  const repeat = cards === undefined ? 1 : friendlyCastMultiplier(board, cards, rules);
+  // Положительный признак цели И отрицательный вместе: «Give a friendly
+  // minion of each type» (Misplaced Tea Set) начинается как направленное,
+  // но цель раздаёт игра, и такое `untargeted` отсекает (part15).
+  const castsOf = (e: SpellEffect): number =>
+    repeat > 1 &&
+    e.targetsFriendly &&
+    !e.untargeted &&
+    !e.boardWide &&
+    !e.buffsShop &&
+    !e.destroysFriendly
+      ? repeat
+      : 1;
 
   let picked = effect;
   if (effect.chosen === null && effect.branchEffects.length > 1) {
     const scores = effect.branchEffects.map(
-      (e) => branchScore(e, rules) + (bodiesOf(e) - 1) * e.stats * rules.value.perStatPoint,
+      (e) =>
+        branchScore(e, rules) +
+        (bodiesOf(e) * castsOf(e) - 1) * e.stats * rules.value.perStatPoint,
     );
     const best = Math.max(...scores);
     const leaders = scores.flatMap((s, i) => (s === best ? [i] : []));
@@ -6015,20 +6059,52 @@ export function effectOnBoard(
   }
 
   const bodies = bodiesOf(picked);
+  const casts = castsOf(picked);
   const wide = picked.boardWide;
-  if (bodies === 1) return { effect: picked, bodies, wide };
+  const factor = bodies * casts;
+  if (factor === 1) return { effect: picked, bodies, wide, casts };
   return {
     wide,
-    // `boardWide` снимается с умноженного эффекта: второй вызов на нём
-    // не должен умножить ещё раз.
+    // `boardWide` и `targetsFriendly` снимаются с умноженного эффекта:
+    // второй вызов на нём не должен умножить ещё раз.
     effect: {
       ...picked,
-      stats: picked.stats * bodies,
-      temporaryStats: picked.temporaryStats * bodies,
+      stats: picked.stats * factor,
+      temporaryStats: picked.temporaryStats * factor,
       boardWide: false,
+      targetsFriendly: casts > 1 ? false : picked.targetsFriendly,
     },
     bodies,
+    casts,
   };
+}
+
+/**
+ * Во сколько раз свой борд повторяет заклинание по своему миньону (D219).
+ *
+ * Множитель — слово из текста миньона на борде: «twice» — 2, «three
+ * times» — 3. Из нескольких удвоителей берётся больший.
+ */
+export function friendlyCastMultiplier(
+  board: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  let best = 1;
+  for (const m of board) {
+    const word = firstMatch(rules.friendlyTargetCastWords, cards.info(m.cardId)?.text ?? '');
+    if (word === null) continue;
+    best = Math.max(best, /three/i.test(word) ? 3 : 2);
+  }
+  return best;
+}
+
+/** Приписка к совету, когда заклинание повторит свой миньон. */
+function castsNote(casts: number): string {
+  if (casts <= 1) return '';
+  return casts === 2
+    ? ' (сработает дважды: удвоитель заклинаний по своим на борде)'
+    : ` (сработает ${String(casts)} раза: удвоитель заклинаний по своим на борде)`;
 }
 
 /** Приписка к «+N статов», когда их получает весь борд. */
@@ -6904,6 +6980,15 @@ function computeSpellEffect(
   const givesCardId = givesMinion ? null : promisedCardId(text, cards);
   const givesCards = givesCardId === null ? 0 : promisedCardCount(text, rules);
 
+  // Цель по выбору — первое предложение без тегов разметки («<b>Choose
+  // One</b> - Give a minion…»): дальше по тексту «a minion» встречается
+  // и в чужих ролях («…get a minion of the same type»).
+  const firstClause = text.replace(/<[^>]*>/g, '').split(/[.;]/)[0] ?? '';
+  const tribes = Object.values(rules.tribeTextWords).join('|');
+  const targetsFriendly = rules.targetsFriendlyWords.some((w) =>
+    new RegExp(w.replace('{tribe}', `(?:${tribes})`), 'i').test(firstClause),
+  );
+
   if (
     gold === null &&
     stats === 0 &&
@@ -6934,6 +7019,7 @@ function computeSpellEffect(
     targetRace,
     untargeted,
     boardWide,
+    targetsFriendly,
     givesMinion,
     givesCards,
     givesCardId,
@@ -7267,6 +7353,7 @@ export function buffTarget(
     targetRace: null,
     untargeted: false,
     boardWide: false,
+    targetsFriendly: true,
     givesMinion: false,
     givesCards: 0,
     givesCardId: null,
@@ -7461,7 +7548,7 @@ export function spellRules(
     // Усиление или замена: бесплатная ценность перед боем.
     if (spell.cost > state.gold || state.board.length === 0) return [];
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
-    const onBoard = effectOnBoard(effect, state.board, rules);
+    const onBoard = effectOnBoard(effect, state.board, rules, deps.cards);
     const boosted = onBoard.effect;
     const score =
       (boosted.transforms
@@ -7490,7 +7577,7 @@ export function spellRules(
         reason:
           `${name} — ${boosted.transforms ? 'замена' : 'усиление перед боем'}` +
           (boosted.stats > 0
-            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})`
+            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})${castsNote(onBoard.casts)}`
             : '') +
           (boosted.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
@@ -7878,7 +7965,7 @@ export function shopSpellRules(
 
     if (state.board.length === 0) return [];
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
-    const onBoard = effectOnBoard(effect, state.board, rules);
+    const onBoard = effectOnBoard(effect, state.board, rules, deps.cards);
     const boosted = onBoard.effect;
     const score = boosted.transforms
       ? rules.value.transform
@@ -7903,7 +7990,7 @@ export function shopSpellRules(
         reason:
           `${name} за ${price} — ${boosted.transforms ? 'замена' : 'усиление'}` +
           (boosted.stats > 0
-            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})`
+            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})${castsNote(onBoard.casts)}`
             : '') +
           (boosted.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
@@ -8503,7 +8590,8 @@ export function choiceAdvice(
           ? spellEffect(option.cardId, option.scriptData ?? [], deps.cards, rules)
           : null;
       // Статы на весь борд — той же функцией, что у покупки и розыгрыша (part51).
-      const onBoard = parsed === null ? null : effectOnBoard(parsed, state.board, rules);
+      const onBoard =
+        parsed === null ? null : effectOnBoard(parsed, state.board, rules, deps.cards);
       const effect = onBoard?.effect ?? null;
       if (effect === null || (effect.stats === 0 && !effect.divineShield && effect.gold === 0)) {
         return { option, name, value: null, score: null, reason: 'оценить не берёмся' };

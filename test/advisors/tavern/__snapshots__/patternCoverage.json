@@ -132,6 +132,10 @@
    "BGS_116",
    "BGS_Treasures_023pe"
   ],
+  "friendlyTargetCastWords": [
+   "BG35_883",
+   "BG35_883_G"
+  ],
   "givesMinionFromShopWords": [
    "BG23_HERO_305p",
    "BG24_022",
@@ -464,6 +468,7 @@
    "BG36_921",
    "BG36_921_G"
   ],
+  "targetsFriendlyWords": 103,
   "tavernTriggerWords": 704,
   "temporaryBuffWords": 134,
   "tribeTextWords.MURLOC": 88,
