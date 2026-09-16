@@ -301,6 +301,12 @@ export interface ValueBreakdown {
    */
   readonly activation: number;
   readonly total: number;
+  /**
+   * Слово, которое кандидат получит этим ходом, добрав порог атаки
+   * (`thresholdKeywordReached`, D221), и атака, на которой он его возьмёт.
+   * Его цена уже внутри `keywords`; поле — для причины совета.
+   */
+  readonly thresholdKeyword: { readonly field: BinaryKeywordField; readonly attack: number } | null;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1055,13 +1061,20 @@ export function minionValue(
 
   // Веса и капы слов — в `keywordValue` (щит не дороже тела, part7).
   // Яд и токсин — одно слово с одним весом, дважды не считаются.
-  const keywords = BINARY_KEYWORDS.filter(([, field]) => candidate[field])
-    .filter(([, field]) => field !== 'venomous' || !candidate.poisonous)
-    .reduce(
-      (sum, [, field]) =>
-        sum + keywordValue(field, candidate.attack ?? 0, candidate.health ?? 0, rules),
-      0,
-    );
+  // Слово по порогу атаки, который усиления ЭТОГО хода добирают (D221):
+  // Scarlet Survivor 3/3 с бананом и Major Hymn на первом ходу — 7/5 со щитом.
+  const reached = thresholdKeywordReached(candidate, state, cards, rules);
+  const keywords =
+    BINARY_KEYWORDS.filter(([, field]) => candidate[field])
+      .filter(([, field]) => field !== 'venomous' || !candidate.poisonous)
+      .reduce(
+        (sum, [, field]) =>
+          sum + keywordValue(field, candidate.attack ?? 0, candidate.health ?? 0, rules),
+        0,
+      ) +
+    (reached === null
+      ? 0
+      : keywordValue(reached.field, reached.attack, candidate.health ?? 0, rules));
 
   const owned = copiesOwned(candidate, state);
   // Сколько копий собирают золотого, решает сила героя, а не константа:
@@ -1294,6 +1307,7 @@ export function minionValue(
     heroPowerBuy,
     heroPowerBuyLeft,
     heroPowerBuyReward: heroPowerBuyRewardName,
+    thresholdKeyword: reached,
     total:
       tech +
       stats +
@@ -1432,6 +1446,86 @@ function keywordValue(
     case 'stealth':
       return 0;
   }
+}
+
+/**
+ * Слово, которое кандидат получит ЭТИМ ходом, добрав порог атаки (D221).
+ *
+ * Жалоба игрока по part54 (ход 1): Scarlet Survivor 3/3 («Once this reaches
+ * {0} Attack, gain Divine Shield», порог 6 на сущности) советник ставил ниже
+ * Glim Guardian 1/4, не видя, что банан (+2) и сила Инге (+1 по тиру) делают
+ * из неё 6/5 со щитом до конца хода. Замер против поля: 100 % боёв первого
+ * хода против 96.7 % у Glim, а без щита Survivor берёт лишь 90.2 %.
+ *
+ * Атака хода — бесплатные заклинания руки с выбором своей цели и одно
+ * нажатие бесплатной силы «Attack equal to your Tier» (одно, как в плане:
+ * сколько нажатий положено, лог не пишет, D187). Досталось бы всё это
+ * кандидату только тогда, когда он станет КРУПНЕЙШИМ телом борда (D142),
+ * поэтому второй Survivor при своём же 17/19 щита не получает — усиления
+ * уйдут старшему. Выбор цели через `buffTarget` здесь недоступен: он сам
+ * спрашивает ценность миньонов (жертвы продажи), и круг замкнулся бы.
+ */
+function thresholdKeywordReached(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { field: BinaryKeywordField; attack: number } | null {
+  const text = cards.info(candidate.cardId)?.text ?? '';
+  if (text === '') return null;
+  for (const pattern of rules.attackThresholdKeywordWords) {
+    const m = new RegExp(pattern, 'i').exec(text);
+    if (m === null) continue;
+    const threshold = candidate.scriptData[Number(m[1])] ?? null;
+    const named = (m[2] ?? '').toLowerCase().replace(/\s+/g, ' ');
+    const field = BINARY_KEYWORDS.map(([, f]) => f).find((f) => KEYWORD_WORD[f] === named);
+    if (threshold === null || field === undefined || candidate[field]) return null;
+    const size = (x: Minion): number => (x.attack ?? 0) + (x.health ?? 0);
+    const rival = state.board.some(
+      (o) => o.entityId !== candidate.entityId && size(o) >= size(candidate),
+    );
+    if (rival) return null;
+    const attack = (candidate.attack ?? 0) + turnAttackGain(state, cards, rules);
+    return attack >= threshold ? { field, attack } : null;
+  }
+  return null;
+}
+
+/** «усиления хода доведут атаку до 6: божественный щит» */
+function thresholdKeywordNote(reached: { field: BinaryKeywordField; attack: number }): string {
+  return `усиления хода доведут атаку до ${String(reached.attack)}: ${KEYWORD_NAME_RU[reached.field]}`;
+}
+
+/** Атака, которую этот ход может положить на одного своего миньона даром. */
+function turnAttackGain(state: GameState, cards: CardIndex, rules: TavernRules): number {
+  let gain = 0;
+  for (const spell of state.handSpells) {
+    if (spell.cost > 0 || spell.unplayable) continue;
+    const effect = spellEffect(spell.cardId, spell.scriptData, cards, rules);
+    if (effect === null || effect.stats <= 0) continue;
+    if (effect.untargeted || effect.boardWide || effect.destroysFriendly) continue;
+    if (effect.targetRace !== null) continue;
+    const plus = /\+(?:\{(\d)\}|(\d+))(?=\s*(?:\/|attack\b))/i.exec(
+      cards.info(spell.cardId)?.text ?? '',
+    );
+    if (plus === null) continue;
+    gain +=
+      plus[1] !== undefined ? (spell.scriptData[Number(plus[1])] ?? 0) : Number(plus[2] ?? 0);
+  }
+  const hero = state.hero;
+  if (
+    hero?.heroPowerCardId != null &&
+    hero.heroPowerHasActivate &&
+    heroPowerReady(hero) &&
+    (hero.heroPowerCost ?? 0) === 0
+  ) {
+    const powerText = cards.info(hero.heroPowerCardId)?.text ?? '';
+    const stat = rules.heroPowerTierStatsWords
+      .map((w) => new RegExp(w, 'i').exec(powerText)?.[1]?.toLowerCase())
+      .find((s) => s !== undefined);
+    if (stat === 'attack') gain += state.techLevel;
+  }
+  return gain;
 }
 
 const BINARY_KEYWORD_FLAGS: readonly (readonly [string, (m: Minion) => boolean])[] =
@@ -2316,6 +2410,7 @@ export function buyRules(
       } else if (value.tripleBet && !notes.some((n) => n.includes('тройку'))) {
         notes.unshift('вторая копия');
       }
+      if (value.thresholdKeyword !== null) notes.push(thresholdKeywordNote(value.thresholdKeyword));
       if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
       if (value.textTribeMates > 0) {
         notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
@@ -2571,6 +2666,7 @@ export function playRules(
     if (value.completesTriple) notes.push('собирает тройку');
     else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
     if (minion.golden) notes.push('золотой');
+    if (value.thresholdKeyword !== null) notes.push(thresholdKeywordNote(value.thresholdKeyword));
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
     if (value.textTribeMates > 0) {
       notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);

@@ -964,6 +964,7 @@ describe('вид оверлея', () => {
       namedCard: 0,
       spellMagnet: 0,
       total,
+      thresholdKeyword: null,
       tribeMates: 0,
       textTribeMates: 0,
       textMechMates: 0,

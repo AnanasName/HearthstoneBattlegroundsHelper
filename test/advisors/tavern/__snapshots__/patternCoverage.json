@@ -1,6 +1,10 @@
 {
  "pool": 4778,
  "coverage": {
+  "attackThresholdKeywordWords": [
+   "BG35_814",
+   "BG35_814_G"
+  ],
   "battlecryGetCountWords": 278,
   "battlecryGetWords": 108,
   "battleTextWords": 383,

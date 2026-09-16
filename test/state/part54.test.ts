@@ -120,6 +120,44 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
   };
 
   /**
+   * Жалоба игрока №1: «на 1 ходе мне советовало более слабый ход».
+   * Витрина — Scarlet Survivor 3/3, Southsea Busker 3/1, Glim Guardian 1/4;
+   * в руке Big Banana, сила Major Hymn. Советник звал Glim (7.0), Survivor
+   * стоила 5.0 с «текст 0». Игрок купил Survivor и довёл её до 7/5 со щитом:
+   *
+   *   D 16:12:25.14… TAG_CHANGE Entity=[… cardId=BG35_814 …] tag=TAG_SCRIPT_DATA_NUM_1 value=6
+   *   16:12:35 купил Survivor → 16:12:37 Big Banana на неё → 16:12:38, 16:12:40 Major Hymn на неё
+   *
+   * К ходу 3 она 7/5 (щит). Против поля первого хода: 100 % боёв против
+   * 96.7 % у Glim 5/6, без щита — 90.2 % (D221).
+   *
+   * На ходу 9 вторая Survivor щита не получает: банан и сила уйдут своей
+   * 17/19, крупнейшей на борде.
+   */
+  it('ход 1: Survivor добирает порог щита бананом и силой, и план берёт её', () => {
+    const state = decisionPoint(1);
+    const survivor = state.shop.find((m) => m.cardId === 'BG35_814');
+    expect(survivor?.scriptData[0]).toBe(6);
+    expect(minionValue(survivor!, state, { cards }).thresholdKeyword).toEqual({
+      field: 'divineShield',
+      attack: 6,
+    });
+
+    const plan = spendPlan(state, { cards });
+    const first = plan.steps[0]?.recommendation;
+    expect(first?.action).toBe('buy');
+    expect(first?.minion?.cardId).toBe('BG35_814');
+    expect(first?.reason).toContain('божественный щит');
+    expect(plan.steps.slice(1).every((s) => s.recommendation.targetMinion?.cardId === 'BG35_814')).toBe(
+      true,
+    );
+
+    const later = decisionPoint(9);
+    const copy = later.shop.find((m) => m.cardId === 'BG35_814');
+    expect(minionValue(copy!, later, { cards }).thresholdKeyword).toBeNull();
+  });
+
+  /**
    * Жалоба игрока №2 (кадр 16:24:52): «предлагает демона, от которого
    * не вижу смысла в этой композиции». План кадра начинался словами
    * «КУПИТЬ Tichondrius 4/4 за 3» — балл 14.0 = тир 10 + статы 4, при

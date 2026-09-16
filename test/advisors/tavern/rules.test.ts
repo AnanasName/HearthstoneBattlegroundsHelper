@@ -3581,6 +3581,67 @@ describe('синергия с механикой из текста (part15, Titu
     });
   });
 
+  describe('слово по порогу атаки, добираемому этим ходом (part54, D221)', () => {
+    const thresholdCards = createCardIndex([
+      {
+        id: 'SURVIVOR',
+        name: 'Выживший',
+        type: 'Minion',
+        techLevel: 1,
+        races: ['DRAGON'],
+        isBaconPool: true,
+        mechanics: ['TRIGGER_VISUAL'],
+        text: 'Once this reaches {0} Attack, gain <b>Divine Shield</b>.',
+      },
+      { id: 'BIG_BANANA', name: 'Большой банан', type: 'Spell', text: 'Give a minion +2/+2.' },
+      {
+        id: 'HYMN',
+        name: 'Гимн',
+        type: 'Hero_power',
+        text: '[x]Twice per turn, give a minion Attack equal to your Tier. <i>(Swaps to Health next turn!)</i>',
+      },
+      { id: 'BIG', name: 'Большой', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+    ]);
+    const thresholdDeps = { cards: thresholdCards };
+    const banana = {
+      entityId: 900,
+      cardId: 'BIG_BANANA',
+      cost: 0,
+      scriptData: [null, null, null, null],
+      zonePos: 1,
+      unplayable: false,
+      costsHealth: false,
+    };
+    const inge = { ...hero(40), heroPowerCardId: 'HYMN', heroPowerHasActivate: true };
+    const survivor = minion(9, { cardId: 'SURVIVOR', attack: 3, health: 3, techLevel: 1, scriptData: [6] });
+    const turnOne = (patch: Partial<GameState> = {}): GameState =>
+      state({ turn: 1, techLevel: 1, gold: 3, hero: inge, handSpells: [banana], ...patch });
+
+    it('ход 1: банан и сила доводят 3/3 до шести — щит в цене покупки', () => {
+      const value = minionValue(survivor, turnOne(), thresholdDeps);
+      expect(value.thresholdKeyword).toEqual({ field: 'divineShield', attack: 6 });
+      expect(value.keywords).toBe(DEFAULT_TAVERN_RULES.value.divineShield);
+    });
+
+    it('без банана или без силы порога не достать — и слова нет', () => {
+      expect(minionValue(survivor, turnOne({ handSpells: [] }), thresholdDeps).thresholdKeyword).toBeNull();
+      const pressed = { ...inge, heroPowerUsedThisTurn: true };
+      expect(minionValue(survivor, turnOne({ hero: pressed }), thresholdDeps).thresholdKeyword).toBeNull();
+    });
+
+    it('усиления достанутся крупнейшему: при большом своём порог не засчитан', () => {
+      const big = minion(1, { cardId: 'BIG', attack: 4, health: 4 });
+      expect(minionValue(survivor, turnOne({ board: [big] }), thresholdDeps).thresholdKeyword).toBeNull();
+    });
+
+    it('щит уже есть — второй раз не платится', () => {
+      const shielded = { ...survivor, divineShield: true };
+      const value = minionValue(shielded, turnOne(), thresholdDeps);
+      expect(value.thresholdKeyword).toBeNull();
+      expect(value.keywords).toBe(DEFAULT_TAVERN_RULES.value.divineShield);
+    });
+  });
+
   it('своя механика синергией не считается: хрип про свой же хрип молчит', () => {
     // Buzzing Vermin пишет «Deathrattle:» о себе — это описание, не связь.
     const board = [minion(1, { cardId: 'RATTLER' })];

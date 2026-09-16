@@ -388,6 +388,22 @@ export interface TavernRules {
   readonly tribePremiumKeepWords: readonly string[];
 
   /**
+   * Слово, которое миньон получает, ДОБРАВ порог атаки: группа 1 — индекс
+   * плейсхолдера порога (`TAG_SCRIPT_DATA_NUM_{N+1}` на сущности), группа 2 —
+   * само слово.
+   *
+   * Scarlet Survivor `BG35_814` («Once this reaches {0} Attack, gain Divine
+   * Shield», порог 6 — `TAG_SCRIPT_DATA_NUM_1` на сущности витрины, part54
+   * строка 3915). Жалоба игрока №1 по part54 (ход 1): советник звал Glim
+   * Guardian 1/4 (7.0), а Survivor 3/3 стоил 5.0 с «текст 0». Игрок купил
+   * Survivor, положил на неё Big Banana (+2) и два нажатия Major Hymn
+   * (+1, +1) — 7/5 СО ЩИТОМ на первом ходу; против поля первого хода это
+   * 100 % боёв против 96.7 % у Glim 5/6, а без щита — 90.2 % (D221).
+   * В пуле 251952 шаблон ловит ровно эту карту.
+   */
+  readonly attackThresholdKeywordWords: readonly string[];
+
+  /**
    * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -1952,6 +1968,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\bin\\s+your\\s+hand\\b',
     '\\badded\\s+to\\s+your\\s+hand\\b',
     '\\brewind\\b',
+  ],
+
+  attackThresholdKeywordWords: [
+    '\\bonce\\s+this\\s+reaches\\s+\\{(\\d)\\}\\s+attack\\b[^.]*?\\bgain\\s+(?:<b>)*(divine\\s+shield|taunt|windfury|reborn)\\b',
   ],
 
   rerollMarginOverTier: 2,
