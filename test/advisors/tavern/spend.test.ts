@@ -124,6 +124,29 @@ describe('переходы состояния для плана трат', () =>
     expect(applied?.state.techLevelUpTurn).toBe(9);
   });
 
+  /**
+   * Долг part53 (ходы 23 и 25), и part54 показала его цену (ход 27):
+   * без отметки активация оставалась верхним советом на каждом следующем
+   * шаге, и запасное обновление плана не наступало никогда — план кончался
+   * словами «остаётся 10 — сгорит» при шестнадцати золотых.
+   */
+  it('активация отмечает носителя: второй раз за ход её не советуют', () => {
+    const carrier = shopMinion(30, 'BODY_1');
+    const applied = applyRecommendation(state({ board: [carrier], gold: 6 }), {
+      action: 'activate',
+      minion: carrier,
+      score: 4,
+      cost: 2,
+      requiresSlot: false,
+      sellFirst: null,
+      reason: 'тест',
+    });
+
+    expect(applied?.state.gold).toBe(4);
+    expect(applied?.state.activatedEntityIds).toEqual([30]);
+    expect(applied?.state.board.map((x) => x.entityId)).toEqual([30]);
+  });
+
   it('обновление витрины план заканчивает: дальше витрина неизвестна', () => {
     const applied = applyRecommendation(state(), {
       action: 'reroll',

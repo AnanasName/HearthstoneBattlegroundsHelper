@@ -438,7 +438,21 @@ export function applyRecommendation(
 
     case 'activate':
       // Активация — свой эффект со своей ценой; носитель остаётся на борде.
-      return { state: paid(), opaque: true, terminal: false };
+      // И отмечается нажатым: `activationRules` второй раз за ход его
+      // не советует, а без отметки активация оставалась верхним советом
+      // на каждом шаге, и запасное обновление плана не наступало никогда
+      // (part53, ходы 23 и 25; part54, ход 27 — «остаётся 10 — сгорит»
+      // при шестнадцати золотых).
+      return {
+        state: paid({
+          activatedEntityIds:
+            rec.minion === null
+              ? state.activatedEntityIds
+              : [...state.activatedEntityIds, rec.minion.entityId],
+        }),
+        opaque: true,
+        terminal: false,
+      };
 
     case 'reroll':
       // Витрина стала другой: всё, что мы про неё знали, больше не про неё.

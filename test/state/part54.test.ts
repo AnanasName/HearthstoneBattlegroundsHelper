@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
@@ -109,5 +110,29 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
 
     const taken = frame.playerId === null ? [] : (frame.trinketsByPlayer[frame.playerId] ?? []);
     expect(taken.map((dbf) => cards.infoByDbfId(dbf)?.name)).toContain('Faerie Dragon Scale');
+  });
+
+  const decisionPoint = (turn: number): GameState => {
+    const found = turns.find((t) => t.turn === turn);
+    expect(found, `точка решения хода ${String(turn)}`).toBeDefined();
+    return found!.state;
+  };
+
+  /**
+   * Ход 27 (14-й ход таверны): шестнадцать золотых, полный борд, в плане
+   * активация Hired Mount за 2 и подъём за 4. Прежде план кончался словами
+   * «остаётся 10 — сгорит»: `applyRecommendation` не отмечал нажатую
+   * активацию, она оставалась верхним советом, и запасное обновление
+   * не наступало. Игрок потратил все шестнадцать — десятки прокруток
+   * кличевых при Бранне и Kalecgos.
+   */
+  it('ход 27: нажатая активация не запирает обновление, золото не сгорает', () => {
+    const state = decisionPoint(27);
+    expect(state.gold).toBe(16);
+    const plan = spendPlan(state, { cards });
+    const actions = plan.steps.map((s) => s.recommendation.action);
+    expect(actions.filter((a) => a === 'activate')).toHaveLength(1);
+    expect(actions.at(-1)).toBe('reroll');
+    expect(plan.truncated).toBe(true);
   });
 });
