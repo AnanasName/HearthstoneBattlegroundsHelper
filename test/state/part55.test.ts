@@ -226,6 +226,29 @@ describe('part55: Юдора, раскопки золотых и пираты', 
     expect(frameFirst?.minion?.cardId).toBe('BG36_760');
   });
 
+  /**
+   * Hooktusk, Master Marauder на своём борде (D232): «After you Discover
+   * a card, give your other Pirates +{0}/+{1}». Игрок крутил источники
+   * Discover, и каждый кормил пиратов:
+   *
+   *   D 17:15:04.60… BLOCK_START BlockType=TRIGGER Entity=[… id=9122 … cardId=BG36_344 …]
+   *   D 17:15:04.60…     SUB_SPELL_START … Source=9122 TargetCount=5
+   *
+   * (Discover от Rodeo Performer, выбран Overconfidence), и так же после
+   * Hired Headhunter (17:15:58). До правки Rodeo стоил 13.5 телом, ниже
+   * Costume Enthusiast 19.0, а Headhunter — 12.9, ниже Shell Collector 17.5.
+   */
+  it('кадры хода 19: Discover при Hooktusk ведёт план, как у игрока', () => {
+    const rodeoFrame = spendPlan(at('17:14:58'), { cards }).steps[0]?.recommendation;
+    expect(['buy', 'spin']).toContain(rodeoFrame?.action);
+    expect(rodeoFrame?.minion?.cardId).toBe('BG28_550');
+
+    const headhunter = adviseTavern(at('17:15:54'), { cards })?.recommendations[0];
+    expect(headhunter?.action).toBe('buy');
+    expect(headhunter?.spellCardId).toBe('BG28_GIL_836');
+    expect(headhunter?.reason).toContain('Discover кормит своих');
+  });
+
   it('план берёт силу, когда золото иначе остаётся: ходы 5 и 9', () => {
     for (const turn of [5, 9]) {
       const plan = spendPlan(decisionPoint(turn), { cards });
