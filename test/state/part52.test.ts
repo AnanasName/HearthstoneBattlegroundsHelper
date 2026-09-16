@@ -255,6 +255,21 @@ describe('part52: реванш и порядок строк про героя с
   });
 
   /**
+   * Ход 13, выбор тёмного дара (00:44:18). Дар кладётся на вариант ДО экрана:
+   * Soulkeeping Jailer `BG36_503` родился 3/5 и в 00:44:17 стал 15/17.
+   * Оценка по снапшоту ставила его ниже Glambot; по сущности — выше, и так же
+   * говорит ближайший бой (+5.8 п.п., разбор part52). Игрок взял Glambot.
+   */
+  it('ход 13: вариант тёмного дара оценивается статами своей сущности', () => {
+    const frame = at('00:44:19');
+    const jailer = frame.openChoice?.options.find((o) => o.cardId === 'BG36_503');
+    expect([jailer?.attack, jailer?.health, jailer?.techLevel]).toEqual([15, 17, 4]);
+    const choice = adviseTavern(frame, { cards })?.choice ?? [];
+    expect(choice[0]?.option.cardId).toBe('BG36_503');
+    expect(choice[0]?.score).toBe(27);
+  });
+
+  /**
    * Ход 25: усиление всего борда ждёт в хвосте плана по D210, а строка
    * плана обрезана четырьмя шагами — главный шаг хода (Azerite Empowerment,
    * 154 очка) пропадал с экрана, хотя список советов звал его первым.

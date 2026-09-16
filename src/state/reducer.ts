@@ -1336,12 +1336,16 @@ export function createReducer(players: Players): Reducer {
     const resolveOption = (o: ChoiceOption): ChoiceOption => {
       const e = entities.get(o.entityId);
       if (e === undefined) return o;
+      const minion = e.cardType === 'MINION';
       return {
         ...o,
         cardId: e.cardId === '' ? o.cardId : e.cardId,
         scriptData: [1, 2, 3, 4].map(
           (i) => e.tags.get(`TAG_SCRIPT_DATA_NUM_${String(i)}`) ?? null,
         ),
+        attack: minion ? (e.tags.get('ATK') ?? null) : null,
+        health: minion ? (e.tags.get('HEALTH') ?? null) : null,
+        techLevel: minion ? (e.tags.get('TECH_LEVEL') ?? null) : null,
       };
     };
 

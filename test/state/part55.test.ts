@@ -306,6 +306,21 @@ describe('part55: Юдора, раскопки золотых и пираты', 
     expect(plan.steps[0]?.goldBefore).toBe(5);
   });
 
+  /**
+   * Ход 17, выбор тёмного дара (17:12:13). Копии Maritime Extortionist
+   * растут за каждого сыгранного золотого, и сущность варианта пришла 28/28
+   * (тег в 17:12:13.257), а снапшот знает 7/7. Игрок взял Sky Admiral
+   * Rogers — движок трат, которого шкала не считает (долг «движок трат
+   * золота»); это расхождение весов, а не чтения.
+   */
+  it('ход 17: вариант тёмного дара оценивается статами своей сущности', () => {
+    const frame = at('17:12:14');
+    const extortionist = frame.openChoice?.options.find((o) => o.cardId === 'BG36_524');
+    expect([extortionist?.attack, extortionist?.health]).toEqual([28, 28]);
+    const choice = adviseTavern(frame, { cards })?.choice ?? [];
+    expect(choice.map((c) => c.option.cardId)).toEqual(['BG36_524', 'BG33_823', 'BG25_354']);
+  });
+
   it('ход 11: тринкет не по карману в расчёт не идёт — берётся верхний из доступных', () => {
     const state = decisionPoint(11);
     // Два золота: Archaic Scroll (3) и Sunken Anchor (4) не взять,

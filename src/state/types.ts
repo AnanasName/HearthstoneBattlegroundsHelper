@@ -189,6 +189,19 @@ export interface ChoiceOption {
    * с id зонных копий, — тогда здесь `null`.
    */
   readonly scriptData?: readonly (number | null)[];
+  /**
+   * Статы и тир сущности варианта-МИНЬОНА — теги `ATK`, `HEALTH`, `TECH_LEVEL`.
+   *
+   * Вариант — это сущность (D199), и её числа бывают не те, что в снапшоте.
+   * Тёмный дар кладёт свой эффект до открытия выбора: part52, 00:44:17 —
+   * Soulkeeping Jailer родился 3/5 и стал 15/17 за строку до экрана выбора;
+   * part55, 17:12:13 — Maritime Extortionist 7/7 по снапшоту и 28/28
+   * на сущности. `null` — тега нет (сущность не найдена или не миньон);
+   * поля нет — запись старой схемы.
+   */
+  readonly attack?: number | null;
+  readonly health?: number | null;
+  readonly techLevel?: number | null;
 }
 
 /**

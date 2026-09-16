@@ -9602,10 +9602,20 @@ export function choiceAdvice(
       };
     }
 
-    // Псевдо-миньон из справочника: у варианта выбора нет сущности с тегами,
-    // есть только карта. Ключевые слова (щит, яд) при этом не видны —
+    // Псевдо-миньон из справочника, поверх которого кладутся статы и тир
+    // СУЩНОСТИ варианта (D199): тёмный дар меняет их до экрана выбора
+    // (part52 — Jailer 15/17 против 3/5 снапшота, part55 — Extortionist
+    // 28/28 против 7/7). Ключевые слова по-прежнему не ставятся —
     // тир, статы, племя и копии дают основную часть различий.
-    const candidate = minionFromCard(info, option.entityId, false);
+    const card = minionFromCard(info, option.entityId, false);
+    const health = option.health ?? card.health;
+    const candidate: Minion = {
+      ...card,
+      attack: option.attack ?? card.attack,
+      health,
+      maxHealth: health,
+      techLevel: option.techLevel ?? card.techLevel,
+    };
     const value = minionValue(candidate, state, deps, rules);
 
     const notes: string[] = [];
@@ -9624,7 +9634,7 @@ export function choiceAdvice(
       value,
       score: value.total,
       reason:
-        `тир ${info.techLevel === null ? '?' : String(info.techLevel)}, ` +
+        `тир ${candidate.techLevel === null ? '?' : String(candidate.techLevel)}, ` +
         `ценность ${value.total.toFixed(1)}` +
         (notes.length > 0 ? ` — ${notes.join(', ')}` : ''),
     };
