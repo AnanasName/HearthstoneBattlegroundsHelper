@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { minionValue } from '../../src/advisors/tavern/advisor.js';
+import { battlecryPayoffOf, minionValue } from '../../src/advisors/tavern/advisor.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
@@ -225,6 +225,36 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
     const first25 = spendPlan(decisionPoint(25), { cards }).steps[0]?.recommendation;
     expect(first25?.action).toBe('play');
     expect(first25?.minion?.cardId).toBe('BG33_825');
+  });
+
+  /**
+   * Двигатель второй половины партии (D224): золотой Kalecgos («After you
+   * trigger a Battlecry, give your Dragons +4/+4») и Бранн («Your Battlecries
+   * trigger twice») — каждый розыгрыш кличевого давал +8/+8 каждому дракону.
+   * Игрок крутил кличевых десятками (ход 27 — одиннадцать розыгрышей,
+   * десять продаж), план прежде не предлагал ни одной прокрутки. Ход 29:
+   * в руке три Chromadrake, в витрине Oozeling Gladiator — теперь план
+   * разыгрывает их и кладёт прибавку на драконов.
+   */
+  it('ход 29: клич кормит Kalecgos, и план разыгрывает кличевых', () => {
+    const state = decisionPoint(29);
+    expect(battlecryPayoffOf(state.board, cards)).toMatchObject({
+      buffs: [{ race: 'DRAGON', attack: 4, health: 4 }],
+      times: 2,
+    });
+
+    const plan = spendPlan(state, { cards });
+    const fed = plan.steps.filter(
+      (s) =>
+        (s.recommendation.action === 'play' || s.recommendation.action === 'buy') &&
+        (cards.info(s.recommendation.minion?.cardId ?? '')?.mechanics.includes('BATTLECRY') ?? false),
+    );
+    expect(fed.length).toBeGreaterThanOrEqual(3);
+
+    const kalecAttack = (s: GameState): number =>
+      s.board.find((m) => m.cardId === 'TB_BaconUps_109')?.attack ?? 0;
+    const last = plan.steps.at(-1)?.stateAfter ?? state;
+    expect(kalecAttack(last) - kalecAttack(state)).toBeGreaterThanOrEqual(8 * fed.length);
   });
 
   /**

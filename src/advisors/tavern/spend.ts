@@ -1,6 +1,9 @@
 import type { GameState, Minion } from '../../state/types.js';
 import {
   adviseTavern,
+  battlecryPayoffOf,
+  battlecryPayoffPoints,
+  withBattlecryPayoff,
   withKeyword,
   withMagnetDoublingSpent,
   type Recommendation,
@@ -424,17 +427,22 @@ export function applyRecommendation(
         terminal: false,
       };
 
-    case 'spin':
+    case 'spin': {
       // Прокрутка — цепочка «купить-разыграть-продать»: миньон уходит
       // из витрины, а цена шага и есть чистая цена цепочки. Что принесёт
-      // боевой клич — решает игра.
+      // боевой клич — решает игра. На полном борде место освобождает
+      // продажа (D224): жертва уходит, её золото возвращается.
+      const sold = rec.sellFirst;
       return {
         state: paid({
+          gold: state.gold - rec.cost + (sold === null ? 0 : rules.sellGold),
           shop: rec.minion === null ? state.shop : withoutEntity(state.shop, rec.minion.entityId),
+          board: sold === null ? state.board : withoutEntity(state.board, sold.entityId),
         }),
         opaque: true,
         terminal: false,
       };
+    }
 
     case 'activate':
       // Активация — свой эффект со своей ценой; носитель остаётся на борде.
@@ -759,10 +767,10 @@ export function spendPlan(
   const withoutLevelUp = levelStep !== undefined;
 
   let best = greedy;
-  let bestValue = chainValue(greedy, deps, rules);
+  let bestValue = chainValue(greedy, state, deps, rules);
   for (const first of alternatives) {
     const chain = buildChain(state, deps, rules, options, first, withoutLevelUp);
-    const value = chainValue(chain, deps, rules);
+    const value = chainValue(chain, state, deps, rules);
     // Строгое превосходство: при равенстве остаётся жадная цепочка, чтобы
     // порядок советов и план не расходились без причины.
     //
@@ -801,12 +809,17 @@ export function spendPlan(
  * ход, а сравниваем мы этот. Сгоревшее золото переводится в очки тем же
  * курсом `goldPointValue`, что и везде.
  */
-function chainValue(plan: SpendPlan, deps: TavernAdvisorDeps, rules: TavernRules): number {
+function chainValue(
+  plan: SpendPlan,
+  start: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): number {
   const gained =
     plan.steps
       .filter((s) => s.recommendation.action !== 'freeze')
       .reduce((sum, s) => sum + (s.recommendation.standaloneScore ?? s.recommendation.score), 0) -
-    undoneValue(plan, deps, rules);
+    undoneValue(plan, start, deps, rules);
   // Подъём-ХВОСТ (D214) в сравнении цепочек считается ТАК ЖЕ, как сгоревшее
   // золото, хотя на деле оно уходит в тир. Иначе он становится доводом
   // ОСТАВЛЯТЬ золото: у сгорания цена 3 очка за монету, и хвост, съедающий
@@ -830,39 +843,79 @@ function chainValue(plan: SpendPlan, deps: TavernAdvisorDeps, rules: TavernRules
  * продав Felfire Conjurer» — триггер конца хода, который до конца хода
  * не доживёт. По корпусу до правки таких планов 43 из 647.
  *
- * Шаг не отменён, если тело успело отдать своё до продажи: клич (прокрутка
- * D094 живёт ровно так) или ценность в самой продаже (`sellValueWords`).
+ * Шаг не отменён, если тело успело отдать своё до продажи: клич с ДОБЫЧЕЙ
+ * (прокрутка D094 живёт ровно так) или ценность в самой продаже
+ * (`sellValueWords`). Просто клич — не довод: part55, ход 23, En-Djinn
+ * Blazer («Battlecry: After the Tavern is Refreshed this game…») стоил
+ * 14.5 одним телом, и первая версия правки, пропускавшая любой клич,
+ * оставляла в сумме всё тело вместе с двумя выброшенными золотыми
+ * (находка соседней сессии). Клич, накормивший плательщиков борда (D224),
+ * своё отдал — отменена только остальная часть цены.
+ *
  * Покупка теряет ещё и разницу цены с возвратом — тем же курсом, что
  * сгоревшее золото: иначе потраченные впустую монеты выглядели бы
  * пристроенными и продолжали выигрывать развилку.
  */
-function undoneValue(plan: SpendPlan, deps: TavernAdvisorDeps, rules: TavernRules): number {
-  const placed = new Map<number, Recommendation[]>();
+export function undoneValue(
+  plan: SpendPlan,
+  start: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): number {
+  const placed = new Map<number, { rec: Recommendation; before: GameState }[]>();
   let undone = 0;
-  for (const { recommendation: rec } of plan.steps) {
+  plan.steps.forEach(({ recommendation: rec }, k) => {
+    const before = k === 0 ? start : (plan.steps[k - 1]?.stateAfter ?? start);
     const victim = rec.sellFirst ?? (rec.action === 'sell' ? rec.minion : null);
     const origins = victim === null ? undefined : placed.get(victim.entityId);
     if (victim !== null && origins !== undefined) {
       const info = deps.cards.info(victim.cardId);
       const text = info?.text ?? '';
+      const battlecry = info?.mechanics.includes('BATTLECRY') ?? false;
       const paidOnTheWay =
-        (info?.mechanics.includes('BATTLECRY') ?? false) ||
+        (battlecry && rules.battlecryGetWords.some((w) => new RegExp(w, 'i').test(text))) ||
         rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text));
       if (!paidOnTheWay) {
         for (const origin of origins) {
-          undone += origin.standaloneScore ?? origin.score;
-          if (origin.action === 'buy') {
-            undone += Math.max(0, origin.cost - rules.sellGold) * rules.goldPointValue;
+          const payoff = battlecry ? battlecryPayoffOf(origin.before.board, deps.cards, rules) : null;
+          const fed =
+            payoff === null
+              ? 0
+              : battlecryPayoffPoints(payoff, origin.before.board, null, deps.cards, rules);
+          undone += Math.max(0, (origin.rec.standaloneScore ?? origin.rec.score) - fed);
+          if (origin.rec.action === 'buy') {
+            undone += Math.max(0, origin.rec.cost - rules.sellGold) * rules.goldPointValue;
           }
         }
       }
       placed.delete(victim.entityId);
     }
     if ((rec.action === 'buy' || rec.action === 'play') && rec.minion !== null && rec.magnetizeTo == null) {
-      placed.set(rec.minion.entityId, [...(placed.get(rec.minion.entityId) ?? []), rec]);
+      placed.set(rec.minion.entityId, [...(placed.get(rec.minion.entityId) ?? []), { rec, before }]);
     }
-  }
+  });
   return undone;
+}
+
+/**
+ * Разыгран ли этим шагом кличевой миньон: прокрутка — всегда, покупка
+ * и розыгрыш — когда тело встало на борд (покупка в полный борд уходит
+ * в руку, и клич там не срабатывает). Примагничивание кличем не считаем.
+ */
+function triggersBattlecry(
+  before: GameState,
+  after: GameState,
+  rec: Recommendation,
+  deps: TavernAdvisorDeps,
+): boolean {
+  const minion = rec.minion;
+  if (minion === null) return false;
+  if (!(deps.cards.info(minion.cardId)?.mechanics.includes('BATTLECRY') ?? false)) return false;
+  if (rec.action === 'spin') return true;
+  if (rec.action !== 'buy' && rec.action !== 'play') return false;
+  if (rec.magnetizeTo != null) return false;
+  const placed = (s: GameState): boolean => s.board.some((m) => m.entityId === minion.entityId);
+  return placed(after) && !placed(before);
 }
 
 /** Золото, не пристроенное к делу: остаток плюс ушедшее в подъём-хвост (D214). */
@@ -898,15 +951,20 @@ function buildChain(
 
     const applied = applyRecommendation(current, rec, rules);
     if (applied === null) break;
+    // Сработавший клич кормит плательщиков борда (D224): прибавка известна
+    // числом, и следующий шаг обязан считать драконов уже с ней.
+    const after = triggersBattlecry(current, applied.state, rec, deps)
+      ? withBattlecryPayoff(applied.state, deps, rules)
+      : applied.state;
 
     steps.push({
       recommendation: rec,
       goldBefore: current.gold,
-      goldAfter: applied.state.gold,
+      goldAfter: after.gold,
       opaque: applied.opaque,
-      stateAfter: applied.state,
+      stateAfter: after,
     });
-    current = applied.state;
+    current = after;
 
     if (applied.terminal) {
       // «Оборван» — не то же, что «закончен»: план обрывается, только когда

@@ -3699,6 +3699,104 @@ describe('синергия с механикой из текста (part15, Titu
     });
   });
 
+  describe('клич кормит плательщика борда (part54, D224)', () => {
+    const payoffCards = createCardIndex([
+      {
+        id: 'KALEC',
+        name: 'Калесгос',
+        type: 'Minion',
+        techLevel: 5,
+        races: ['DRAGON'],
+        isBaconPool: true,
+        mechanics: ['TRIGGER_VISUAL'],
+        text: '[x]After you trigger a <b>Battlecry</b>, give your Dragons +{0}/+{1}.',
+      },
+      {
+        id: 'BRANN',
+        name: 'Бранн',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        mechanics: ['AURA'],
+        text: 'Your <b>Battlecries</b> trigger twice.',
+      },
+      {
+        id: 'BRANN_G',
+        name: 'Золотой Бранн',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        mechanics: ['AURA'],
+        text: 'Your <b>Battlecries</b> trigger three times.',
+      },
+      {
+        id: 'SHOUTER',
+        name: 'Крикун',
+        type: 'Minion',
+        techLevel: 3,
+        races: ['PIRATE'],
+        isBaconPool: true,
+        mechanics: ['BATTLECRY'],
+        text: '<b>Battlecry:</b> Your Tavern spells give an extra +1 Attack this game.',
+      },
+      { id: 'WHELP', name: 'Дракончик', type: 'Minion', techLevel: 2, races: ['DRAGON'], isBaconPool: true },
+      { id: 'LUMP', name: 'Тело', type: 'Minion', techLevel: 1, races: ['BEAST'], isBaconPool: true },
+    ]);
+    const payoffDeps = { cards: payoffCards };
+    const w = DEFAULT_TAVERN_RULES.value;
+    const kalec = minion(1, { cardId: 'KALEC', attack: 50, health: 50, scriptData: [2, 2] });
+    const whelps = [minion(2, { cardId: 'WHELP', attack: 20, health: 20 }), minion(3, { cardId: 'WHELP', attack: 20, health: 20 })];
+    const shouter = minion(9, { cardId: 'SHOUTER', attack: 6, health: 4, techLevel: 3 });
+
+    it('клич стоит прибавки всем драконам — и кратен удвоителю', () => {
+      const plain = minionValue(shouter, state({ board: [kalec, ...whelps] }), payoffDeps);
+      expect(plain.battlecryPayoff).toBe((2 + 2) * 3 * w.perStatPoint);
+      const brann = minion(4, { cardId: 'BRANN', attack: 4, health: 4 });
+      const twice = minionValue(shouter, state({ board: [kalec, ...whelps, brann] }), payoffDeps);
+      expect(twice.battlecryPayoff).toBe(2 * (2 + 2) * 3 * w.perStatPoint);
+      const golden = minion(5, { cardId: 'BRANN_G', attack: 8, health: 8 });
+      const thrice = minionValue(shouter, state({ board: [kalec, ...whelps, brann, golden] }), payoffDeps);
+      expect(thrice.battlecryPayoff).toBe(3 * (2 + 2) * 3 * w.perStatPoint);
+    });
+
+    it('без плательщика и у миньона без клича прибавки нет', () => {
+      expect(minionValue(shouter, state({ board: whelps }), payoffDeps).battlecryPayoff).toBe(0);
+      const whelp = minion(9, { cardId: 'WHELP', attack: 2, health: 2 });
+      expect(minionValue(whelp, state({ board: [kalec] }), payoffDeps).battlecryPayoff).toBe(0);
+    });
+
+    it('полный борд: кличевого крутят через продажу слабейшего, но не плательщика', () => {
+      const lumps = [4, 5, 6, 7].map((id) => minion(id, { cardId: 'LUMP', attack: 1, health: 1 }));
+      const full = state({
+        gold: 3,
+        board: [minion(1, { cardId: 'KALEC', attack: 1, health: 1, scriptData: [8, 8] }), ...whelps, ...lumps],
+        shop: [shouter],
+      });
+      const spin = spinRule(full, payoffDeps, DEFAULT_TAVERN_RULES, buyRules(full, payoffDeps));
+      expect(spin?.minion?.entityId).toBe(9);
+      expect(spin?.sellFirst?.cardId).toBe('LUMP');
+      expect(spin?.reason).toContain('Калесгос');
+    });
+
+    it('полный борд без плательщика прокрутку по-прежнему не допускает', () => {
+      const lumps = [4, 5, 6, 7, 8].map((id) => minion(id, { cardId: 'LUMP' }));
+      const full = state({ gold: 3, board: [...whelps, ...lumps], shop: [shouter] });
+      expect(spinRule(full, payoffDeps, DEFAULT_TAVERN_RULES, buyRules(full, payoffDeps))).toBeNull();
+    });
+
+    it('план кладёт прибавку клича на драконов борда', () => {
+      const s = state({ gold: 3, board: [kalec, ...whelps], shop: [shouter] });
+      const plan = spendPlan(s, payoffDeps);
+      const step = plan.steps.find((x) => x.recommendation.minion?.entityId === 9);
+      expect(step).toBeDefined();
+      const after = step!.stateAfter.board;
+      expect(after.find((m) => m.entityId === 2)).toMatchObject({ attack: 22, health: 22 });
+      expect(after.find((m) => m.entityId === 1)).toMatchObject({ attack: 52, health: 52 });
+    });
+  });
+
   it('своя механика синергией не считается: хрип про свой же хрип молчит', () => {
     // Buzzing Vermin пишет «Deathrattle:» о себе — это описание, не связь.
     const board = [minion(1, { cardId: 'RATTLER' })];

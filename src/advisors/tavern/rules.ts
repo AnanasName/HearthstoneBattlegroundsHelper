@@ -421,6 +421,30 @@ export interface TavernRules {
   readonly combatKeywordGrantWords: readonly string[];
 
   /**
+   * Свой миньон, который ПЛАТИТ за каждый сработавший клич статами племени:
+   * «After you trigger a Battlecry, give your {tribe} +{0}/+{1}» (Kalecgos,
+   * Arcane Aspect `BGS_041`). Группы: 1/2 — атака (плейсхолдер/литерал),
+   * 3/4 — здоровье; `{tribe}` — из `tribeTextWords`.
+   *
+   * part54 (D224): к ходу 27 золотой Kalecgos и Бранн превращали каждый
+   * розыгрыш кличевого в +8/+8 каждому дракону, и игрок крутил кличевых
+   * десятками — план не предложил ни одной прокрутки и жёг 10 золотых из 16.
+   * Против поля 14-го хода таверны: план 31 %, план и четыре прокрутки —
+   * 37.5 %, восемь — 39.9 %, фактический конец хода игрока — 54 %.
+   * Корпус: плательщик на своём борде в 29 точках шести партий, прокрутку
+   * план предлагал в одной.
+   */
+  readonly battlecryPayoffWords: readonly string[];
+
+  /**
+   * Сколько раз срабатывает клич при удвоителе на борде: группа 1 —
+   * «twice», «three times», «an extra time» (Бранн, золотой Бранн — «three
+   * times», Мойра, Timewarped Deios). Несколько удвоителей не складываются:
+   * берётся наибольший.
+   */
+  readonly battlecryTimesWords: readonly string[];
+
+  /**
    * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -1989,6 +2013,15 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   attackThresholdKeywordWords: [
     '\\bonce\\s+this\\s+reaches\\s+\\{(\\d)\\}\\s+attack\\b[^.]*?\\bgain\\s+(?:<b>)*(divine\\s+shield|taunt|windfury|reborn)\\b',
+  ],
+
+  battlecryPayoffWords: [
+    '\\bafter\\s+you\\s+trigger\\s+a\\s+(?:<b>)*battlecry(?:<\\/b>)*\\s*,\\s*give\\s+your\\s+{tribe}\\s+' +
+      '\\+(?:\\{(\\d)\\}|(\\d+))\\s*\\/\\s*\\+(?:\\{(\\d)\\}|(\\d+))',
+  ],
+
+  battlecryTimesWords: [
+    '\\bbattlecr(?:y|ies)\\b(?:<\\/b>)?[^.]*?\\btriggers?\\s+(twice|three\\s+times|an\\s+extra\\s+time)\\b',
   ],
 
   combatKeywordGrantWords: [

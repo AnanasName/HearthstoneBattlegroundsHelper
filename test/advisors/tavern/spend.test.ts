@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { spellRules, type Recommendation } from '../../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../../src/advisors/tavern/rules.js';
-import { applyRecommendation, spendPlan } from '../../../src/advisors/tavern/spend.js';
+import { applyRecommendation, spendPlan, undoneValue } from '../../../src/advisors/tavern/spend.js';
 import { createCardIndex } from '../../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Hero, type Minion } from '../../../src/state/types.js';
 import { spendPlanLine } from '../../../src/ui/format.js';
@@ -532,5 +532,103 @@ describe('усиление всего борда в плане ждёт тел (
     });
     const first = spendPlan(s, { cards: idx }).steps[0]?.recommendation;
     expect(first?.spellCardId).toBe('RING');
+  });
+});
+
+describe('шаг, который план сам отменяет продажей (D222, D224)', () => {
+  const idx = createCardIndex([
+    {
+      id: 'DJINN',
+      name: 'Джинн',
+      type: 'Minion',
+      techLevel: 4,
+      races: [],
+      isBaconPool: true,
+      mechanics: ['BATTLECRY'],
+      text: '<b>Battlecry:</b> After the Tavern is Refreshed this game, give a random minion in it +1/+1.',
+    },
+    {
+      id: 'OOZE',
+      name: 'Слизень',
+      type: 'Minion',
+      techLevel: 2,
+      races: [],
+      isBaconPool: true,
+      mechanics: ['BATTLECRY'],
+      text: '<b>Battlecry:</b> Get two Slimy Shields.',
+    },
+    {
+      id: 'PAYER',
+      name: 'Плательщик',
+      type: 'Minion',
+      techLevel: 5,
+      races: ['DRAGON'],
+      isBaconPool: true,
+      text: 'After you trigger a <b>Battlecry</b>, give your Dragons +{0}/+{1}.',
+    },
+    { id: 'KEEP', name: 'Тело', type: 'Minion', techLevel: 3, races: [], isBaconPool: true },
+  ]);
+  const g = DEFAULT_TAVERN_RULES.goldPointValue;
+  const plan2 = (bought: Minion, board: readonly Minion[]) => {
+    const start = state({ board });
+    const buyStep = {
+      recommendation: buy(bought, { score: 14.5 }),
+      goldBefore: 6,
+      goldAfter: 3,
+      opaque: false,
+      stateAfter: { ...start, board: [...board, bought] },
+    };
+    const keep = shopMinion(40, 'KEEP');
+    const playStep = {
+      recommendation: {
+        action: 'play' as const,
+        minion: keep,
+        score: 20,
+        cost: 0,
+        requiresSlot: true,
+        sellFirst: bought,
+        reason: 'тест',
+      },
+      goldBefore: 3,
+      goldAfter: 4,
+      opaque: false,
+      stateAfter: start,
+    };
+    return { start, plan: { steps: [buyStep, playStep], goldLeft: 4, truncated: false } };
+  };
+
+  it('клич без добычи тело не окупает: отменены и его очки, и два золотых', () => {
+    const { start, plan } = plan2(shopMinion(30, 'DJINN'), []);
+    expect(undoneValue(plan, start, { cards: idx }, DEFAULT_TAVERN_RULES)).toBe(14.5 + 2 * g);
+  });
+
+  it('клич с добычей — законная прокрутка, отменять нечего', () => {
+    const { start, plan } = plan2(shopMinion(30, 'OOZE'), []);
+    expect(undoneValue(plan, start, { cards: idx }, DEFAULT_TAVERN_RULES)).toBe(0);
+  });
+
+  it('клич, накормивший плательщика, своё отдал: отменён только остаток', () => {
+    const payer = minion(1, { cardId: 'PAYER', attack: 10, health: 10, scriptData: [1, 1] });
+    const { start, plan } = plan2(shopMinion(30, 'DJINN'), [payer]);
+    const fed = (1 + 1) * 1 * DEFAULT_TAVERN_RULES.value.perStatPoint;
+    expect(undoneValue(plan, start, { cards: idx }, DEFAULT_TAVERN_RULES)).toBe(14.5 - fed + 2 * g);
+  });
+
+  it('прокрутка на полном борде продаёт жертву и возвращает её золото', () => {
+    const victim = shopMinion(5, 'KEEP');
+    const spun = shopMinion(31, 'DJINN');
+    const s = state({ gold: 3, board: [victim], shop: [spun] });
+    const applied = applyRecommendation(s, {
+      action: 'spin',
+      minion: spun,
+      score: 5,
+      cost: 2,
+      requiresSlot: false,
+      sellFirst: victim,
+      reason: 'тест',
+    });
+    expect(applied?.state.gold).toBe(3 - 2 + DEFAULT_TAVERN_RULES.sellGold);
+    expect(applied?.state.board).toHaveLength(0);
+    expect(applied?.state.shop).toHaveLength(0);
   });
 });

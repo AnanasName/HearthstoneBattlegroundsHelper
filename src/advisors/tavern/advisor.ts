@@ -312,6 +312,12 @@ export interface ValueBreakdown {
    * (лучший получатель). Цена — внутри `battle`; поле — для причины совета.
    */
   readonly combatGrant: { readonly field: BinaryKeywordField; readonly recipient: Minion } | null;
+  /**
+   * Статы, которые розыгрыш этого кличевого положит на борд через своих
+   * плательщиков за клич (Kalecgos, D224). Про ПРИОБРЕТЕНИЕ, как `copies`:
+   * у своего миньона борда клич уже отыграл, и `ownValue` его вычитает.
+   */
+  readonly battlecryPayoff: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1147,6 +1153,14 @@ export function minionValue(
   const combatGrant = combatKeywordGrant(candidate, state, cards, rules);
   if (combatGrant !== null) battle += combatGrant.value;
 
+  // Клич кормит плательщиков борда (D224): розыгрыш кличевого — это
+  // прибавка их племени, известная числом.
+  const payoff = (info?.mechanics ?? []).includes('BATTLECRY')
+    ? battlecryPayoffOf(state.board, cards, rules)
+    : null;
+  const battlecryPayoff =
+    payoff === null ? 0 : battlecryPayoffPoints(payoff, state.board, candidate, cards, rules);
+
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
   // 2 Mechs that died») на борде из мехов была слабейшей по голым статам,
@@ -1337,6 +1351,7 @@ export function minionValue(
     thresholdKeyword: reached,
     combatGrant:
       combatGrant === null ? null : { field: combatGrant.field, recipient: combatGrant.recipient },
+    battlecryPayoff,
     total:
       tech +
       stats +
@@ -1354,7 +1369,8 @@ export function minionValue(
       heroPower +
       activation +
       heroPowerPlay +
-      heroPowerBuy,
+      heroPowerBuy +
+      battlecryPayoff,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -1582,6 +1598,169 @@ function combatKeywordGrant(
     hit.slice(covered).reduce((s, o) => s + wordGain(o), 0) + hit.length * statsGain;
   return { field: grant.field, recipient: ranked[0]!, value };
 }
+
+/**
+ * Что даёт своим один сработавший клич (D224): прибавки плательщиков
+ * борда («After you trigger a Battlecry, give your Dragons +{0}/+{1}»)
+ * и кратность от удвоителей клича. `null` — плательщиков нет.
+ *
+ * part54: золотой Kalecgos и Бранн делали каждый розыгрыш кличевого
+ * прибавкой +8/+8 каждому дракону. Игрок крутил кличевых десятками, план
+ * не предложил ни одной прокрутки — клич без добычи стоил для советника
+ * ноль. Замер хода 27: план 31 % против поля, тот же план с четырьмя
+ * прокрутками — 37.5 %, фактический конец хода игрока — 54 %.
+ */
+export interface BattlecryPayoff {
+  readonly buffs: readonly { readonly race: string; readonly attack: number; readonly health: number }[];
+  /** Сколько раз срабатывает один клич: 1, при Бранне 2, при золотом — 3. */
+  readonly times: number;
+  /** Имена плательщиков — для причины совета. */
+  readonly payers: readonly string[];
+}
+
+export function battlecryPayoffOf(
+  board: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): BattlecryPayoff | null {
+  const buffs: { race: string; attack: number; health: number }[] = [];
+  const payers: string[] = [];
+  let times = 1;
+  for (const m of board) {
+    const text = battlecryPayoffTextOf(m.cardId, cards, rules);
+    if (text.times > times) times = text.times;
+    if (text.payoff === null) continue;
+    const read = (ph: string | undefined, lit: string | undefined): number =>
+      ph !== undefined ? (m.scriptData[Number(ph)] ?? 0) : Number(lit ?? 0);
+    const attack = read(text.payoff.attack[0], text.payoff.attack[1]);
+    const health = read(text.payoff.health[0], text.payoff.health[1]);
+    if (attack + health <= 0) continue;
+    buffs.push({ race: text.payoff.race, attack, health });
+    payers.push(cards.info(m.cardId)?.name ?? m.cardId);
+  }
+  return buffs.length === 0 ? null : { buffs, times, payers };
+}
+
+/**
+ * Статы, которые один клич кладёт на борд, в очках. `played` — сам кличевой:
+ * после розыгрыша он уже на борде и получает свою долю, если он того племени.
+ */
+export function battlecryPayoffPoints(
+  payoff: BattlecryPayoff,
+  board: readonly Minion[],
+  played: Minion | null,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  const bodies = played === null || board.some((m) => m.entityId === played.entityId)
+    ? board
+    : [...board, played];
+  let stats = 0;
+  for (const buff of payoff.buffs) {
+    const members = bodies.filter((m) => {
+      const races = racesOf(m, cards);
+      return races.includes(buff.race) || races.includes(RACE_ALL);
+    }).length;
+    stats += (buff.attack + buff.health) * members;
+  }
+  return stats * payoff.times * rules.value.perStatPoint;
+}
+
+/**
+ * Борд после одного сработавшего клича: прибавки плательщиков на своих
+ * того племени, столько раз, сколько клич срабатывает. Эффект известен
+ * числом, и план обязан его видеть — иначе прокрутка выглядела бы тратой
+ * без результата, а следующий шаг считал бы драконов по старым статам.
+ */
+export function withBattlecryPayoff(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): GameState {
+  const payoff = battlecryPayoffOf(state.board, deps.cards, rules);
+  if (payoff === null) return state;
+  const board = state.board.map((m) => {
+    const races = racesOf(m, deps.cards);
+    let attack = 0;
+    let health = 0;
+    for (const buff of payoff.buffs) {
+      if (!races.includes(buff.race) && !races.includes(RACE_ALL)) continue;
+      attack += buff.attack * payoff.times;
+      health += buff.health * payoff.times;
+    }
+    return attack + health === 0
+      ? m
+      : { ...m, attack: (m.attack ?? 0) + attack, health: (m.health ?? 0) + health };
+  });
+  return { ...state, board };
+}
+
+/** «Kalecgos, Arcane Aspect: драконам +2/+2 ×2» */
+function payoffNote(payoff: BattlecryPayoff, cards: CardIndex): string {
+  void cards;
+  const buffs = payoff.buffs
+    .map((b) => `${b.race} +${String(b.attack)}/+${String(b.health)}`)
+    .join(', ');
+  const times = payoff.times > 1 ? ` ×${String(payoff.times)}` : '';
+  return `${payoff.payers.join(', ')}: ${buffs}${times} за клич`;
+}
+
+/** Плательщик за клич или удвоитель клича — такого не продают ради места. */
+function feedsBattlecries(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
+  const text = battlecryPayoffTextOf(m.cardId, cards, rules);
+  return text.payoff !== null || text.times > 1;
+}
+
+interface BattlecryPayoffText {
+  readonly payoff: {
+    readonly race: string;
+    readonly attack: readonly [string | undefined, string | undefined];
+    readonly health: readonly [string | undefined, string | undefined];
+  } | null;
+  readonly times: number;
+}
+
+const BATTLECRY_TIMES: Readonly<Record<string, number>> = {
+  twice: 2,
+  'three times': 3,
+  'an extra time': 2,
+};
+
+function battlecryPayoffTextOf(
+  cardId: string,
+  cards: CardIndex,
+  rules: TavernRules,
+): BattlecryPayoffText {
+  return memoByCard(BATTLECRY_PAYOFF_CACHE, cardId, cards, rules, () => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (!/battlecr/i.test(text)) return { payoff: null, times: 1 };
+    let times = 1;
+    for (const pattern of rules.battlecryTimesWords) {
+      const word = new RegExp(pattern, 'i').exec(text)?.[1]?.toLowerCase().replace(/\s+/g, ' ');
+      if (word !== undefined) times = Math.max(times, BATTLECRY_TIMES[word] ?? 1);
+    }
+    for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+      for (const pattern of rules.battlecryPayoffWords) {
+        const found = new RegExp(pattern.replace('{tribe}', `(?:${tribe})`), 'i').exec(text);
+        if (found === null) continue;
+        return {
+          payoff: {
+            race,
+            attack: [found[1], found[2]] as const,
+            health: [found[3], found[4]] as const,
+          },
+          times,
+        };
+      }
+    }
+    return { payoff: null, times };
+  });
+}
+
+const BATTLECRY_PAYOFF_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, BattlecryPayoffText>>
+>();
 
 /**
  * Что обещает стартовый эффект миньона — по тексту и тегам самого миньона.
@@ -2283,7 +2462,11 @@ function ownValue(
   //
   // Доля награды за покупку (part34) — тоже про приобретение: свой кличевой
   // миньон второй раз не покупается, и Бранна за него больше не дадут.
-  return value.total - value.copies - value.heroPowerPlay - value.heroPowerBuy;
+  // Цена клича через плательщиков (D224) — туда же: клич своего миньона
+  // борда уже отыграл.
+  return (
+    value.total - value.copies - value.heroPowerPlay - value.heroPowerBuy - value.battlecryPayoff
+  );
 }
 
 /**
@@ -2700,9 +2883,22 @@ export function playRules(
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): Recommendation[] {
   const full = state.board.length >= rules.boardSize;
-  const victim = full ? weakestOwn(state, deps, rules) : null;
+  const weakest = full ? weakestOwn(state, deps, rules) : null;
 
   return state.hand.flatMap((minion) => {
+    // Копию из СОБРАННОЙ тройки в жертвы не берут. В игре третья купленная
+    // копия сразу сливается в золотую, но план слияния не моделирует и кладёт
+    // в руку обычную копию — part54, ход 19: «РАЗЫГРАТЬ Shipwrecked Rascal,
+    // продав Shipwrecked Rascal 7/4» (всплыло, когда клич при Kalecgos стал
+    // стоить очков, D224). Пару это не трогает: слабую копию ради сильной
+    // из руки продавать можно (part10, ход 11).
+    const copy = (b: Minion): boolean => !minion.golden && !b.golden && b.cardId === minion.cardId;
+    const tripled =
+      copiesOwned(minion, state) + 1 >= copiesForTriple(state, deps.cards, rules);
+    const victim =
+      weakest !== null && tripled && copy(weakest.minion)
+        ? weakestOwn({ ...state, board: state.board.filter((b) => !copy(b)) }, deps, rules)
+        : weakest;
     // Заблокированную карту разыграть нельзя, и советовать её — тихо неверно.
     // Пример из part8: Polarizing Beatboxer 5/10, выданный тринкетом
     // с замком на два хода, — тег LITERALLY_UNPLAYABLE, тикает и снимается.
@@ -3107,7 +3303,26 @@ export function spinRule(
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   buys: readonly Recommendation[] = [],
 ): Recommendation | null {
-  if (state.board.length >= rules.boardSize) return null;
+  // Клич кормит плательщиков борда (D224): тогда прокручивается ЛЮБОЙ
+  // кличевой, а не только генератор карт, и полный борд прокрутке не помеха —
+  // первая продаёт слабейшего (не плательщика и не удвоителя), и дальше
+  // слот свободен. Без плательщика полный борд, как прежде, прокрутку
+  // не допускает.
+  const payoff = battlecryPayoffOf(state.board, deps.cards, rules);
+  const full = state.board.length >= rules.boardSize;
+  let victim: { minion: Minion; value: number } | null = null;
+  if (full) {
+    if (payoff === null) return null;
+    for (const m of state.board) {
+      if (feedsBattlecries(m, deps.cards, rules)) continue;
+      const value = ownValue(m, state, deps, rules);
+      if (victim === null || value < victim.value) victim = { minion: m, value };
+    }
+    if (victim === null) return null;
+  }
+  const refund = victim === null ? 0 : rules.sellGold;
+  const boardAfterSale =
+    victim === null ? state.board : state.board.filter((m) => m.entityId !== victim.minion.entityId);
 
   // Соперник по цепочке — лучшая покупка, КРОМЕ названного кандидата:
   // продажный генератор бывает и лучшей покупкой сразу, и сравнивать его
@@ -3140,24 +3355,43 @@ export function spinRule(
   } | null = null;
   for (const minion of state.shop) {
     const cost = buyCostOf(minion, rules);
-    if (cost > state.gold) continue;
+    if (cost > state.gold + refund) continue;
     // Копию не прокручивают: продажа ломает будущую тройку.
     if (copiesOwned(minion, state) > 0) continue;
 
-    const text = deps.cards.info(minion.cardId)?.text ?? '';
+    const info = deps.cards.info(minion.cardId);
+    const text = info?.text ?? '';
     if (text === '') continue;
-    const kind = spinKindOf(text, rules);
+    const generator = spinKindOf(text, rules);
+    const fed =
+      payoff !== null && (info?.mechanics ?? []).includes('BATTLECRY')
+        ? // Прокрученное тело продаётся, своя доля прибавки ему не впрок.
+          battlecryPayoffPoints(payoff, boardAfterSale, null, deps.cards, rules)
+        : 0;
+    const kind = generator ?? (fed > 0 ? 'battlecry' : null);
     if (kind === null) continue;
+    // Через проданный слот крутится только клич, который кормит плательщиков.
+    if (victim !== null && (kind !== 'battlecry' || fed <= 0)) continue;
     // Батлкрайного генератора, который сам — лучшая покупка, не прокручивают.
-    if (kind === 'battlecry' && bestBuy?.minion?.entityId === minion.entityId) continue;
+    // Кличевого без добычи при плательщике — прокручивают: лучшей покупкой
+    // его делает та же прибавка, что получит и прокрутка, а «купить или
+    // крутить» решают очки двух советов.
+    if (generator === 'battlecry' && bestBuy?.minion?.entityId === minion.entityId) continue;
 
     const net = cost - rules.sellGold;
     let base: number;
     let note: string;
     if (kind === 'battlecry') {
-      const count = promisedCards(text);
-      base = count * rules.heroPowerSpellValue - net * rules.goldPointValue;
-      note = `клич даст ${String(count)} карт.`;
+      const count = generator === 'battlecry' ? promisedCards(text) : 0;
+      base =
+        count * rules.heroPowerSpellValue +
+        fed -
+        net * rules.goldPointValue -
+        (victim?.value ?? 0);
+      const notes: string[] = [];
+      if (count > 0) notes.push(`клич даст ${String(count)} карт.`);
+      if (fed > 0 && payoff !== null) notes.push(payoffNote(payoff, deps.cards));
+      note = notes.join(', ');
     } else {
       const spun = sellSpinValue(minion, state, deps, rules, true);
       if (spun === null) continue;
@@ -3172,7 +3406,8 @@ export function spinRule(
     // Пока выполнимы и прокрутка, и лучшая покупка, прокрутка идёт первой:
     // начатая с покупки цепочка умирает — золота на генератора не остаётся.
     const rival = bestBuyExcept(minion.entityId);
-    const affordBoth = rival?.minion != null && state.gold - net >= buyCostOf(rival.minion, rules);
+    const affordBoth =
+      rival?.minion != null && state.gold + refund - net >= buyCostOf(rival.minion, rules);
     const score = affordBoth && rival !== null ? Math.max(base, rival.score + 0.5) : base;
     if (best === null || base > best.base) best = { minion, net, base, score, note };
   }
@@ -3181,7 +3416,7 @@ export function spinRule(
   const name = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
   const next = bestBuyExcept(best.minion.entityId);
   const followUp =
-    next?.minion != null && state.gold - best.net >= buyCostOf(next.minion, rules)
+    next?.minion != null && state.gold + refund - best.net >= buyCostOf(next.minion, rules)
       ? `; потом ${deps.cards.info(next.minion.cardId)?.name ?? next.minion.cardId}`
       : '';
 
@@ -3194,7 +3429,8 @@ export function spinRule(
     standaloneScore: best.base,
     cost: best.net,
     requiresSlot: false,
-    sellFirst: null,
+    // На полном борде место под прокрутку освобождает продажа (D224).
+    sellFirst: victim?.minion ?? null,
     reason:
       `купить ${name}, разыграть (${best.note}) и продать — ` +
       `чистая цена ${String(best.net)}${followUp}`,

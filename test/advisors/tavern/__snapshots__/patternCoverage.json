@@ -7,6 +7,23 @@
   ],
   "battlecryGetCountWords": 278,
   "battlecryGetWords": 108,
+  "battlecryPayoffWords": [
+   "BGS_041"
+  ],
+  "battlecryTimesWords": [
+   "BG27_518",
+   "BG27_518_G",
+   "BG27_Anomaly_802",
+   "BG27_Reward_802",
+   "BG28_509",
+   "BG34_Giant_376",
+   "BG34_Giant_376_G",
+   "BG36_MagicItem_215",
+   "BGS_Treasures_030",
+   "BGS_Treasures_030e",
+   "BG_LOE_077",
+   "TB_BaconShop_HP_022e"
+  ],
   "battleTextWords": 383,
   "bloodGemGetWords": 51,
   "bloodGemUpgradeWords": [

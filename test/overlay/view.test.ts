@@ -966,6 +966,7 @@ describe('вид оверлея', () => {
       total,
       thresholdKeyword: null,
       combatGrant: null,
+      battlecryPayoff: 0,
       tribeMates: 0,
       textTribeMates: 0,
       textMechMates: 0,
