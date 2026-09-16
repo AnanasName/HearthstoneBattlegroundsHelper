@@ -3527,6 +3527,60 @@ describe('синергия с механикой из текста (part15, Titu
     expect(value.textMech).toBe(2 * DEFAULT_TAVERN_RULES.value.perTextMechMate);
   });
 
+  describe('племя-получатель без носителей (part54, D220)', () => {
+    const tribeCards = createCardIndex([
+      {
+        id: 'TICH',
+        name: 'Тихондрий',
+        type: 'Minion',
+        techLevel: 5,
+        races: ['DEMON'],
+        isBaconPool: true,
+        mechanics: ['TRIGGER_VISUAL'],
+        text: 'After your hero takes damage, give your Demons +{0}/+{1}.',
+      },
+      {
+        id: 'EVOKER',
+        name: 'Заклинатель',
+        type: 'Minion',
+        techLevel: 6,
+        races: ['DRAGON'],
+        isBaconPool: true,
+        text: '<b>Start of Combat:</b> Give your Dragons +{0}/+{1}. Improves permanently after you cast a Tavern spell.',
+      },
+      { id: 'IMP', name: 'Бес', type: 'Minion', techLevel: 1, races: ['DEMON'], isBaconPool: true },
+      { id: 'DRAKE', name: 'Дракон', type: 'Minion', techLevel: 2, races: ['DRAGON'], isBaconPool: true },
+      { id: 'AMALGAM', name: 'Амальгама', type: 'Minion', techLevel: 2, races: ['ALL'], isBaconPool: true },
+    ]);
+    const tribeDeps = { cards: tribeCards };
+    const tich = minion(9, { cardId: 'TICH', attack: 4, health: 4, techLevel: 5 });
+    const drakes = [minion(1, { cardId: 'DRAKE' }), minion(2, { cardId: 'DRAKE' })];
+
+    it('на борде без демонов тир за текст Тихондрия не платит', () => {
+      const value = minionValue(tich, state({ board: drakes }), tribeDeps);
+      expect(value.techLevel).toBe(0);
+      expect(value.total).toBe((4 + 4) * DEFAULT_TAVERN_RULES.value.perStatPoint);
+    });
+
+    it('демон на борде, в руке или амальгама — носитель, и надбавка на месте', () => {
+      const full = 5 * DEFAULT_TAVERN_RULES.value.perTechLevel;
+      const onBoard = state({ board: [...drakes, minion(3, { cardId: 'IMP' })] });
+      const inHand = state({ board: drakes, hand: [minion(4, { cardId: 'IMP' })] });
+      const amalgam = state({ board: [...drakes, minion(5, { cardId: 'AMALGAM' })] });
+      expect(minionValue(tich, onBoard, tribeDeps).techLevel).toBe(full);
+      expect(minionValue(tich, inHand, tribeDeps).techLevel).toBe(full);
+      expect(minionValue(tich, amalgam, tribeDeps).techLevel).toBe(full);
+    });
+
+    it('растущий сам («Improves permanently») надбавку сохраняет и без своих', () => {
+      const evoker = minion(8, { cardId: 'EVOKER', attack: 8, health: 6, techLevel: 6 });
+      const demons = [minion(1, { cardId: 'IMP' })];
+      expect(minionValue(evoker, state({ board: demons }), tribeDeps).techLevel).toBe(
+        6 * DEFAULT_TAVERN_RULES.value.perTechLevel,
+      );
+    });
+  });
+
   it('своя механика синергией не считается: хрип про свой же хрип молчит', () => {
     // Buzzing Vermin пишет «Deathrattle:» о себе — это описание, не связь.
     const board = [minion(1, { cardId: 'RATTLER' })];

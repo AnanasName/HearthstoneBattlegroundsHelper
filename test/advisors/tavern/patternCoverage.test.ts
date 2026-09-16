@@ -35,9 +35,18 @@ const LIST_LIMIT = 40;
 
 type Compiled = readonly [label: string, patterns: readonly RegExp[]];
 
+/**
+ * `{tribe}` — подстановка племён, как её делает советник (`targetsFriendlyWords`,
+ * `tribeRecipientWords`). Без неё шаблон из одного `{tribe}` не ловил бы
+ * ничего и лежал бы в снапшоте пустым списком — ровно тем видом, которым
+ * здесь помечается мёртвое правило.
+ */
+const TRIBES = `(?:${Object.values(DEFAULT_TAVERN_RULES.tribeTextWords).join('|')})`;
+const pattern = (s: string): RegExp => new RegExp(s.replace('{tribe}', TRIBES), 'i');
+
 function compile(key: string, value: unknown): Compiled[] {
-  if (Array.isArray(value)) return [[key, value.map((s) => new RegExp(String(s), 'i'))]];
-  if (typeof value === 'string') return [[key, [new RegExp(value, 'i')]]];
+  if (Array.isArray(value)) return [[key, value.map((s) => pattern(String(s)))]];
+  if (typeof value === 'string') return [[key, [pattern(value)]]];
   if (value === null || typeof value !== 'object') return [];
   return Object.entries(value).flatMap(([name, inner]): Compiled[] => {
     if (typeof inner === 'string') return [[`${key}.${name}`, [new RegExp(`\\b(?:${inner})\\b`, 'i')]]];

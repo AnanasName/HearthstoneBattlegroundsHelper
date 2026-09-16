@@ -359,6 +359,35 @@ export interface TavernRules {
   readonly combatBoundMechanics: readonly string[];
 
   /**
+   * Племя-ПОЛУЧАТЕЛЬ в тексте миньона: «give your Demons», «another friendly
+   * Dragon», «your other Murlocs». `{tribe}` подставляется из `tribeTextWords`.
+   *
+   * Вторая половина D218 (part54, D220): надбавка за тир молчит и тогда,
+   * когда текст обращён к ПЛЕМЕНИ, а своих этого племени на борде и в руке
+   * нет. Тихондрий `BG26_523` («After your hero takes damage, give your
+   * Demons +{0}/+{1}») на драконьем борде без единого демона стоил 14.0 =
+   * тир 10 + статы 4 и стоял первым шагом плана на кадре игрока; D218 его
+   * не видел — Тихондрий не AURA и называет племя, а не механику.
+   */
+  readonly tribeRecipientWords: readonly string[];
+
+  /**
+   * Признаки текста, при которых племя-получатель надбавку за тир СОХРАНЯЕТ
+   * даже без носителей: карта окупается не соседями по бою, а таверной
+   * или собой. Вместе с ними действуют `tavernTriggerWords` (розыгрыш,
+   * покупка, траты) и `triggerGetWords` (клич или хрип, приносящий карту).
+   *
+   * Умолчание здесь то же, что у `combatBoundMechanics`, только вывернутое:
+   * список держит в ЗАЩИТЕ всё, про что известно, что оно живёт вне боя —
+   * приносит тело, копит счётчик партии, срабатывает кличем или активацией,
+   * растёт само («Improves permanently» у Fire-forged Evoker), отменяет урон
+   * герою («rewind it» у Timewarped Rewinder). По пулу 251952 правило
+   * гасит надбавку у 15 карт, все с боевой головой: хрип, стартовый эффект,
+   * раж, «whenever … attacks/dies», «after your hero takes damage».
+   */
+  readonly tribePremiumKeepWords: readonly string[];
+
+  /**
    * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -1909,6 +1938,21 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   },
 
   combatBoundMechanics: ['DEATHRATTLE', 'BACON_RALLY'],
+
+  tribeRecipientWords: ['\\byour\\s+(?:other\\s+)?{tribe}\\b', '\\bfriendly\\s+{tribe}\\b'],
+
+  tribePremiumKeepWords: [
+    '\\b(?:summon|get|discover)s?\\b',
+    '\\bthis\\s+game\\b',
+    '\\bwherever\\s+they\\s+are\\b',
+    '\\bimproves?\\s+permanently\\b',
+    '\\bactivate\\b',
+    '\\bbattlecry\\b',
+    '\\bspellcraft\\b',
+    '\\bin\\s+your\\s+hand\\b',
+    '\\badded\\s+to\\s+your\\s+hand\\b',
+    '\\brewind\\b',
+  ],
 
   rerollMarginOverTier: 2,
   cheapestShopPrice: 1,

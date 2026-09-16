@@ -967,6 +967,19 @@ function purchasesWord(n: number): string {
 function tierPremiumSilent(
   candidate: Minion,
   textMechMates: number,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): boolean {
+  return (
+    auraWithoutCarriers(candidate, textMechMates, cards, rules) ||
+    tribePayoffWithoutCarriers(candidate, state, cards, rules)
+  );
+}
+
+function auraWithoutCarriers(
+  candidate: Minion,
+  textMechMates: number,
   cards: CardIndex,
   rules: TavernRules,
 ): boolean {
@@ -975,6 +988,49 @@ function tierPremiumSilent(
   const named = textMechanicsOf(candidate.cardId, cards, rules);
   if (named.length === 0) return false;
   return named.every((m) => rules.combatBoundMechanics.includes(m));
+}
+
+/**
+ * Племя-получатель без носителей (D220, part54).
+ *
+ * Тот же довод, что у ауры Титуса, только текст обращён к ПЛЕМЕНИ, а не
+ * к механике: Тихондрий («After your hero takes damage, give your Demons
+ * +{0}/+{1}») на драконьем борде без единого демона — это тело 4/4, и тир
+ * за его текст платить нечем. На кадре игрока (16:24:52) он стоял первым
+ * шагом плана с баллом 14.0 = тир 10 + статы 4; игрок его не купил.
+ *
+ * Носители считаются на борде И В РУКЕ, кроме самого кандидата: карта руки
+ * встанет на борд этим же ходом, и гасить надбавку при демоне в руке было бы
+ * ошибкой в опасную сторону. Самого кандидата не считаем, хотя «your Demons»
+ * задевает и его: прибавка одному себе — это рост тела, а не то, за что
+ * берётся тир (у Тихондрия +4/+4 за каждый полученный героем удар).
+ *
+ * Защищены карты, которые окупаются не соседями по бою
+ * (`tribePremiumKeepWords`, `tavernTriggerWords`, `triggerGetWords`).
+ */
+function tribePayoffWithoutCarriers(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): boolean {
+  const text = cards.info(candidate.cardId)?.text ?? '';
+  if (text === '') return false;
+  const tribes = Object.entries(rules.tribeTextWords)
+    .filter(([, word]) =>
+      rules.tribeRecipientWords.some((w) =>
+        new RegExp(w.replace('{tribe}', `(?:${word})`), 'i').test(text),
+      ),
+    )
+    .map(([race]) => race);
+  if (tribes.length === 0) return false;
+  const kept = [...rules.tavernTriggerWords, ...rules.triggerGetWords, ...rules.tribePremiumKeepWords];
+  if (kept.some((w) => new RegExp(w, 'i').test(text))) return false;
+  return ![...state.board, ...state.hand].some((m) => {
+    if (m.entityId === candidate.entityId) return false;
+    const races = racesOf(m, cards);
+    return races.includes(RACE_ALL) || tribes.some((r) => races.includes(r));
+  });
 }
 
 /** Ценность миньона: во что складываются веса из таблицы правил. */
@@ -1083,7 +1139,7 @@ export function minionValue(
   // за тир — она платила за текст, стоящий на этом борде ровно ничего.
   // Жалоба игрока («не очень понимал смысла от него в той стадии игры») была
   // об этом, и Титуса он не купил.
-  const tech = tierPremiumSilent(candidate, textMechMates, cards, rules) ? 0 : techFull;
+  const tech = tierPremiumSilent(candidate, textMechMates, state, cards, rules) ? 0 : techFull;
 
   // Связь по ИМЕНИ карты — прямее племени: Automaton Portrait называет
   // Ancestral Automaton, а племени у портрета нет вовсе.

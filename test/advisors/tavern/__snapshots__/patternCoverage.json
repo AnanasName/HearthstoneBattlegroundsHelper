@@ -468,9 +468,11 @@
    "BG36_921",
    "BG36_921_G"
   ],
-  "targetsFriendlyWords": 103,
+  "targetsFriendlyWords": 116,
   "tavernTriggerWords": 704,
   "temporaryBuffWords": 134,
+  "tribePremiumKeepWords": 1849,
+  "tribeRecipientWords": 364,
   "tribeTextWords.MURLOC": 88,
   "tribeTextWords.DEMON": 83,
   "tribeTextWords.MECH": 92,

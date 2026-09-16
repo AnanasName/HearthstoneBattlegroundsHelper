@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { minionValue } from '../../src/advisors/tavern/advisor.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
@@ -117,6 +118,27 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
     expect(found, `точка решения хода ${String(turn)}`).toBeDefined();
     return found!.state;
   };
+
+  /**
+   * Жалоба игрока №2 (кадр 16:24:52): «предлагает демона, от которого
+   * не вижу смысла в этой композиции». План кадра начинался словами
+   * «КУПИТЬ Tichondrius 4/4 за 3» — балл 14.0 = тир 10 + статы 4, при
+   * борде из четырёх драконов, пирата и квилбоара. Текст Тихондрия
+   * («After your hero takes damage, give your Demons +{0}/+{1}») на этом
+   * борде обращён к пустоте, и тир за него не платит (D220). Devout
+   * Hellcaller («After another friendly Demon deals damage…») — тот же
+   * случай в той же витрине.
+   */
+  it('ход 17: Тихондрий без демонов — тело 4/4, и в плане его нет', () => {
+    for (const state of [decisionPoint(17), at('16:24:52')]) {
+      const tich = state.shop.find((m) => m.cardId === 'BG26_523');
+      const hellcaller = state.shop.find((m) => m.cardId === 'BG33_155');
+      expect(minionValue(tich!, state, { cards }).techLevel).toBe(0);
+      expect(minionValue(hellcaller!, state, { cards }).techLevel).toBe(0);
+      const plan = spendPlan(state, { cards });
+      expect(plan.steps.some((s) => s.recommendation.minion?.cardId === 'BG26_523')).toBe(false);
+    }
+  });
 
   /**
    * Ход 27 (14-й ход таверны): шестнадцать золотых, полный борд, в плане
