@@ -179,6 +179,34 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
   });
 
   /**
+   * Шаг, который план сам отменяет продажей (D222). Ход 25: «КУПИТЬ
+   * Treasure Parrot 5/5 за 3 → РАЗЫГРАТЬ Proud Privateer, продав Treasure
+   * Parrot» — попугай без клича, два золотых в никуда. Ход 29: «РАЗЫГРАТЬ
+   * Felfire Conjurer → РАЗЫГРАТЬ Blue Chromadrake, продав Felfire Conjurer» —
+   * триггер конца хода, не доживший до конца хода. Оба плана выигрывали
+   * развилку, потому что её сумма считала отменённый шаг целиком.
+   * Прокрутка кличевого (купить-разыграть-продать) остаётся законной.
+   */
+  it('ходы 25 и 29: план не продаёт своё же тело без клича', () => {
+    for (const turn of [25, 29]) {
+      const plan = spendPlan(decisionPoint(turn), { cards });
+      const placed = new Set<number>();
+      for (const { recommendation: rec } of plan.steps) {
+        const victim = rec.sellFirst ?? (rec.action === 'sell' ? rec.minion : null);
+        if (victim !== null && placed.has(victim.entityId)) {
+          expect(cards.info(victim.cardId)?.mechanics, `ход ${String(turn)}`).toContain('BATTLECRY');
+        }
+        if ((rec.action === 'buy' || rec.action === 'play') && rec.minion !== null) {
+          placed.add(rec.minion.entityId);
+        }
+      }
+    }
+    const first25 = spendPlan(decisionPoint(25), { cards }).steps[0]?.recommendation;
+    expect(first25?.action).toBe('play');
+    expect(first25?.minion?.cardId).toBe('BG33_825');
+  });
+
+  /**
    * Ход 27 (14-й ход таверны): шестнадцать золотых, полный борд, в плане
    * активация Hired Mount за 2 и подъём за 4. Прежде план кончался словами
    * «остаётся 10 — сгорит»: `applyRecommendation` не отмечал нажатую

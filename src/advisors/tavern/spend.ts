@@ -759,10 +759,10 @@ export function spendPlan(
   const withoutLevelUp = levelStep !== undefined;
 
   let best = greedy;
-  let bestValue = chainValue(greedy, rules);
+  let bestValue = chainValue(greedy, deps, rules);
   for (const first of alternatives) {
     const chain = buildChain(state, deps, rules, options, first, withoutLevelUp);
-    const value = chainValue(chain, rules);
+    const value = chainValue(chain, deps, rules);
     // Строгое превосходство: при равенстве остаётся жадная цепочка, чтобы
     // порядок советов и план не расходились без причины.
     //
@@ -801,10 +801,12 @@ export function spendPlan(
  * ход, а сравниваем мы этот. Сгоревшее золото переводится в очки тем же
  * курсом `goldPointValue`, что и везде.
  */
-function chainValue(plan: SpendPlan, rules: TavernRules): number {
-  const gained = plan.steps
-    .filter((s) => s.recommendation.action !== 'freeze')
-    .reduce((sum, s) => sum + (s.recommendation.standaloneScore ?? s.recommendation.score), 0);
+function chainValue(plan: SpendPlan, deps: TavernAdvisorDeps, rules: TavernRules): number {
+  const gained =
+    plan.steps
+      .filter((s) => s.recommendation.action !== 'freeze')
+      .reduce((sum, s) => sum + (s.recommendation.standaloneScore ?? s.recommendation.score), 0) -
+    undoneValue(plan, deps, rules);
   // Подъём-ХВОСТ (D214) в сравнении цепочек считается ТАК ЖЕ, как сгоревшее
   // золото, хотя на деле оно уходит в тир. Иначе он становится доводом
   // ОСТАВЛЯТЬ золото: у сгорания цена 3 очка за монету, и хвост, съедающий
@@ -813,6 +815,54 @@ function chainValue(plan: SpendPlan, rules: TavernRules): number {
   // (19.3), на part51 (ход 23) — покупка, и оба раза ради хвоста.
   // Хвост — утешение остатку, а не аргумент его копить.
   return gained - burningGold(plan) * rules.goldPointValue;
+}
+
+/**
+ * Очки шагов, которые та же цепочка потом ОТМЕНЯЕТ продажей (D222).
+ *
+ * part54, ход 25: «КУПИТЬ Treasure Parrot 5/5 за 3 → РАЗЫГРАТЬ Proud
+ * Privateer, продав Treasure Parrot». Попугай без клича («Once this deals
+ * {1} damage, get a Golden Touch») — купить за 3 и продать за 1 ради места
+ * значит выбросить два золотых. Развилка при этом выбирала именно эту
+ * цепочку: её сумма считала попугая (15.5) целиком, хотя к концу хода его
+ * нет, а два потраченных впустую золотых не попадали в «сгорело». Ход 29
+ * того же класса: «РАЗЫГРАТЬ Felfire Conjurer → РАЗЫГРАТЬ Blue Chromadrake,
+ * продав Felfire Conjurer» — триггер конца хода, который до конца хода
+ * не доживёт. По корпусу до правки таких планов 43 из 647.
+ *
+ * Шаг не отменён, если тело успело отдать своё до продажи: клич (прокрутка
+ * D094 живёт ровно так) или ценность в самой продаже (`sellValueWords`).
+ * Покупка теряет ещё и разницу цены с возвратом — тем же курсом, что
+ * сгоревшее золото: иначе потраченные впустую монеты выглядели бы
+ * пристроенными и продолжали выигрывать развилку.
+ */
+function undoneValue(plan: SpendPlan, deps: TavernAdvisorDeps, rules: TavernRules): number {
+  const placed = new Map<number, Recommendation[]>();
+  let undone = 0;
+  for (const { recommendation: rec } of plan.steps) {
+    const victim = rec.sellFirst ?? (rec.action === 'sell' ? rec.minion : null);
+    const origins = victim === null ? undefined : placed.get(victim.entityId);
+    if (victim !== null && origins !== undefined) {
+      const info = deps.cards.info(victim.cardId);
+      const text = info?.text ?? '';
+      const paidOnTheWay =
+        (info?.mechanics.includes('BATTLECRY') ?? false) ||
+        rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text));
+      if (!paidOnTheWay) {
+        for (const origin of origins) {
+          undone += origin.standaloneScore ?? origin.score;
+          if (origin.action === 'buy') {
+            undone += Math.max(0, origin.cost - rules.sellGold) * rules.goldPointValue;
+          }
+        }
+      }
+      placed.delete(victim.entityId);
+    }
+    if ((rec.action === 'buy' || rec.action === 'play') && rec.minion !== null && rec.magnetizeTo == null) {
+      placed.set(rec.minion.entityId, [...(placed.get(rec.minion.entityId) ?? []), rec]);
+    }
+  }
+  return undone;
 }
 
 /** Золото, не пристроенное к делу: остаток плюс ушедшее в подъём-хвост (D214). */
