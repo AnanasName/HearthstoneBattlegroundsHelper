@@ -9215,6 +9215,24 @@ export function trinketAdvice(
 }
 
 /**
+ * Состояние, на котором судятся траты хода при открытом предложении тринкетов.
+ *
+ * Точка решения стоит ДО выбора: золото в ней ещё целое, а вариант стоит
+ * от нуля до шести (D116). Советы и план строились на всём золоте, и в 58
+ * точках корпуса из 71 опознанного выбора план тратил больше, чем останется
+ * (part55, ход 11: план на 8 при оставшихся 4). Вычитается цена ВЕРХНЕГО
+ * варианта своего же совета — из тех, что по карману: дороже золота игра
+ * тринкет не отдаст. Предложение в результате закрыто, чтобы цепочка
+ * плана не вычла цену второй раз.
+ */
+export function afterTrinketPick(state: GameState, trinkets: readonly TrinketAdvice[]): GameState {
+  if (state.trinketOffer.length === 0) return state;
+  const pick = trinkets.find((t) => (t.offer.cost ?? 0) <= state.gold);
+  const cost = pick?.offer.cost ?? 0;
+  return { ...state, gold: state.gold - cost, trinketOffer: [] };
+}
+
+/**
  * Напоминание за ход до предложения тринкетов.
  *
  * Предложения открываются на ходах `trinketOfferTurns` (11 и 17 — 6-й
@@ -9713,11 +9731,15 @@ export function playPlan(
  * бессмысленно, а притворяться, что состояние подходит, — вредно.
  */
 export function adviseTavern(
-  state: GameState,
+  input: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): TavernAdvice | null {
-  if (state.phase !== 'tavern') return null;
+  if (input.phase !== 'tavern') return null;
+  // Тринкеты судятся на открытом предложении, всё остальное — на золоте,
+  // которое останется после выбора (`afterTrinketPick`).
+  const trinkets = trinketAdvice(input, deps, rules);
+  const state = afterTrinketPick(input, trinkets);
 
   // До выбора героя советовать нечего, КРОМЕ самого выбора героя: он идёт
   // тем же каналом выборов, и его ранжирует статистика мест.
@@ -9821,7 +9843,7 @@ export function adviseTavern(
       minion,
       value: minionValue(minion, state, deps, rules),
     })),
-    trinkets: trinketAdvice(state, deps, rules),
+    trinkets,
     choice: choiceAdvice(state, deps, rules),
     playPlan: playPlan(state, deps, plays, rules),
     heroChoice: heroChoiceAdvice(state, deps),

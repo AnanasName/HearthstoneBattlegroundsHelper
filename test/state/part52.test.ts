@@ -242,11 +242,15 @@ describe('part52: реванш и порядок строк про героя с
     // Из руки карта уже оплачена: те же 24 стата без вычета цены.
     expect(play?.score).toBe(12);
 
-    // Ход 17: та же карта во второй раз, игрок купил её в 00:49:08.
+    // Ход 17: та же карта во второй раз, игрок купил её в 00:49:08 — после
+    // Портрета царицы за 3, продаж и подъёма. Советуется она и здесь;
+    // в план на семи золотых после тринкета (с 17.09) она не входит:
+    // Auto Assembler, сила и тёмный дар съедают остаток.
     const later = decisionPoint(17);
-    expect(
-      spendPlan(later, { cards }).steps.some((s) => s.recommendation.spellCardId === 'BG36_884'),
-    ).toBe(true);
+    const forgeLater = adviseTavern(later, { cards })?.recommendations.find(
+      (r) => r.action === 'buy' && r.spellCardId === 'BG36_884',
+    );
+    expect(forgeLater?.score).toBe(12);
     expect(text).toContain('cardId=BG36_884');
   });
 

@@ -144,7 +144,12 @@ describe('part47: сила героя, поднимающая карту вит�
    * второй раз.
    */
   it('ход 17: нажатие входит в план и обрывает его', () => {
-    const state = decisionPoint(17);
+    // Свойство правила проверяется на золоте ДО выбора тринкета. Точка
+    // решения стоит перед выбором, и с 17.09 план тратит только остаток
+    // после верхнего варианта (Colorful Compass за 2 — его и взял игрок):
+    // на восьми золотых нажатие в план не попадает, и в этот ход игрок
+    // силу не жал.
+    const state = { ...decisionPoint(17), trinketOffer: [] };
     const plan = spendPlan(state, { cards });
     const step = plan.steps.findIndex((s) => s.recommendation.action === 'heroPower');
     expect(step).toBeGreaterThanOrEqual(0);

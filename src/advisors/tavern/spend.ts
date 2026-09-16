@@ -1,10 +1,12 @@
 import type { GameState, Minion } from '../../state/types.js';
 import {
   adviseTavern,
+  afterTrinketPick,
   battlecryPayoffOf,
   battlecryPayoffPoints,
   withBattlecryPayoff,
   withKeyword,
+  trinketAdvice,
   withMagnetDoublingSpent,
   type Recommendation,
   type TavernAdvisorDeps,
@@ -668,11 +670,14 @@ export interface SpendPlanOptions {
  * по-прежнему не входит — `levelUpRule` не заполняет там `standaloneScore`.
  */
 export function spendPlan(
-  state: GameState,
+  input: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   options: SpendPlanOptions = {},
 ): SpendPlan {
+  // Точка решения с открытым предложением тринкетов: тратится то, что
+  // останется после выбора (`afterTrinketPick`, долг part55).
+  const state = afterTrinketPick(input, trinketAdvice(input, deps, rules));
   // Ранжирование на ИСХОДНОМ состоянии считается один раз: жадная цепочка
   // берёт отсюда свой первый шаг, развилка — его ближайших соперников.
   // Прежде и то и другое звало `adviseTavern` на одном и том же состоянии

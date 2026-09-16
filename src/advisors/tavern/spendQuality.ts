@@ -3,7 +3,13 @@ import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mappe
 import type { BattleSimulator } from '../battle/simulator.js';
 import type { CardIndex } from '../../data/cards.js';
 import type { GameState, Minion } from '../../state/types.js';
-import { buyCostOf, weakestOwn, type TavernAdvisorDeps } from './advisor.js';
+import {
+  afterTrinketPick,
+  buyCostOf,
+  trinketAdvice,
+  weakestOwn,
+  type TavernAdvisorDeps,
+} from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 import { spendPlan } from './spend.js';
 import { readTavernTurns } from './turns.js';
@@ -278,7 +284,14 @@ export function measureSpendQuality(
       continue;
     }
 
-    const baskets = enumerateBaskets(state, deps, rules, options.maxBaskets);
+    // Наборы перебираются на том же золоте, на котором строится план:
+    // при открытом предложении тринкетов — после цены верхнего варианта.
+    const baskets = enumerateBaskets(
+      afterTrinketPick(state, trinketAdvice(state, deps, rules)),
+      deps,
+      rules,
+      options.maxBaskets,
+    );
     if (baskets.length < 2) {
       skippedNoChoice += 1;
       continue;

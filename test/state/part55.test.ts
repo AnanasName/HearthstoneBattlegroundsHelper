@@ -281,4 +281,38 @@ describe('part55: Юдора, раскопки золотых и пираты', 
       expect(plan.goldLeft, `ход ${String(turn)}`).toBe(0);
     }
   });
+
+  /**
+   * Ход 11: точка решения стоит ДО выбора тринкета — золота 8, а на экране
+   * четыре варианта с ценами 3, 4, 0 и 2. Игрок взял Sunken Anchor за 4
+   * (17:05:35, `m_chosenEntities[0]` → `BG35_MagicItem_890`), а план
+   * строился на все восемь: «дар за 3 → Repair Job за 2 → сила за 1 → …».
+   * Тратить можно только то, что останется после выбора; план берёт цену
+   * ВЕРХНЕГО варианта своего же совета — Archaic Scroll за 3.
+   */
+  it('ход 11: план и список советов строятся на золоте после верхнего тринкета', () => {
+    const state = decisionPoint(11);
+    expect(state.gold).toBe(8);
+    expect(state.trinketOffer.map((t) => t.cost)).toEqual(expect.arrayContaining([3, 4, 2]));
+
+    const advice = adviseTavern(state, { cards });
+    expect(advice?.trinkets[0]?.offer.cardId).toBe('BG32_MagicItem_930');
+    expect(advice?.gold).toBe(5);
+    // Тёмный дар за 3 и прочие траты судятся на пяти золотых, а сам список
+    // тринкетов — на исходном предложении: вычитать нечего дважды.
+    expect(advice?.trinkets).toHaveLength(4);
+
+    const plan = spendPlan(state, { cards });
+    expect(plan.steps[0]?.goldBefore).toBe(5);
+  });
+
+  it('ход 11: тринкет не по карману в расчёт не идёт — берётся верхний из доступных', () => {
+    const state = decisionPoint(11);
+    // Два золота: Archaic Scroll (3) и Sunken Anchor (4) не взять,
+    // верхний по карману — вариант за 2 или бесплатный.
+    const poor = { ...state, gold: 2 };
+    const advice = adviseTavern(poor, { cards });
+    const affordable = advice?.trinkets.find((t) => (t.offer.cost ?? 0) <= 2);
+    expect(advice?.gold).toBe(2 - (affordable?.offer.cost ?? 0));
+  });
 });
