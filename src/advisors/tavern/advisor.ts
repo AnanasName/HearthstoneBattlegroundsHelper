@@ -114,6 +114,13 @@ export interface Recommendation {
    */
   readonly grantsGold?: number;
   /**
+   * Золото, которое действие обещает к СЛЕДУЮЩЕМУ ходу («Gain N Gold next
+   * turn»). В текущий кошелёк оно не идёт (D012), но план переносит его
+   * в `extraGoldNextTurn` своего состояния — тем же счётчиком, что игра
+   * ведёт тегом (Private Investigator `BG36_509`, part54, part55).
+   */
+  readonly grantsGoldNextTurn?: number;
+  /**
    * Цель заклинания-усиления — свой миньон, на которого его кастовать.
    *
    * Отдельным полем, а не только словами в reason: оверлей показывает
@@ -6385,6 +6392,16 @@ export function activationRules(
     const name = info?.name ?? minion.cardId;
     let score = 0;
     let what = '';
+    // «Activate ({0}): Gain {1} Gold next turn» — Private Investigator
+    // `BG36_509` (part40, part54, part55: scriptData [1, 2]). Золото
+    // отложенное (D012) и считается тем же курсом, что у заклинаний.
+    const goldNext = /\bgain\s+(?:\{(\d)\}|(\d+))\s+gold\s+next\s+turn\b/i.exec(effectText);
+    const goldNextTurn =
+      goldNext === null
+        ? 0
+        : goldNext[1] !== undefined
+          ? (minion.scriptData[Number(goldNext[1])] ?? 0)
+          : Number(goldNext[2]);
 
     // Поглощение витрины: сколько своих едят и по сколько статов достаётся.
     // Оба числа читаемы — племя из текста, статы из витрины.
@@ -6413,6 +6430,9 @@ export function activationRules(
     } else if (stats > 0) {
       score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
       what = `+${String(stats)} статов`;
+    } else if (goldNextTurn > 0) {
+      score = (goldNextTurn - cost) * rules.goldPointValue;
+      what = `+${String(goldNextTurn)} золота на следующий ход`;
     } else if (givesMinion) {
       // Приносимое тело оценивается как средний миньон текущего тира.
       score = rules.value.perTechLevel * state.techLevel - cost * rules.goldPointValue;
@@ -6469,6 +6489,7 @@ export function activationRules(
         requiresSlot: false,
         sellFirst: null,
         targetMinion: target,
+        ...(goldNextTurn > 0 ? { grantsGoldNextTurn: goldNextTurn } : {}),
         reason: `активация ${name} за ${String(cost)}: ${what}`,
       },
     ];

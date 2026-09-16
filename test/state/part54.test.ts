@@ -290,4 +290,23 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
     expect(actions.at(-1)).toBe('reroll');
     expect(plan.truncated).toBe(true);
   });
+
+  /**
+   * Ход 17: Private Investigator `BG36_509` на борде — «Activate ({0}):
+   * Gain {1} Gold next turn», числа 1 и 2 на сущности. Игрок нажимал его
+   * на ходах 15 и 17; советник эффекта не видел, и в плане активации
+   * не было. Золото отложенное (D012): в кошелёк хода не идёт, а в плане
+   * ложится в счётчик следующего хода, как у игры.
+   */
+  it('ход 17: активация «Gain 2 Gold next turn» советуется и входит в план', () => {
+    const state = decisionPoint(17);
+    const plan = spendPlan(state, { cards });
+    const step = plan.steps.find(
+      (s) => s.recommendation.action === 'activate' && s.recommendation.minion?.cardId === 'BG36_509',
+    );
+    expect(step?.recommendation.score).toBe(3);
+    expect(step?.recommendation.grantsGoldNextTurn).toBe(2);
+    expect(step?.goldAfter).toBe((step?.goldBefore ?? 0) - 1);
+    expect(step?.stateAfter.extraGoldNextTurn).toBe(2);
+  });
 });

@@ -459,6 +459,8 @@ export function applyRecommendation(
             rec.minion === null
               ? state.activatedEntityIds
               : [...state.activatedEntityIds, rec.minion.entityId],
+          // Обещанное к следующему ходу золото — туда же, куда его пишет игра.
+          extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
         }),
         opaque: true,
         terminal: false,
