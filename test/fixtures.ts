@@ -1144,3 +1144,16 @@ export function part52Game(): string {
 export function part53Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part53', 'game.log'), 'utf8');
 }
+
+/**
+ * part54 — Инге Стальной Гимн (`Inge, the Iron Hymn`), 16.09.2026,
+ * 16:11–16:41, **2-е место**, 15 ходов таверны, билд 251952.
+ *
+ * Лог не резался по содержимому: в сессии клиента 16:10:15 ровно одна
+ * партия (`GT_BATTLEGROUNDS` один, `GT_RANKED` ноль, `CREATE_GAME`
+ * канала-источника один), доиграна до `FINAL_GAMEOVER`; нарезана
+ * `fixture:passport --game=1 --write=part54`.
+ */
+export function part54Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part54', 'game.log'), 'utf8');
+}
