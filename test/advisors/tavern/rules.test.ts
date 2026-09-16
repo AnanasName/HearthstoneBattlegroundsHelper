@@ -1464,6 +1464,14 @@ describe('правило заморозки', () => {
     // не стоит (part29, ход 5 — «5 золота скорее всего последнее выгодное
     // значение для его заморозки»).
     expect(freezeRule({ ...broke, turn: 5 }, lassoDeps)).toBeNull();
+    // Но если к следующему ходу обещаны ещё два золотых («Gain N Gold next
+    // turn», тег `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN`), золота будет восемь,
+    // и лассо снова даёт третье тело (долг part46).
+    const promised = freezeRule({ ...broke, turn: 5, extraGoldNextTurn: 2 }, lassoDeps);
+    expect(promised?.action).toBe('freeze');
+    expect(promised?.reason).toContain('со следующего хода');
+    // Обещание относится только к следующему ходу: одной монеты мало (7 → 2 тела и там и там).
+    expect(freezeRule({ ...broke, turn: 5, extraGoldNextTurn: 1 }, lassoDeps)).toBeNull();
     // А на ходу 9 (пятый ход таверны, восемь золота следующим) лишнее
     // тело снова появляется: две покупки без лассо против лассо и двух
     // покупок с ним. Порога по тиру у ветки нет — есть арифметика.

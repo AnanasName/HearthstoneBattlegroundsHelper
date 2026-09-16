@@ -4256,7 +4256,13 @@ export function freezeRule(
   // сделает сверх самого предложения — зависит от его цены: на четырёх
   // золотых после лассо за 2 покупок ноль, и штрафовать доживающих
   // за покупки, которых не будет, нельзя (состязательная проверка 26.08).
-  const nextGold = Math.min(2 + tavernTurnOf(state.turn) + 1, 10);
+  //
+  // К СЛЕДУЮЩЕМУ ходу сверх правила придёт обещанное золото («Gain N Gold
+  // next turn») — живой тег игры, `extraGoldNextTurn` (долг part46).
+  const nextTavernTurn = tavernTurnOf(state.turn) + 1;
+  const tavernGold = (t: number): number =>
+    Math.min(2 + t, 10) + (t === nextTavernTurn ? state.extraGoldNextTurn : 0);
+  const nextGold = tavernGold(nextTavernTurn);
   const purchasesAfter = (spent: number): number =>
     Math.max(0, Math.floor((nextGold - spent) / rules.minionCost));
 
@@ -4297,10 +4303,10 @@ export function freezeRule(
   // Первый ход таверны, на котором хватит и на предложение, и на покупку.
   const turnAffordingBoth = (spent: number): number => {
     const need = spent + rules.minionCost;
-    for (let t = tavernTurnOf(state.turn) + 1; t < 12; t++) {
-      if (Math.min(2 + t, 10) >= need) return t;
+    for (let t = nextTavernTurn; t < 12; t++) {
+      if (tavernGold(t) >= need) return t;
     }
-    return tavernTurnOf(state.turn) + 1;
+    return nextTavernTurn;
   };
 
   /**
@@ -4333,7 +4339,7 @@ export function freezeRule(
    * и на покупку (part17, ход 1).
    */
   const addsExtraBody = (spent: number): boolean => {
-    const gold = Math.min(2 + turnAffordingBoth(spent), 10);
+    const gold = tavernGold(turnAffordingBoth(spent));
     const without = Math.floor(gold / rules.minionCost);
     const withOffer = 1 + Math.floor((gold - spent) / rules.minionCost);
     return withOffer > without;
@@ -4442,7 +4448,6 @@ export function freezeRule(
     const spellName = deps.cards.info(keeper.spell.cardId)?.name ?? keeper.spell.cardId;
     // «Два тела в один ход» обещаются только тем ходом, где золота хватит
     // на оба: на первом ходу таверны это третий (пять золота), а не второй.
-    const nextTavernTurn = tavernTurnOf(state.turn) + 1;
     const when =
       keeper.bothOn <= nextTavernTurn
         ? 'со следующего хода это'

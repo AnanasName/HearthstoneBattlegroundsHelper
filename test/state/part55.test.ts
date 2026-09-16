@@ -321,6 +321,20 @@ describe('part55: Юдора, раскопки золотых и пираты', 
     expect(choice.map((c) => c.option.cardId)).toEqual(['BG36_524', 'BG33_823', 'BG25_354']);
   });
 
+  /**
+   * Счётчик отложенного золота — `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` на игроке:
+   * ход 25 копит 1 → 2 → 3 → 4 → 6 (17:22:40–17:23:12), а в 17:23:43 ход 27
+   * начинается нулём при 18 золотых. На точках решения он поэтому ноль —
+   * виден только посреди хода, где его и ждёт оверлей.
+   */
+  it('обещанное золото следующего хода читается живым счётчиком', () => {
+    const mid = at('17:23:12');
+    expect([mid.turn, mid.extraGoldNextTurn]).toEqual([25, 6]);
+    const next = at('17:23:44');
+    expect([next.turn, next.extraGoldNextTurn, next.gold]).toEqual([27, 0, 18]);
+    expect(turns.every((t) => t.state.extraGoldNextTurn === 0)).toBe(true);
+  });
+
   it('ход 11: тринкет не по карману в расчёт не идёт — берётся верхний из доступных', () => {
     const state = decisionPoint(11);
     // Два золота: Archaic Scroll (3) и Sunken Anchor (4) не взять,

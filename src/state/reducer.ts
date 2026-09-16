@@ -216,6 +216,8 @@ export function createReducer(players: Players): Reducer {
   let goldTemp = 0;
   /** Сколько временного золота потрачено в этом ходу — чтобы `goldSpent` видел и его. */
   let tempSpent = 0;
+  /** Золото, обещанное к следующему ходу, — тег игры, см. `GameState.extraGoldNextTurn`. */
+  let extraGoldNextTurn = 0;
   let anomalyCardId: string | null = null;
   let finalPlace: number | null = null;
   let buildNumber: number | null = null;
@@ -554,6 +556,9 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'RESOURCES_USED':
         if (subject.kind === 'self' && n !== null) goldSpent = n;
+        return;
+      case 'BACON_PLAYER_EXTRA_GOLD_NEXT_TURN':
+        if (subject.kind === 'self' && n !== null) extraGoldNextTurn = n;
         return;
       case 'TEMP_RESOURCES':
         if (subject.kind === 'self' && n !== null) {
@@ -1449,6 +1454,7 @@ export function createReducer(players: Players): Reducer {
       gold: Math.max(0, goldTotal + goldTemp - goldSpent),
       goldTotal,
       goldSpent: goldSpent + tempSpent,
+      extraGoldNextTurn,
       anomalyCardId,
       globalInfo: { ...globalInfo, ...enchantCountersOf(players.selfPlayerId) },
       // Счётчики СОПЕРНИКА текущего боя — та же функция, другой контроллер.

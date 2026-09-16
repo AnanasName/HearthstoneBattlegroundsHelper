@@ -630,6 +630,17 @@ export interface GameState {
   readonly goldTotal: number;
   /** Потрачено золота за ход — `RESOURCES_USED`. */
   readonly goldSpent: number;
+  /**
+   * Золото, обещанное к СЛЕДУЮЩЕМУ ходу, — тег `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN`
+   * на игроке.
+   *
+   * Растёт внутри хода с каждым «Gain N Gold next turn» и сбрасывается в ноль
+   * в начале следующего, когда золото пришло (part55: 1 → 2 → 3 → 4 → 6 → 7
+   * за ход, ноль в 17:13:55 и 17:23:43). Поэтому на точке решения он почти
+   * всегда ноль, а посреди хода — нет. До 17.09 советник брал золото
+   * следующего хода одним правилом `min(2 + N, 10)` (долг part46).
+   */
+  readonly extraGoldNextTurn: number;
   readonly hero: Hero | null;
   /** Свой борд, слева направо. */
   readonly board: readonly Minion[];
@@ -893,6 +904,7 @@ export const EMPTY_STATE: GameState = {
   gold: 0,
   goldTotal: 0,
   goldSpent: 0,
+  extraGoldNextTurn: 0,
   hero: null,
   board: [],
   hand: [],
