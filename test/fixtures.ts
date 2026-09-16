@@ -1153,6 +1153,18 @@ export function part53Game(): string {
  * партия (`GT_BATTLEGROUNDS` один, `GT_RANKED` ноль, `CREATE_GAME`
  * канала-источника один), доиграна до `FINAL_GAMEOVER`; нарезана
  * `fixture:passport --game=1 --write=part54`.
+ *
+ * Что этой партией закрыто:
+ *  1. **Порог щита по атаке** — Scarlet Survivor («Once this reaches {0}
+ *     Attack, gain Divine Shield», порог 6 на сущности) добирается бананом
+ *     и силой Инге на первом ходу (D221).
+ *  2. **Тир не платит за текст, обращённый к племени без носителей** —
+ *     Тихондрий на драконьем борде, жалоба игрока по кадру 16:24:52 (D220).
+ *  3. **Стартовый дар вихря** — Thousandth Paper Drake и Survivor крайней
+ *     левой (D223).
+ *  4. **Клич кормит Kalecgos** — золотой Kalecgos и Бранн, прокрутки
+ *     кличевых десятками (D224); **атака — на Warpwing** (D225).
+ *  5. **Тринкет за золото в журнал действий не попадает** (16:24:38).
  */
 export function part54Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part54', 'game.log'), 'utf8');
