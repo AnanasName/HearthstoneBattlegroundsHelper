@@ -250,6 +250,15 @@ export function createReducer(players: Players): Reducer {
 
   /** id сущности героя → `PlayerID` его владельца. */
   const heroOwner = new Map<number, number>();
+  /**
+   * Герой, только что подставленный в чужой слот, чей `PlayerID` ещё не
+   * пришёл. Порядок этих двух строк В ЛОГЕ НЕ ЗАКРЕПЛЁН: в обычном бою
+   * `PLAYER_ID` героя идёт раньше `HERO_ENTITY` слота, а в РЕВАНШЕ —
+   * строкой позже (part52: 11 боёв обычных, 2 реванша, 00:50:14 и 00:58:00).
+   * Поиск владельца только в момент `HERO_ENTITY` промахивался молча,
+   * и борд соперника записывался ПРЕДЫДУЩЕМУ игроку.
+   */
+  let pendingOpponentHeroId: number | null = null;
   /** Последний увиденный борд каждого противника. */
   const lastSeenBoards = new Map<number, Minion[]>();
   /** Ход, на котором этот борд был увиден, — мера устаревания картинки. */
@@ -542,7 +551,14 @@ export function createReducer(players: Players): Reducer {
       case 'PLAYER_ID':
         // У героя каждого участника лобби есть его PlayerID. Это единственный
         // способ понять, кто скрыт за чужим слотом во время боя.
-        if (subject.kind === 'entity' && n !== null) heroOwner.set(subject.id, n);
+        if (subject.kind === 'entity' && n !== null) {
+          heroOwner.set(subject.id, n);
+          // Реванш: слот получил героя раньше, чем герой — свой PlayerID.
+          if (subject.id === pendingOpponentHeroId) {
+            currentOpponentPlayerId = n;
+            pendingOpponentHeroId = null;
+          }
+        }
         return;
       case 'BACON_WON_LAST_COMBAT':
         if (subject.kind === 'self' && n !== null) wonLastCombat = n > 0;
@@ -920,8 +936,11 @@ export function createReducer(players: Players): Reducer {
         // подставляется герой очередного противника. Кто именно — видно
         // по тегу PLAYER_ID самого героя, а не по подписи слота: в поздних
         // боях подпись остаётся «Бармен Боб», хотя дерёмся с игроком.
-        const owner = heroOwner.get(numeric(value) ?? -1);
+        const heroId = numeric(value);
+        const owner = heroOwner.get(heroId ?? -1);
         if (owner !== undefined) currentOpponentPlayerId = owner;
+        // Владельца ещё не объявляли — ждём его строку (реванш, part52).
+        else pendingOpponentHeroId = heroId;
       }
     }
 

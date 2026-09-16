@@ -511,7 +511,36 @@ function planSteps(
   // Иначе план обрывался бы на ней, не потратив ни монеты: очки заморозки
   // считаются по своей шкале и легко обгоняют покупку.
   const spending = usable.filter((rec) => rec.action !== 'freeze');
-  if (spending.length === 0) return usable.slice(0, 1);
+  if (spending.length === 0) {
+    // Тратить больше не на что — и тогда остаток забирает подъём,
+    // обнулённый ПОРОГОМ ЗДОРОВЬЯ (`blockedByHp`). Довод порога — «ход без
+    // покупки ослабит бой», — но покупок в этой ветке нет вовсе: они уже
+    // сделаны или их не было. Золото иначе сгорает целиком (part52, ход 23:
+    // hp 1, десять золотых, все шаги плана бесплатны; part51, ход 29 при hp 2).
+    //
+    // Берётся ТОЛЬКО ноль от порога здоровья. Ноль «по графику» — другое
+    // утверждение («тир и так свой»), и пускать его тем же условием значило
+    // бы воскресить подъём, который правило только что признало ненужным.
+    //
+    // В ветке развилки «ход БЕЗ подъёма» хвост не добавляется: там сравнение
+    // идёт именно про подъём, и вернуть его с другого конца значило бы
+    // сравнивать две цепочки, в обеих из которых он есть (part24, ход 7).
+    const burning = withoutLevelUp ? undefined : advice.recommendations.find(
+      (rec) =>
+        rec.action === 'levelUp' &&
+        rec.blockedByHp === true &&
+        rec.cost <= state.gold &&
+        !used.has(stepKey(rec) ?? ''),
+    );
+    if (burning !== undefined) {
+      const tail: Recommendation = {
+        ...burning,
+        reason: `${burning.reason}; но тратить больше не на что — иначе золото сгорает, а покупок подъём не отнимает`,
+      };
+      return [tail, ...usable.slice(0, 1)];
+    }
+    return usable.slice(0, 1);
+  }
 
   // Усиление ВСЕГО борда ждёт, пока есть что делать до него (part51).
   // Сыгранное раньше покупки, оно купленному не достанется, а жадная цепочка
@@ -629,13 +658,26 @@ export function spendPlan(
   // с усреднением по пулу, заморозка, выборы).
   const firstOptions = planSteps(state, deps, rules, new Set<string>());
   const greedy = buildChain(state, deps, rules, options, firstOptions[0] ?? null);
-  if (greedy.goldLeft <= 0) return greedy;
+  // Золото, которое цепочка НЕ пристроила к делу: остаток плюс то, что ушло
+  // в подъём-хвост (D214). Хвост тратит остаток, но развилку он выключать
+  // не должен — иначе жадная цепочка, сунувшая девять золотых в тир,
+  // объявлялась бы «потратившей всё», и альтернативы не пробовались бы
+  // вовсе (part52, ход 21: из плана так выпадал тёмный дар).
+  if (burningGold(greedy) <= 0) return greedy;
 
   // Цепочка с подъёмом судится развилкой только тогда, когда у подъёма есть
   // СВОЯ ценность (`standaloneScore`): без неё сумма очков считала бы лучшую
   // покупку дважды. Не заполнено — цепочка уходит как есть, как было до
   // 17.08 (мусорная витрина, см. `levelUpRule`).
-  const levelStep = greedy.steps.find((s) => s.recommendation.action === 'levelUp');
+  // Подъём-ХВОСТ (`blockedByHp`, D214) развилкой не считается: он не выбор
+  // между тиром и покупками, а способ не сжечь остаток, и появляется он
+  // ровно там, где тратить больше не на что. Считать его «подъёмом жадной
+  // цепочки» значило бы и выключить развилку, и строить альтернативы
+  // без него — то есть сравнивать цепочку с непотраченным золотом
+  // с цепочкой, которая его сожгла.
+  const levelStep = greedy.steps.find(
+    (s) => s.recommendation.action === 'levelUp' && s.recommendation.blockedByHp !== true,
+  );
   if (levelStep !== undefined && levelStep.recommendation.standaloneScore === undefined) {
     return greedy;
   }
@@ -749,7 +791,22 @@ function chainValue(plan: SpendPlan, rules: TavernRules): number {
   const gained = plan.steps
     .filter((s) => s.recommendation.action !== 'freeze')
     .reduce((sum, s) => sum + (s.recommendation.standaloneScore ?? s.recommendation.score), 0);
-  return gained - plan.goldLeft * rules.goldPointValue;
+  // Подъём-ХВОСТ (D214) в сравнении цепочек считается ТАК ЖЕ, как сгоревшее
+  // золото, хотя на деле оно уходит в тир. Иначе он становится доводом
+  // ОСТАВЛЯТЬ золото: у сгорания цена 3 очка за монету, и хвост, съедающий
+  // девять, «стоил» бы 27 очков — больше любого настоящего шага. Корпусный
+  // прогон это и показал: на part52 (ход 21) из плана выпадал тёмный дар
+  // (19.3), на part51 (ход 23) — покупка, и оба раза ради хвоста.
+  // Хвост — утешение остатку, а не аргумент его копить.
+  return gained - burningGold(plan) * rules.goldPointValue;
+}
+
+/** Золото, не пристроенное к делу: остаток плюс ушедшее в подъём-хвост (D214). */
+function burningGold(plan: SpendPlan): number {
+  const tail = plan.steps
+    .filter((s) => s.recommendation.action === 'levelUp' && s.recommendation.blockedByHp === true)
+    .reduce((sum, s) => sum + s.recommendation.cost, 0);
+  return plan.goldLeft + tail;
 }
 
 function buildChain(

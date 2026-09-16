@@ -68,6 +68,17 @@ export interface CardInfo {
    */
   readonly magnetic: boolean;
   /**
+   * Базовые плейсхолдеры карты — `TAG_SCRIPT_DATA_NUM_1..4` из снапшота.
+   *
+   * У сущности в логе эти числа ЖИВЫЕ (у Pointy Arrow 7/3 при счётчике 3/3),
+   * и обычно читаются именно они. Но у карты, которую заклинание только
+   * ОБЕЩАЕТ («Get 3 Pointy Arrows»), сущности ещё нет, а её числа уже нужны:
+   * база из снапшота плюс живая надбавка заклинаниям таверны даёт ровно то,
+   * что игра потом создаст (part52: база 4/0, в логе 7/3 при счётчике 3/3
+   * и 8/4 при 4/4 — сверено на трёх картах, семь наблюдений).
+   */
+  readonly baseScriptData: readonly number[];
+  /**
    * Механики карты как есть: DEATHRATTLE, REBORN, MODULAR…
    *
    * Нужны советнику для карт-смертников из «Восстания из гробницы»
@@ -123,6 +134,20 @@ export interface CardIndex {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** Плейсхолдеры карты из снапшота: `tags.TAG_SCRIPT_DATA_NUM_1..4` по порядку. */
+function scriptDataOf(card: RawCard): number[] {
+  const tags = (card as { readonly tags?: unknown }).tags;
+  if (typeof tags !== 'object' || tags === null) return [];
+  const bag = tags as Record<string, unknown>;
+  const out: number[] = [];
+  for (let i = 1; i <= 4; i += 1) {
+    // Индексы плейсхолдеров сквозные: `{0}` в тексте — это NUM_1. Дырок
+    // тут быть не должно, поэтому пропущенный тег — ноль, а не пропуск.
+    out.push(asNumber(bag[`TAG_SCRIPT_DATA_NUM_${String(i)}`]) ?? 0);
+  }
+  return out;
 }
 
 function asRaces(card: RawCard): string[] {
@@ -226,6 +251,7 @@ export function createCardIndex(raw: readonly unknown[]): CardIndex {
       health: asNumber(card.health),
       type: typeof card.type === 'string' ? card.type.toUpperCase() : null,
       magnetic: Array.isArray(card.mechanics) && card.mechanics.includes('MODULAR'),
+      baseScriptData: scriptDataOf(card),
       mechanics: Array.isArray(card.mechanics)
         ? card.mechanics.filter((m): m is string => typeof m === 'string')
         : [],

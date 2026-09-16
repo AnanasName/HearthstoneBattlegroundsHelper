@@ -61,6 +61,25 @@ describe('part51: продажа ради покупки на неполном �
   const swapsOf = (recs: readonly Recommendation[]): Recommendation[] =>
     recs.filter((r) => r.action === 'buy' && r.minion !== null && r.sellFirst !== null);
 
+  /**
+   * Второй случай класса, найденного на part52 (ход 23): при hp 2 порог
+   * `levellingHpFloor` обнуляет подъём, и план кончался словами «остаётся
+   * 13 — сгорит». Игрок поднялся сам, в 17:31:45:
+   *
+   *   D 17:31:45.2021894 … BLOCK_START BlockType=PLAY Entity=[entityName=Таверна
+   *   6-го уровня … cardId=TB_BaconShopTechUp06_Button player=1]
+   *
+   * Строка лога здесь не проверяется намеренно: файл и так держит в памяти
+   * партию целиком, а лишний проход по 43 мегабайтам роняет воркер.
+   */
+  it('ход 29: сгорающее золото уходит в подъём, обнулённый порогом здоровья', () => {
+    const state = decisionPoint(29);
+    expect(state.tavernUpgradeCost).toBe(4);
+    const plan = spendPlan(state, { cards });
+    expect(plan.steps.map((s) => s.recommendation.action)).toContain('levelUp');
+    expect(plan.goldLeft).toBeLessThan(state.gold - 4);
+  }, 240_000);
+
   it('партия целая: один матч Battlegrounds билда 250339, доигранный до конца', () => {
     expect(text.match(/GameType=GT_BATTLEGROUNDS/g)).toHaveLength(1);
     expect(text.includes('GameType=GT_RANKED')).toBe(false);

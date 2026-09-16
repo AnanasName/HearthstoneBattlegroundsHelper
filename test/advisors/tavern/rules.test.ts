@@ -1784,6 +1784,9 @@ describe('заклинания руки', () => {
       // Весь борд — только «Give your minions +X/+Y» (part51).
       boardWide: false,
       givesMinion: false,
+      // «Get N карт» — счёт обещанных карт, у усиления его нет (part52).
+      givesCards: 0,
+      givesCardId: null,
       goldNextTurn: 0,
       buffsShop: false,
       buffsShopAllGame: false,
@@ -1805,6 +1808,40 @@ describe('заклинания руки', () => {
     });
     expect(spellEffect('GOLD', [], idx)).toEqual({ gold: 2, stats: 0, divineShield: false, ...plain });
     expect(spellEffect('NONE', [], idx)).toBeNull();
+  });
+
+  it('spellEffect: «Get 3 Pointy Arrows» — счёт и ИМЯ обещанной карты (part52)', () => {
+    // Weapons Forge BG36_884 из витрины part52 (ходы 15 и 17): ни статов,
+    // ни золота, ни миньона в тексте — разбор возвращал null, и карта была
+    // невидима целиком. Счёт читается тем же шаблоном, что у кличевого
+    // генератора, и пишется он словом или цифрой (D093); имя карты —
+    // по заглавным буквам, поэтому «3 random Spellcraft spells» именем
+    // не считается.
+    // `set: 'Battlegrounds'` обязателен: имена индексируются только по этому
+    // набору — в снапшоте 35 тысяч карт, и искать «Pointy Arrow» надо среди
+    // тех, что вообще могут прийти в партию режима.
+    const idx = createCardIndex([
+      { id: 'FORGE', set: 'Battlegrounds', name: 'Оружейная кузница', type: 'Battleground_spell', text: 'Get 3 Pointy Arrows.' },
+      { id: 'ARROW', set: 'Battlegrounds', name: 'Pointy Arrow', type: 'Battleground_spell', text: 'Give a minion +{0} Attack.', tags: { TAG_SCRIPT_DATA_NUM_1: 4 } },
+      { id: 'WORDS', set: 'Battlegrounds', name: 'Словом', type: 'Battleground_spell', text: 'Get two Slimy Shields.' },
+      { id: 'SHIELD', set: 'Battlegrounds', name: 'Slimy Shield', type: 'Spell', text: 'Give a minion +1/+1 and <b>Taunt</b>.' },
+      // Имени нет — ветка молчит: что придёт, мы не знаем.
+      { id: 'RANDOM', set: 'Battlegrounds', name: 'Три случайных', type: 'Battleground_spell', text: 'Get 3 random Spellcraft spells.' },
+      // «Get a …» — счёт не назван; молчит по той же причине, что и раньше.
+      { id: 'SINGLE', set: 'Battlegrounds', name: 'Без счёта', type: 'Battleground_spell', text: 'Get a random Tier 6 minion.' },
+      // Тир из текста — это «даёт миньона», у него своя, более точная цена.
+      { id: 'MINIONS', set: 'Battlegrounds', name: 'Два тела', type: 'Battleground_spell', text: 'Get two random Tier 5 minions.' },
+    ]);
+    expect(spellEffect('FORGE', [], idx)?.givesCards).toBe(3);
+    expect(spellEffect('FORGE', [], idx)?.givesCardId).toBe('ARROW');
+    // Множественное число снимается: карта в наборе зовётся в единственном.
+    expect(spellEffect('WORDS', [], idx)?.givesCardId).toBe('SHIELD');
+    expect(spellEffect('RANDOM', [], idx)).toBeNull();
+    expect(spellEffect('SINGLE', [], idx)?.givesCards).toBe(0);
+    expect(spellEffect('MINIONS', [], idx)?.givesMinion).toBe(true);
+    expect(spellEffect('MINIONS', [], idx)?.givesCards).toBe(0);
+    // База плейсхолдеров карты читается из снапшота — по ней и считается цена.
+    expect(idx.info('ARROW')?.baseScriptData[0]).toBe(4);
   });
 
   it('spellEffect: приклеенный золотой вариант текста не удваивает числа (part17)', () => {
@@ -1863,6 +1900,8 @@ describe('заклинания руки', () => {
       untargeted: false,
       boardWide: false,
       givesMinion: false,
+      givesCards: 0,
+      givesCardId: null,
       buffsShop: false,
       buffsShopAllGame: false,
       shopBuffRace: null,

@@ -931,7 +931,19 @@ function planView(input: ViewInput, cards: CardIndex): OverlayPlan | null {
   return {
     gold: plan.steps[0]?.goldBefore ?? 0,
     steps,
-    restVerbs: rest.map((s) => ACTION_LABEL[s.recommendation.action]),
+    // У непоместившегося шага остаётся глагол — кроме усиления ВСЕГО борда:
+    // оно стоит в хвосте по построению (D210), то есть ровно там, где его
+    // срезает блок, а стоит при этом больше половины суммы плана (part52,
+    // ход 25: Azerite Empowerment, 154 очка из 289). Глагол «КУПИТЬ» без
+    // имени не отвечал на вопрос игрока «почему список зовёт его первым,
+    // а план — нет».
+    restVerbs: rest.map((s) => {
+      const verb = ACTION_LABEL[s.recommendation.action];
+      if (s.recommendation.buffsWholeBoard !== true) return verb;
+      const id = s.recommendation.spellCardId ?? s.recommendation.minion?.cardId ?? null;
+      const name = id === null ? null : (cards.info(id)?.name ?? id);
+      return name === null ? verb : `${verb} ${name}`;
+    }),
     goldCaption: lowerBound ? 'остаток не меньше' : 'остаток',
     tail: outcome === null ? null : { text: outcome, tone: plan.truncated ? 'muted' : 'warn' },
   };

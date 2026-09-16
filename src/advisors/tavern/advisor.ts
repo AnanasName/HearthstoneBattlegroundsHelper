@@ -230,6 +230,24 @@ export interface Recommendation {
    */
   readonly standaloneScore?: number;
   /**
+   * Ноль у подъёма поставлен ПОРОГОМ ЗДОРОВЬЯ, а не графиком.
+   *
+   * У нуля две природы, и они требуют разного (part51, part52). «По графику»
+   * значит «тир и так свой» — подъёма не нужно. Порог `levellingHpFloor`
+   * значит другое: тир нужен, но ход без покупки ослабит бой, который
+   * при низком здоровье может стать последним. Довод порога держится
+   * на том, что подъём ВЫТЕСНЯЕТ покупку, — а когда тратить больше не на
+   * что, вытеснять нечего, и золото просто сгорает.
+   *
+   * part52, ход 23: hp 1, золото 10, все шаги плана бесплатны, и план
+   * печатал «остаётся 10 — сгорит», пока игрок поднимался до шестого тира
+   * (00:56:26). То же в part51 на ходу 29 при hp 2 (17:31:45).
+   *
+   * Поле читает только план (`spend.ts`), список советов оно не трогает:
+   * там порог по-прежнему ранжирует подъём против покупок.
+   */
+  readonly blockedByHp?: boolean;
+  /**
    * Действие ЗАМЕНЯЕТ витрину: «Refresh the Tavern with Battlecry minions»
    * заклинанием руки (part35). Нужно плану: после такого шага всё, что мы
    * знали о витрине, больше не про неё, и цепочка обрывается там же, где
@@ -1737,6 +1755,7 @@ export function levelUpRule(
       cost,
       requiresSlot: false,
       sellFirst: null,
+      blockedByHp: true,
       reason:
         `поднять таверну можно за ${String(cost)}, но здоровья ${String(hp)} ` +
         `при пороге ${String(rules.levellingHpFloor)} — ход без покупки сейчас дороже тира`,
@@ -2526,6 +2545,98 @@ function spinKindOf(text: string, rules: TavernRules): 'battlecry' | 'sell' | nu
 }
 
 /**
+ * Сколько КАРТ обещает текст: «Get two Slimy Shields», «Get 2 Blood Gems»,
+ * «Get 3 Pointy Arrows». Ноль — счёт не назван.
+ *
+ * Счёт пишется и словом, и цифрой, и читать надо оба (D093, part38: одна
+ * непрочитанная цифра роняла счёт на единицу, а с ним и всё правило).
+ * Функция одна на два места: прокрутку кличевого генератора (`spinRule`)
+ * и заклинание, которое кроме карт не обещает ничего (`givesCards`).
+ */
+function promisedCardCount(text: string, rules: TavernRules): number {
+  const numbers: Readonly<Record<string, number>> = { two: 2, three: 3, four: 4 };
+  for (const word of rules.battlecryGetCountWords) {
+    const raw = new RegExp(word, 'i').exec(text)?.[1]?.toLowerCase();
+    if (raw === undefined) continue;
+    const count = numbers[raw] ?? Number(raw);
+    if (Number.isFinite(count) && count > 0) return count;
+  }
+  return 0;
+}
+
+/**
+ * Что стоят ОБЕЩАННЫЕ карты: «Get 3 Pointy Arrows» (Weapons Forge, part52).
+ *
+ * Считается по числам самой обещанной карты, а не курсом: база плейсхолдеров
+ * из снапшота (`baseScriptData`) плюс ЖИВАЯ надбавка заклинаниям таверны,
+ * которую редьюсер уже читает (`globalInfo.tavernSpellAttackBuff` и
+ * `HealthBuff`). Проверено на трёх картах, семь наблюдений: Pointy Arrow
+ * база 4/0 — в логе 7/3 при счётчике 3/3 и 8/4 при 4/4; Repair Job база
+ * 4/8 — 6/10 при 2/2 и 8/12 при 4/4; Shiny Ring база 1/1 — 4/4 при 3/3.
+ *
+ * Почему не курс `heroPowerSpellValue` (D069, D094): корпусный прогон
+ * показал цену ошибки. Три стрелы по шесть очков стоили 12 и на part36
+ * (ход 11) вытесняли из плана ТЕЛО — при том, что на нулевом счётчике
+ * стрела даёт 4 стата, то есть вся тройка равна цене покупки. Числа карты
+ * калибруют сами себя: в начале партии ветка молчит, к 17-му ходу part52
+ * (счётчик 4/4) три стрелы стоят 36 статов.
+ *
+ * Оценка НИЖНЯЯ: спутники Glambot и триггеры Царицы за каст сюда не входят
+ * (долг, docs/next-steps.md), а карта, названная не по имени («Get 3 random
+ * Spellcraft spells»), не оценивается вовсе.
+ */
+function promisedCardsValue(
+  effect: SpellEffect,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  goldCost: number,
+): { score: number; reason: string } | null {
+  if (effect.givesCards <= 0 || effect.givesCardId === null || effect.stats > 0) return null;
+  const card = deps.cards.info(effect.givesCardId);
+  if (card === null) return null;
+  const base = card.baseScriptData;
+  if (base.length === 0) return null;
+  const attack = (base[0] ?? 0) + (state.globalInfo.tavernSpellAttackBuff ?? 0);
+  const health = (base[1] ?? 0) + (state.globalInfo.tavernSpellHealthBuff ?? 0);
+  const stats = effect.givesCards * (attack + health);
+  if (stats <= 0) return null;
+  const score = stats * rules.value.perStatPoint - goldCost * rules.goldPointValue;
+  if (score <= 0) return null;
+  return {
+    score,
+    reason:
+      `${String(effect.givesCards)} × ${card.name} (+${String(attack)}/+${String(health)}), ` +
+      `итого ${String(stats)} статов; оценка нижняя`,
+  };
+}
+
+/**
+ * Карта, названная ПО ИМЕНИ после счёта: «Get 3 **Pointy Arrows**».
+ *
+ * Имя в тексте карты пишется с заглавных, и это единственный признак,
+ * по которому «Get 3 Pointy Arrows» отличается от «Get 3 random Spellcraft
+ * spells»: там после счёта идёт строчное «random», имени нет, и считать
+ * нечего. Множественное число снимается: карта в наборе одна и зовётся
+ * «Pointy Arrow». Тот же приём уже применён к награде силы героя (part34)
+ * и к «Get a Gem Day» (part48) — там поиск шёл по пулу миньонов, здесь
+ * обещанной картой бывает заклинание.
+ */
+function promisedCardId(text: string, cards: CardIndex): string | null {
+  // Регистр здесь значащий, и флага `i` тут быть не может: глагол пишется
+  // с любой буквы («Get 3 …», «…and get 3 …»), а ИМЯ карты опознаётся
+  // ровно по заглавным — иначе «Get 3 random Spellcraft spells» прочиталось
+  // бы как обещание карты «random Spellcraft spells».
+  const m = /\b(?:[Gg]et|[Dd]iscover|[Aa]dd)s?\s+(?:\d+|two|three|four)\s+((?:[A-Z][\w'’-]*)(?:\s+[A-Z][\w'’-]*)*)/.exec(
+    text.replace(/<\/?[a-z]>/gi, ''),
+  );
+  const name = m?.[1];
+  if (name === undefined) return null;
+  const found = cards.byName(name)[0] ?? cards.byName(name.replace(/s$/i, ''))[0];
+  return found?.id ?? null;
+}
+
+/**
  * Что даёт прокрутка ПРОДАЖНОГО генератора — тем же числом, что заклинание
  * витрины, дающее миньона.
  *
@@ -2611,22 +2722,10 @@ export function spinRule(
       null,
     );
   const bestBuy = bestBuyExcept(null);
-  const numbers: Readonly<Record<string, number>> = { two: 2, three: 3, four: 4 };
 
-  /**
-   * Сколько карт обещает клич. Счёт написан либо словом, либо цифрой,
-   * и оба чтения обязательны: пропущенная цифра роняет счёт на единицу,
-   * а с ним и всё правило (part38 — см. `battlecryGetCountWords`).
-   */
-  const promisedCards = (text: string): number => {
-    for (const word of rules.battlecryGetCountWords) {
-      const raw = new RegExp(word, 'i').exec(text)?.[1]?.toLowerCase();
-      if (raw === undefined) continue;
-      const count = numbers[raw] ?? Number(raw);
-      if (Number.isFinite(count) && count > 0) return count;
-    }
-    return 1;
-  };
+  /** Сколько карт обещает клич; не названо — одна (`promisedCardCount`). */
+  const promisedCards = (text: string): number =>
+    Math.max(1, promisedCardCount(text, rules));
 
   // `base` — собственная ценность прокрутки, `score` — она же после бампа
   // порядка. Отбор кандидата идёт по BASE, и это не мелочь: бамп отвечает
@@ -5561,6 +5660,36 @@ export interface SpellEffect {
    */
   readonly givesMinion: boolean;
   /**
+   * Карта, которую заклинание обещает ПО ИМЕНИ: «Get 3 **Pointy Arrows**».
+   * `null` — имени в тексте нет («Get 3 random Spellcraft spells»), и тогда
+   * ценность не считается вовсе: что придёт, мы не знаем.
+   */
+  readonly givesCardId: string | null;
+  /**
+   * Сколько КАРТ обещает заклинание: «Get 3 Pointy Arrows» (Weapons Forge
+   * `BG36_884`, part52), «Get 3 random Spellcraft spells» (Spitescale
+   * Special `BG28_606`).
+   *
+   * Ни статов, ни золота, ни миньона в таком тексте нет, и разбор возвращал
+   * `null` — заклинание было невидимо целиком: ни покупки, ни розыгрыша
+   * из руки. На part52 игрок купил Кузницу дважды (ходы 15 и 17), и три
+   * её стрелы дали Ancestral Automaton +33/+21; советник обе покупки
+   * пропустил молча, как «Gain 2 free Refreshes» до part23.
+   *
+   * Счёт читается тем же шаблоном, что у кличевого генератора
+   * (`battlecryGetCountWords`, D093: пишется и словом, и цифрой). Формы
+   * «Get a …» без счёта сюда не попадают: там счёт неизвестен, а «Repeat
+   * at the start of each turn» (Timewarped Ring) требует горизонта.
+   *
+   * Ценность считают ПРАВИЛА, а не разбор: числа обещанной карты зависят
+   * от живого счётчика усиления заклинаний таверны, который знает только
+   * состояние. Плоского курса тут нет намеренно — корпусный прогон
+   * показал, почему: три стрелы по `heroPowerSpellValue` стоили 12 очков
+   * и на part36 (ход 11) вытеснили из плана тело, хотя при нулевом
+   * счётчике стрела даёт 4 стата, то есть ровно цену покупки.
+   */
+  readonly givesCards: number;
+  /**
    * ПРЕДЕЛ золота, поднятый навсегда: «Increase your maximum Gold by {0}».
    *
    * Отдельно от `gold` намеренно — это разные величины. Разовая монета
@@ -6663,6 +6792,14 @@ function computeSpellEffect(
   const maxGold =
     maxGoldHit === null ? 0 : placeholderValue(maxGoldHit[1], maxGoldHit[2], scriptData);
 
+  // «Get 3 Pointy Arrows» — обещанные КАРТЫ, счёт словом или цифрой
+  // (`battlecryGetCountWords`, D093). Число само по себе ничего не решает:
+  // у «даёт миньона» своя ветка и своя, более точная цена, поэтому счёт
+  // читается только там, где иначе разбор молчит. Без ИМЕНИ карты счёт
+  // тоже бесполезен — цена считается по её числам.
+  const givesCardId = givesMinion ? null : promisedCardId(text, cards);
+  const givesCards = givesCardId === null ? 0 : promisedCardCount(text, rules);
+
   if (
     gold === null &&
     stats === 0 &&
@@ -6672,6 +6809,7 @@ function computeSpellEffect(
     !grantsReborn &&
     !grantsWindfury &&
     !givesMinion &&
+    givesCards === 0 &&
     maxGold === 0
   ) {
     return null;
@@ -6693,6 +6831,8 @@ function computeSpellEffect(
     untargeted,
     boardWide,
     givesMinion,
+    givesCards,
+    givesCardId,
     buffsShop,
     buffsShopAllGame,
     shopBuffRace,
@@ -7024,6 +7164,8 @@ export function buffTarget(
     untargeted: false,
     boardWide: false,
     givesMinion: false,
+    givesCards: 0,
+    givesCardId: null,
     buffsShop: false,
     buffsShopAllGame: false,
     shopBuffRace: null,
@@ -7188,6 +7330,28 @@ export function spellRules(
           reason: `${name} — ${buff.reason}`,
         },
       ];
+    }
+
+    // «Get 3 Pointy Arrows» из РУКИ — та же карта и та же цена, что
+    // в витрине (part52: куплена на ходу 15, разыграна там же, и ещё раз
+    // на ходу 17). Без этой ветки совет молчал и про покупку, и про
+    // розыгрыш — карта была невидима целиком.
+    if (effect.givesCards > 0 && spell.cost <= state.gold) {
+      const promised = promisedCardsValue(effect, state, deps, rules, spell.cost);
+      if (promised !== null) {
+        return [
+          {
+            action: 'play' as const,
+            minion: null,
+            spellCardId: spell.cardId,
+            score: promised.score,
+            cost: spell.cost,
+            requiresSlot: false,
+            sellFirst: null,
+            reason: `${name} — ${promised.reason}`,
+          },
+        ];
+      }
     }
 
     // Усиление или замена: бесплатная ценность перед боем.
@@ -7583,6 +7747,27 @@ export function shopSpellRules(
           requiresSlot: false,
           sellFirst: null,
           reason: `${name} за ${price} — ${buff.reason}`,
+        },
+      ];
+    }
+
+    // Заклинание, которое кроме КАРТ не обещает ничего: «Get 3 Pointy
+    // Arrows» (Weapons Forge, part52, ходы 15 и 17). Цена — статы
+    // обещанной карты, той же шкалой, что у любого усиления.
+    // Ветка стоит ПОСЛЕ всех узнанных эффектов: там, где карта уже понята
+    // (даёт миньона, золото, статы), счёт карт ничего не уточняет.
+    const promised = promisedCardsValue(effect, state, deps, rules, goldCost);
+    if (promised !== null) {
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score: promised.score,
+          cost: goldCost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason: `${name} за ${price} — ${promised.reason}`,
         },
       ];
     }

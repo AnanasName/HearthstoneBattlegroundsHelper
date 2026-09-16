@@ -114,7 +114,12 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
     r.spellDiscountAfter === undefined
       ? ''
       : ` — клич: заклинание витрины дешевле на ${String(r.spellDiscountAfter)}`;
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}${pick}${discount}`;
+  // Подъём-ХВОСТ (D214) обязан объяснить себя прямо в строке: в СПИСКЕ
+  // тот же подъём стоит с нулём и запретом («здоровья 1 при пороге 15»),
+  // и без этих слов план противоречил бы списку на глазах у игрока — тот
+  // самый класс подачи, из-за которого пропадал скрытый шаг усиления.
+  const burning = r.blockedByHp === true ? ' — иначе золото сгорает' : '';
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}${pick}${discount}${burning}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */
@@ -241,9 +246,28 @@ export function spendPlanLine(plan: SpendPlan, cards: CardIndex): string {
   // — это все крупные траты; хвост (дар, обновление) виден и в списке
   // советов ниже.
   const shown = plan.steps.slice(0, MAX_PLAN_STEPS);
-  const rest = plan.steps.length - shown.length;
+  const hidden = plan.steps.slice(MAX_PLAN_STEPS);
   const steps = shown.map((s) => recommendationLine(s.recommendation, cards));
-  if (rest > 0) steps.push(`…и ещё ${String(rest)}`);
+  if (hidden.length > 0) {
+    // Усиление ВСЕГО борда план держит в хвосте по построению (D210:
+    // сыгранное раньше замен, оно достанется проданным), а хвост — ровно
+    // та часть строки, которую срезает ограничение длины. На part52 (ход 25)
+    // так пропал главный шаг хода: Azerite Empowerment на 154 очка стоял
+    // шестым из семи, а список советов называл его ПЕРВОЙ строкой — игрок
+    // видел противоречие «сначала Gearfin» против «сначала Azerite» и не
+    // видел, что план покупает то же самое, только позже.
+    //
+    // Поэтому скрытое усиление всего борда называется по имени. Порогов
+    // тут нет: признак `buffsWholeBoard` у шага уже посчитан.
+    const named = hidden
+      .filter((s) => s.recommendation.buffsWholeBoard === true)
+      .map((s) => recommendationLine(s.recommendation, cards));
+    steps.push(
+      named.length === 0
+        ? `…и ещё ${String(hidden.length)}`
+        : `…и ещё ${String(hidden.length)}, среди них ${named.join(', ')}`,
+    );
+  }
   const tail = plan.truncated
     ? ' → дальше по новой витрине'
     : plan.goldLeft > 0
