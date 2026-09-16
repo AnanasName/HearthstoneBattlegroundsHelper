@@ -930,6 +930,16 @@ export interface TavernRules {
    */
   readonly heroPowerGoldenWords: readonly string[];
   /**
+   * Текст силы героя, РАСКАПЫВАЮЩЕЙ золотого миньона за несколько нажатий, —
+   * «Dig for a Golden minion! (4 Digs left.)» (Капитан Юдора, «Зарытое
+   * сокровище» `TB_BaconShop_HP_074`, part55). Группа 1 — число раскопок
+   * из текста; живой остаток лежит на силе тегом `TAG_SCRIPT_DATA_NUM_1`.
+   *
+   * Класс узкий и назван: слово «dig» в текстах набора Battlegrounds стоит
+   * у ОДНОЙ карты — у этой силы.
+   */
+  readonly heroPowerDigWords: readonly string[];
+  /**
    * Обещание КРОВАВЫХ САМОЦВЕТОВ — «Get {0} Blood Gems» (ветвь «Take the
    * Gems» Кратерного старателя `BG31_320`, part48). Группы: 1 — плейсхолдер
    * числа, 2 — литерал.
@@ -1781,6 +1791,12 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // «Once per game, make a friendly minion Golden.» — Рено, part48.
   // Между словами `\s+`: перенос строки ходит посреди фразы (урок part16).
   heroPowerGoldenWords: ['\\bmake\\s+a\\s+(?:friendly\\s+)?minion\\s+(?:<b>)?golden\\b'],
+  // «[x] Dig for a Golden minion!\n<i>(4 Digs left.)</i>» — Юдора, part55.
+  // Между фразой и скобкой стоят «!», перенос и тег курсива, поэтому
+  // `[\s\S]*?`, а не `[^.]`.
+  heroPowerDigWords: [
+    '\\bdig\\s+for\\s+an?\\s+(?:<b>)?golden(?:</b>)?\\s+minion\\b[\\s\\S]*?\\((\\d+)\\s+digs?\\s+left\\b',
+  ],
   // «Get {0} <b>Blood Gems</b>.» — ветвь Кратерного старателя, part48.
   bloodGemGetWords: [
     '\\bget\\s+(?:\\{(\\d)\\}|(\\d+))\\s+(?:<b>)?blood\\s+gems?\\b',

@@ -247,6 +247,9 @@
   "heroPowerCostGrowthWords": [
    "TB_BaconShop_HP_047"
   ],
+  "heroPowerDigWords": [
+   "TB_BaconShop_HP_074"
+  ],
   "heroPowerGoldenWords": [
    "BG24_Reward_719",
    "BG24_Reward_719t",

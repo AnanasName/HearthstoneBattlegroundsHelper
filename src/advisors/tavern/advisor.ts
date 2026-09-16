@@ -5390,6 +5390,98 @@ function goldenHoldCost(
   };
 }
 
+/**
+ * Правило силы героя, РАСКАПЫВАЮЩЕЙ золотого миньона за несколько нажатий.
+ *
+ * Капитан Юдора (part55), «Зарытое сокровище» `TB_BaconShop_HP_074`:
+ * «Dig for a Golden minion! (4 Digs left.)», цена 1. Игрок нажимал её каждый
+ * ход таверны начиная со второго и по кадру хода 3 написал: «не предложило
+ * нажать силу героя, которую желательно нажимать на этом герое почаще».
+ * Советник молчал всю партию: под шаблоны «даёт миньона» текст не подходит
+ * ни одним словом, а награду приносит не каждое нажатие, а каждое четвёртое.
+ *
+ * Фактура из лога. Счётчик — `TAG_SCRIPT_DATA_NUM_1` на силе: 4 уже при
+ * создании (FULL_ENTITY ID=198, 17:00:20), 3 → 2 → 1 по нажатиям ходов 3, 5
+ * и 7, на ходу 9 — 0: в руку приходит ЗОЛОТОЙ миньон (`BG23_002_G`,
+ * `CREATOR=198`), и счётчик тут же снова 4. Наград за партию три: Shell
+ * Collector тира 2 при таверне 3, Firescale Hoarder тира 5 при таверне 5,
+ * Bigwig Bandit тира 4 при таверне 6, — то есть случайный миньон тиров
+ * от первого до своего. Розыгрыш каждой награды приносил Triple Reward
+ * (17:04:35 → 17:04:37, 17:12:27 → 17:12:46, 17:22:10 → 17:22:18).
+ *
+ * Ценность — доля награды ПО ОСТАТКУ счётчика, та же арифметика, что у силы
+ * «после N покупок» (D005): последнее нажатие стоит целой награды, первое
+ * из четырёх — четверть, и сумма долей больше целого (оценка ВЕРХНЯЯ).
+ * Награда — средний миньон тиров от первого до своего на этом борде плюс
+ * бонус СОБРАННОЙ ТРОЙКИ из `copiesBonus`: золотая карта с наградой за
+ * розыгрыш — ровно то, что приносит тройка, и своего веса правило
+ * не заводит. Эта часть НИЖНЯЯ: тройка стоит двух копий, а раскопка их
+ * не берёт.
+ *
+ * Цена в очки не переводится: золото списывает бюджет плана, как у покупки.
+ * Награда, до которой партия по замеру горизонта не доживёт
+ * (`remainingTurns` меньше, чем нажатий после этого), не стоит ничего.
+ *
+ * Чего правило НЕ считает: карт, растущих от сыгранных золотых (Maritime
+ * Extortionist и Hooktusk на борде part55), — связь есть, числа у неё нет.
+ */
+export function heroPowerDigRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!heroPowerReady(hero)) return null;
+  // `null` — тега `COST` нет вовсе (D083); ноль тегом — скидка (D216).
+  const cost = hero.heroPowerCost;
+  if (cost === null) return null;
+
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const hit = firstMatch(rules.heroPowerDigWords, info?.text ?? '');
+  if (hit === null) return null;
+  const written = Number.parseInt(hit, 10);
+  const remaining = hero.heroPowerScriptData[0] ?? written;
+  if (!Number.isFinite(remaining) || remaining <= 0) return null;
+  const total = Number.isFinite(written) && written >= remaining ? written : remaining;
+
+  // Место награде нужно только на том нажатии, которое её приносит (D008).
+  const victim = remaining === 1 ? handMinionVictim(state, deps, rules) : null;
+  if (cost > state.gold + (victim === null ? 0 : rules.sellGold)) return null;
+
+  // Нажатий после этого — `remaining − 1`, и на каждое нужен свой ход.
+  if (remaining - 1 > remainingTurns(state, rules)) return null;
+
+  const tiers = shopTiers(state.techLevel);
+  const body =
+    averagePoolValue(tiers, state, deps, rules) ?? rules.value.perTechLevel * state.techLevel;
+  const triple = rules.copiesBonus[rules.copiesBonus.length - 1] ?? 0;
+  const reward = body + triple;
+  const share = reward / remaining;
+  if (victim !== null && share - victim.value <= rules.sellMargin) return null;
+
+  const top = tiers[tiers.length - 1] ?? 1;
+  const range = top <= 1 ? 'тира 1' : `тиров 1–${String(top)}`;
+  return {
+    action: 'heroPower',
+    minion: null,
+    score: share - (victim?.value ?? 0),
+    cost,
+    requiresSlot: false,
+    // Жертва — полем только там, где без продажи силу не нажать (как у
+    // `heroPowerRule`).
+    sellFirst: victim !== null && cost > state.gold ? victim.minion : null,
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} — ` +
+      `раскопка ${String(total - remaining + 1)} из ${String(total)}: ` +
+      `золотой миньон ${range} (средний ${body.toFixed(1)} + тройка ${String(triple)})` +
+      (remaining === 1
+        ? ' приходит этим нажатием'
+        : ` — доля ${share.toFixed(1)} из ${reward.toFixed(1)}, нажимать каждый ход`) +
+      (victim === null ? '' : `; ${victim.note}`),
+  };
+}
+
 /** Какое слово дарит сила — по тексту; `null`, если никакого. */
 function grantedKeyword(text: string, rules: TavernRules): BinaryKeywordField | null {
   for (const word of rules.heroPowerKeywordWords) {
@@ -9374,6 +9466,7 @@ export function adviseTavern(
     heroPowerKeywordRule(state, deps, rules),
     heroPowerStatsRule(state, deps, rules),
     heroPowerGoldenRule(state, deps, rules),
+    heroPowerDigRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),
     heroPowerGoldRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),

@@ -77,6 +77,7 @@ describe('покрытие сил героя правилами советник
     if (matches(id, R.heroPowerKeywordWords)) on.push('keyword');
     if (matches(id, R.heroPowerBuyRewardWords)) on.push('buy');
     if (matches(id, R.heroPowerGoldWords)) on.push('gold');
+    if (matches(id, R.heroPowerDigWords)) on.push('dig');
     return on;
   };
 
@@ -121,11 +122,15 @@ describe('покрытие сил героя правилами советник
     // у неё РАСТЁТ («Increases by 1 each turn»), а живого числа мы
     // не видели ни разу — карта во всех партиях чужая.
     expect(count('gold')).toBe(2);
+    // «Dig for a Golden minion! (4 Digs left.)» — Юдора (part55): награда
+    // приходит каждым четвёртым нажатием, слово «dig» в пуле одно.
+    expect(count('dig')).toBe(1);
   });
 
-  it('из 177 сил пула советник не берёт ничего у 121', () => {
+  it('из 177 сил пула советник не берёт ничего у 120', () => {
     const mute = pool.filter((id) => channelsOf(id).length === 0);
-    expect(mute).toHaveLength(121);
+    // 121 → 120: раскопка Юдоры (part55).
+    expect(mute).toHaveLength(120);
 
     // Число большое, и прятать его незачем: сила героя определяет стиль
     // партии, а мы читаем меньше трети пула. Что из этого стоит вносить —
@@ -155,6 +160,7 @@ describe('покрытие сил героя правилами советник
     expect(channelsOf('TB_BaconShop_HP_056')).toEqual(['tribe', 'sell']);
     expect(channelsOf('TB_BaconShop_HP_024')).toEqual(['keyword']);
     expect(channelsOf('TB_BaconShop_HP_048')).toEqual(['buy']);
+    expect(channelsOf('TB_BaconShop_HP_074')).toEqual(['dig']);
     expect(channelsOf('TB_BaconShop_HP_066')).toEqual([]);
     expect(channelsOf('TB_BaconShop_HP_087')).toEqual([]);
 
