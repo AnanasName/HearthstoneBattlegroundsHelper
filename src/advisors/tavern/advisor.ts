@@ -940,6 +940,43 @@ function purchasesWord(n: number): string {
   return `${String(n)} таких покупок`;
 }
 
+/**
+ * Молчит ли надбавка за ТИР на этом кандидате.
+ *
+ * Надбавка `perTechLevel` — прокси: «карта высокого тира несёт сильный
+ * ТЕКСТ». У ауры над чужими весь текст обращён наружу, и когда обращаться
+ * не к кому, прокси лжёт полной ставкой. Проект этот тезис уже сформулировал
+ * («ценность миньона — то, что он делает с остальным бордом, а не собственное
+ * тело», `isAuraOverOthers`), но применял его только при выборе жертвы
+ * продажи. part53 показала вторую половину: на ПОКУПКЕ он нужен ровно так же.
+ *
+ * **Отличать механику БОЯ от механики РОЗЫГРЫША обязательно.** У Титуса
+ * это хрип: он срабатывает смертью носителя в бою, — нет носителей, нет
+ * эффекта. У БРАННА это клич: он срабатывает РОЗЫГРЫШЕМ, то есть окупается
+ * теми, кого мы ЕЩЁ купим, и пустой борд ему не приговор (D059 куплен ровно
+ * этим доводом). Обнулить обе разом значило бы сломать единственную
+ * правильную покупку Бранна в пустой борд. Проверено числами: Титус на этом
+ * борде падает 14.0 → 4.0, Бранн остаётся 13.0.
+ *
+ * Список механик боя ПОЗИТИВНЫЙ: незнакомая механика надбавку сохраняет,
+ * и гаснет она только там, где связь с боем доказана (`combatBoundMechanics`).
+ *
+ * Скидка вместо обнуления не лечит: половина тира даёт Титусу 9.0 — он всё
+ * ещё выше лучшей альтернативы того хода (6.5) и всё ещё в плане.
+ */
+function tierPremiumSilent(
+  candidate: Minion,
+  textMechMates: number,
+  cards: CardIndex,
+  rules: TavernRules,
+): boolean {
+  if (textMechMates > 0) return false;
+  if (!isAuraOverOthers(candidate, cards, rules)) return false;
+  const named = textMechanicsOf(candidate.cardId, cards, rules);
+  if (named.length === 0) return false;
+  return named.every((m) => rules.combatBoundMechanics.includes(m));
+}
+
 /** Ценность миньона: во что складываются веса из таблицы правил. */
 export function minionValue(
   candidate: Minion,
@@ -950,7 +987,11 @@ export function minionValue(
   const w = rules.value;
   const info = cards.info(candidate.cardId);
 
-  const tech = (candidate.techLevel ?? info?.techLevel ?? 1) * w.perTechLevel;
+  // Надбавка за ТИР — прокси «у карты тира N сильный ТЕКСТ». Платится она
+  // не всегда: у ауры над чужими текст — это и есть чужие, и когда носителей
+  // названной механики нет, платить не за что. Решение — ниже, после того
+  // как носители посчитаны (`tierPremiumSilent`).
+  const techFull = (candidate.techLevel ?? info?.techLevel ?? 1) * w.perTechLevel;
   const stats = ((candidate.attack ?? 0) + (candidate.health ?? 0)) * w.perStatPoint;
 
   const mates = tribeMates(candidate, state.board, cards);
@@ -1033,6 +1074,16 @@ export function minionValue(
     rules,
   );
   const textMech = textMechMates * w.perTextMechMate;
+
+  // Надбавка за тир, решённая носителями. Случай part53 (ход таверны 9,
+  // 01:18:32): Titus Rivendare `BG25_354` («Your Deathrattles trigger an extra
+  // time») при ШЕСТИ своих миньонах, из которых с хрипом НОЛЬ, стоял вторым
+  // шагом плана с баллом 14.0 = тир 10 + статы 4 + механика 0. То есть
+  // синергия отработала верно и дала ноль, а балл целиком собрала надбавка
+  // за тир — она платила за текст, стоящий на этом борде ровно ничего.
+  // Жалоба игрока («не очень понимал смысла от него в той стадии игры») была
+  // об этом, и Титуса он не купил.
+  const tech = tierPremiumSilent(candidate, textMechMates, cards, rules) ? 0 : techFull;
 
   // Связь по ИМЕНИ карты — прямее племени: Automaton Portrait называет
   // Ancestral Automaton, а племени у портрета нет вовсе.
