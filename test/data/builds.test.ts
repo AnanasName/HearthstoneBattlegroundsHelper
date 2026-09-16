@@ -12,6 +12,11 @@ describe('совместимость билдов', () => {
   it('баланс-патч и его предшественник — одна игра', () => {
     expect(sameGameBuild(248348, 250339)).toBe(true);
     expect(sameGameBuild(250339, 248348)).toBe(true);
+    // 251952 — тот же случай, решение игрока 16.09.2026 по патчноуту
+    // и по нулю незнакомых карт в part52 (69 карт витрины, 0 незнакомых).
+    expect(sameGameBuild(251952, 250339)).toBe(true);
+    expect(sameGameBuild(250339, 251952)).toBe(true);
+    expect(sameGameBuild(251952, 248348)).toBe(true);
   });
 
   it('контентный патч остаётся чужим', () => {
