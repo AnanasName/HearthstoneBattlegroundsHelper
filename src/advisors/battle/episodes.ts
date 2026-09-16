@@ -107,12 +107,17 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
   const push = (event: PowerEvent): void => {
     reducer.step(event);
 
-    const combatStarting = event.line.content.includes('BOARD_VISUAL_STATE');
+    // Фазу переключают две строки. Возврат стола в таверну закрывает бой
+    // у всех, кто остался в лобби, а у выбывшего его нет: после боя, кончившего
+    // партию, приходит только `STEP=FINAL_GAMEOVER` (part4, part52). Без второй
+    // строки решающий бой каждой проигранной партии терялся.
+    const phaseSwitch =
+      event.line.content.includes('BOARD_VISUAL_STATE') || event.line.content.includes('FINAL_GAMEOVER');
     const inAttack = insideBlock(event, 'ATTACK');
 
     // Снимок дорогой, поэтому берётся только там, где он может понадобиться:
     // на переключении фазы и внутри боя до первого размена.
-    if (!combatStarting && !(phase === 'combat' && !frozen) && !inAttack) return;
+    if (!phaseSwitch && !(phase === 'combat' && !frozen) && !inAttack) return;
 
     const state = reducer.snapshot();
 
