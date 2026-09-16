@@ -9,7 +9,7 @@ import {
   type Recommendation,
   type TavernAdvisorDeps,
 } from './advisor.js';
-import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
+import { DEFAULT_TAVERN_RULES, tavernTurnOf, type TavernRules } from './rules.js';
 
 /**
  * Сила героя после покупки миньона: остаток счётчика «после N покупок»
@@ -685,7 +685,17 @@ export function spendPlan(
   // не должен — иначе жадная цепочка, сунувшая девять золотых в тир,
   // объявлялась бы «потратившей всё», и альтернативы не пробовались бы
   // вовсе (part52, ход 21: из плана так выпадал тёмный дар).
-  if (burningGold(greedy) <= 0) return greedy;
+  //
+  // Второе условие входа (D229) — подъём, который съел ВСЁ золото хода
+  // потому, что прежний тир взят позже своей строки кривой. part55, ход 7:
+  // тир 2 взят на третьем ходу таверны, и подъём на 3 стоит 6 из 6, а не
+  // 5 из 6. Сжечь ему нечего, и сравнение D043 не шло, хотя цепочка «сила +
+  // два Shell Collector» стоила 30.5 против срочности 3.0 — и против поля
+  // борд игрока давал 46 % против 10 % у подъёма. Условие узкое намеренно:
+  // развилка на ЛЮБОМ таком подъёме уводила план от игрока в 47 точках
+  // из 53 (подъём вторым ходом таверны — стандарт, и игроки его делают).
+  const fullLevelWhenLate = levelSpendsAllWhenLate(state, greedy, rules);
+  if (burningGold(greedy) <= 0 && !fullLevelWhenLate) return greedy;
 
   // Цепочка с подъёмом судится развилкой только тогда, когда у подъёма есть
   // СВОЯ ценность (`standaloneScore`): без неё сумма очков считала бы лучшую
@@ -925,6 +935,27 @@ function triggersBattlecry(
   if (rec.magnetizeTo != null) return false;
   const placed = (s: GameState): boolean => s.board.some((m) => m.entityId === minion.entityId);
   return placed(after) && !placed(before);
+}
+
+/**
+ * Настоящий подъём — единственная трата жадной цепочки, а нынешний тир взят
+ * позже своей строки кривой (D229). Остальные шаги цепочки бесплатны.
+ */
+function levelSpendsAllWhenLate(state: GameState, greedy: SpendPlan, rules: TavernRules): boolean {
+  const upTurn = state.techLevelUpTurn;
+  if (upTurn === null) return false;
+  const row = rules.levelling.find((r) => r.tier === state.techLevel);
+  if (row === undefined || tavernTurnOf(upTurn) <= row.fromTavernTurn) return false;
+  const realLevel = greedy.steps.some(
+    (s) =>
+      s.recommendation.action === 'levelUp' &&
+      s.recommendation.blockedByHp !== true &&
+      s.recommendation.standaloneScore !== undefined,
+  );
+  return (
+    realLevel &&
+    greedy.steps.every((s) => s.recommendation.action === 'levelUp' || s.goldAfter >= s.goldBefore)
+  );
 }
 
 /** Золото, не пристроенное к делу: остаток плюс ушедшее в подъём-хвост (D214). */

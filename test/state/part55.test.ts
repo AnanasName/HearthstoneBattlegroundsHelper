@@ -249,6 +249,31 @@ describe('part55: Юдора, раскопки золотых и пираты', 
     expect(headhunter?.reason).toContain('Discover кормит своих');
   });
 
+  /**
+   * Ход 7 (D229): тир 2 взят на третьем ходу таверны, и подъём на 3 стоит
+   * все 6 золотых. Игрок нажал силу и купил два Shell Collector; против поля
+   * его борд на ходу таверны 4 — 46.1 % против 10.2 % у подъёма. Развилка
+   * теперь сравнивает подъём и с цепочкой покупок.
+   *
+   *   D 17:02:44.97… TB_BaconShopTechUp03_Button … tag=COST value=6
+   *
+   * Ход 9 — подъём остаётся: за 5 из 7, и монетка открывает Search Through
+   * Time на оставшийся после силы золотой (D233).
+   */
+  it('ход 7: подъём за всё золото после запоздалого тира уступает покупкам, ход 9 — нет', () => {
+    const turn7 = decisionPoint(7);
+    expect(turn7.techLevel).toBe(2);
+    expect(turn7.tavernUpgradeCost).toBe(6);
+    expect(turn7.techLevelUpTurn).toBe(5);
+    const plan7 = spendPlan(turn7, { cards }).steps.map((s) => s.recommendation.action);
+    expect(plan7).not.toContain('levelUp');
+    expect(plan7).toContain('heroPower');
+
+    const plan9 = spendPlan(decisionPoint(9), { cards }).steps.map((s) => s.recommendation);
+    expect(plan9.map((r) => r.action)).toEqual(['heroPower', 'levelUp', 'play', 'buy']);
+    expect(plan9[3]?.spellCardId).toBe('BG34_330');
+  });
+
   it('план берёт силу, когда золото иначе остаётся: ходы 5 и 9', () => {
     for (const turn of [5, 9]) {
       const plan = spendPlan(decisionPoint(turn), { cards });
