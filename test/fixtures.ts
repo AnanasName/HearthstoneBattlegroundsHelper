@@ -1157,3 +1157,16 @@ export function part53Game(): string {
 export function part54Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part54', 'game.log'), 'utf8');
 }
+
+/**
+ * part55 — Captain Eudora, 16.09.2026, 16:59–17:28, **3-е место**,
+ * 15 ходов таверны, билд 251952.
+ *
+ * Следующая партия игрока после part54, своя сессия клиента (16:59:02),
+ * ровно одна партия (`GT_BATTLEGROUNDS` один, `GT_RANKED` ноль,
+ * `CREATE_GAME` канала-источника один), доиграна до `FINAL_GAMEOVER`.
+ * Снята, чтобы лог не потерялся; разбора пока нет.
+ */
+export function part55Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part55', 'game.log'), 'utf8');
+}
