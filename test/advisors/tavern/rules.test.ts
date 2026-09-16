@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   adviseTavern,
+  buffTarget,
   buyCostOf,
   discountRefreshRule,
   buyRules,
@@ -3794,6 +3795,39 @@ describe('синергия с механикой из текста (part15, Titu
       const after = step!.stateAfter.board;
       expect(after.find((m) => m.entityId === 2)).toMatchObject({ attack: 22, health: 22 });
       expect(after.find((m) => m.entityId === 1)).toMatchObject({ attack: 52, health: 52 });
+    });
+  });
+
+  describe('атака — телу, которое бьёт без ответного урона (part54, D225)', () => {
+    const immuneCards = createCardIndex([
+      { id: 'WARP', name: 'Варпвинг', type: 'Minion', techLevel: 6, races: ['DRAGON'], isBaconPool: true, text: '<b>Immune</b> while attacking.' },
+      { id: 'HULK', name: 'Громила', type: 'Minion', techLevel: 6, races: ['DRAGON'], isBaconPool: true },
+      { id: 'ARROW', name: 'Стрела', type: 'Spell', text: '[x]Give a minion +{0} Attack.' },
+      { id: 'SNACK', name: 'Перекус', type: 'Spell', text: 'Give a minion +{0}/+{1}.' },
+    ]);
+    const immuneDeps = { cards: immuneCards };
+    // Третье, мелкое тело — кандидат в продажу: иначе им стал бы Warpwing,
+    // а на кандидата в продажу усиление не кладут вовсе (part36).
+    const board = [
+      minion(1, { cardId: 'HULK', attack: 180, health: 190 }),
+      minion(2, { cardId: 'WARP', attack: 70, health: 60 }),
+      minion(3, { cardId: 'HULK', attack: 2, health: 2 }),
+    ];
+    const s = state({ board });
+
+    it('прибавка только к атаке идёт на Warpwing, прочая — на крупнейшего', () => {
+      expect(buffTarget(s, immuneDeps, DEFAULT_TAVERN_RULES, false, true)?.entityId).toBe(2);
+      expect(buffTarget(s, immuneDeps, DEFAULT_TAVERN_RULES, false, false)?.entityId).toBe(1);
+    });
+
+    it('заклинание решает по своему тексту: «+N Attack» — Warpwing, «+X/+Y» — крупнейший', () => {
+      const cast = (cardId: string) =>
+        spellRules(
+          state({ board, handSpells: [{ entityId: 90, cardId, cost: 0, scriptData: [3, 3, null, null], zonePos: 1, unplayable: false, costsHealth: false }] }),
+          immuneDeps,
+        )[0]?.targetMinion?.entityId;
+      expect(cast('ARROW')).toBe(2);
+      expect(cast('SNACK')).toBe(1);
     });
   });
 

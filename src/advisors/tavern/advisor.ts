@@ -5181,7 +5181,7 @@ export function heroPowerStatsRule(
   const amount = state.techLevel;
   if (amount <= 0) return null;
 
-  const target = buffTarget(state, deps, rules);
+  const target = buffTarget(state, deps, rules, false, stat === 'attack');
   if (target === null) return null;
 
   const score = amount * rules.value.perStatPoint - cost * rules.goldPointValue;
@@ -7761,6 +7761,8 @@ function spellTargetOn(
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   spellCardId: string | null = null,
+  /** Прибавка только к атаке; `undefined` — решает текст заклинания. */
+  attackOnly?: boolean,
 ): {
   readonly target: Minion | null;
   readonly note: string;
@@ -7862,6 +7864,26 @@ function spellTargetOn(
     }
   }
 
+  // Прибавка ТОЛЬКО К АТАКЕ — телу, которое бьёт без ответного урона (D225).
+  // part54, ходы 19–25: игрок клал Major Hymn и Pointy Arrow на Warpwing
+  // («Immune while attacking»), советник — на крупнейшего. Замер против
+  // поля, +10 атаки: на Warpwing лучше на 0.7, 1.5, 0.3 и 0.7 п.п. на ходах
+  // таверны 10–13; +10 здоровья разницы не даёт, и здоровье сюда не идёт.
+  const attackOnlyBuff =
+    attackOnly ??
+    (spellCardId !== null &&
+      /\+(?:\{\d\}|\d+)\s+attack\b/i.test(cards.info(spellCardId)?.text ?? '') &&
+      !/\+(?:\{\d\}|\d+)\s*\/\s*\+/.test(cards.info(spellCardId)?.text ?? ''));
+  if (attackOnlyBuff) {
+    const immune = pool.filter((m) =>
+      rules.immuneAttackerWords.some((w) => new RegExp(w, 'i').test(cards.info(m.cardId)?.text ?? '')),
+    );
+    if (immune.length > 0 && immune.length < pool.length) {
+      pool = immune;
+      notes.push('атака — телу, которое бьёт без ответного урона');
+    }
+  }
+
   // Магнит заклинаний бьёт размер тела: попадание в него даёт СВЕРХ усиления
   // ещё статы, и они считаются числом, а не мнением (part21, ход 9 — Lava
   // Lurker делает трезубец постоянным, Fleeing Fugitive растёт на +1).
@@ -7907,6 +7929,7 @@ export function buffTarget(
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   grantsTaunt = false,
+  attackOnly = false,
 ): Minion | null {
   const buff: SpellEffect = {
     gold: 0,
@@ -7936,7 +7959,7 @@ export function buffTarget(
     chosen: null,
     branchEffects: [],
   };
-  return spellTargetOn(buff, state, deps, rules)?.target ?? null;
+  return spellTargetOn(buff, state, deps, rules, null, attackOnly)?.target ?? null;
 }
 
 /**

@@ -258,6 +258,22 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
   });
 
   /**
+   * Major Hymn («Attack equal to your Tier», дважды за ход) игрок с хода 21
+   * клал на Warpwing («Immune while attacking»), советник — на крупнейшего,
+   * Ignition Specialist. Прибавка только к атаке телу, которое бьёт без
+   * ответного урона, против поля лучше: +1.5 п.п. на ходу 21, +0.7 на ходу 25
+   * (D225). Minor Hymn (здоровье) правило не трогает.
+   */
+  it('ходы 21 и 25: атака силы героя — на Warpwing', () => {
+    for (const turn of [21, 25]) {
+      const plan = spendPlan(decisionPoint(turn), { cards });
+      const power = plan.steps.find((s) => s.recommendation.action === 'heroPower')?.recommendation;
+      expect(power?.grantsStats?.stat, `ход ${String(turn)}`).toBe('attack');
+      expect(power?.targetMinion?.cardId, `ход ${String(turn)}`).toBe('BG24_004');
+    }
+  });
+
+  /**
    * Ход 27 (14-й ход таверны): шестнадцать золотых, полный борд, в плане
    * активация Hired Mount за 2 и подъём за 4. Прежде план кончался словами
    * «остаётся 10 — сгорит»: `applyRecommendation` не отмечал нажатую

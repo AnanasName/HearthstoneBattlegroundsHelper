@@ -445,6 +445,15 @@ export interface TavernRules {
   readonly battlecryTimesWords: readonly string[];
 
   /**
+   * Тело, которое бьёт без ответного урона: «Immune while attacking»
+   * (Warpwing `BG24_004`, Viper). Прибавка ТОЛЬКО К АТАКЕ (сила «Attack
+   * equal to your Tier», «Give a minion +{0} Attack») достаётся ему, а не
+   * крупнейшему (D225, part54): замер +10 атаки на ходах таверны 10–13 —
+   * +0.7, +1.5, +0.3 и +0.7 п.п. против поля, у +10 здоровья разницы нет.
+   */
+  readonly immuneAttackerWords: readonly string[];
+
+  /**
    * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -2023,6 +2032,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   battlecryTimesWords: [
     '\\bbattlecr(?:y|ies)\\b(?:<\\/b>)?[^.]*?\\btriggers?\\s+(twice|three\\s+times|an\\s+extra\\s+time)\\b',
   ],
+
+  immuneAttackerWords: ['\\bimmune(?:<\\/b>)?\\s+while\\s+attacking\\b'],
 
   combatKeywordGrantWords: [
     '\\bstart\\s+of\\s+combat:(?:\\s*<\\/b>)?\\s*give\\s+(your\\s+(?:two\\s+)?left-most|another\\s+friendly)\\s+{tribe}\\s+' +

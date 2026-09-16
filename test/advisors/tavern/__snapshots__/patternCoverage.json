@@ -327,6 +327,19 @@
   "heroPowerUpgradeWords": [
    "TB_BaconShop_HP_011"
   ],
+  "immuneAttackerWords": [
+   "BG24_004",
+   "BG24_004_G",
+   "BG31_HERO_811t8",
+   "BG31_HERO_811t8_G",
+   "BG34_Treasure_990",
+   "BG34_Treasure_990_G",
+   "BG36_MidGameEffect_000t60",
+   "BG36_MidGameEffect_000t60e",
+   "TB_BaconShop_HERO_08_Buddy",
+   "TB_BaconShop_HERO_08_Buddy_G",
+   "TB_BaconShop_HERO_08_Buddy_e"
+  ],
   "magnetDoubleWords": [],
   "magnetExtraTimesWords": [
    "BG36_506",
