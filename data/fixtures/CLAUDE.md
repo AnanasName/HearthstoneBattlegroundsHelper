@@ -939,5 +939,13 @@ Scarlet Survivor и кличи через Kalecgos, **2-е место**, 15 хо
 
 `part55` — 16.09, Captain Eudora, **3-е место**, 15 ходов таверны
 (16:59–17:28). Следующая партия игрока после part54, своя сессия клиента
-16:59:02, ровно одна партия, доиграна, билд 251952. Снята, чтобы лог
-не потерялся; разбор (два кадра игрока) ведёт соседняя сессия.
+16:59:02, ровно одна партия, доиграна, билд 251952. Кадры игрока —
+17:01:10 (ход 3) и 17:19:40 (ход 23), оба в чат, сверены срезом. Фактура:
+сила-раскопка Юдоры (`TB_BaconShop_HP_074`, счётчик `TAG_SCRIPT_DATA_NUM_1`
+на силе 4 → 0, золотой миньон в руку с `CREATOR` силы, три награды —
+ходы 9, 17, 25), Hooktusk, Master Marauder и его триггер на каждый
+Discover (`TargetCount=5`), пираты трат золота (Sky Admiral Rogers,
+Enterprising Escapee: Bounty и Сейфы), Hostile Bounty на четыре тела,
+Overconfidence, активация Private Investigator (`BACON_PLAYER_EXTRA_GOLD_NEXT_TURN`),
+тринкеты Sunken Anchor и Innkeeper's Hearth (30/30 тела тира 6).
+Тест — `test/state/part55.test.ts`.
