@@ -128,6 +128,8 @@ describe('part51: продажа ради покупки на неполном �
         .actions.filter((a) => a.turn === 11)
         .map((a) => `${a.type}:${a.cardId ?? ''}`);
       expect(played).toEqual([
+        // Выбор тринкета — каналом SendChoices, мимо блоков PLAY (с 17.09).
+        'trinket:BG35_MagicItem_150',
         'roll:',
         'roll:',
         'roll:',
