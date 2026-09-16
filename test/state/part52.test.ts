@@ -168,6 +168,38 @@ describe('part52: реванш и порядок строк про героя с
   });
 
   /**
+   * Ход 21: сила Рафаама «Мне это нужно!» `TB_BaconShop_HP_053` («Next
+   * combat, get a plain copy of the first minion you kill») на ПОЛНОМ борде.
+   *
+   * Правило силы вычитало ценность жертвы продажи — по фактуре part31/part40,
+   * где найденный миньон приходит в руку СЕЙЧАС. Здесь он приходит на конце
+   * следующего боя, и слот нужен не сейчас; вычет же брал КРУПНЕЙШУЮ карту
+   * борда (Cord Puller 76/91) и гасил совет целиком. Молчание выходило ровно
+   * на двух ходах партии — 21 и 23, — обоих с полным развитым бордом.
+   * Игрок нажал силу на обоих (00:53:39 и 00:56:52).
+   */
+  it('ход 21: отложенная награда не платит за слот на полном борде', () => {
+    const state = decisionPoint(21);
+    expect(state.board).toHaveLength(7);
+    expect(state.hero?.heroPowerCardId).toBe('TB_BaconShop_HP_053');
+    expect(state.hero?.heroPowerCost).toBe(1);
+
+    const power = adviseTavern(state, { cards })?.recommendations.find(
+      (r) => r.action === 'heroPower',
+    );
+    expect(power).toBeDefined();
+    // Ни продажи, ни слота: и то и другое было бы платой за место, которое
+    // к приходу карты освободит сам бой.
+    expect(power?.sellFirst).toBeNull();
+    expect(power?.requiresSlot).toBe(false);
+    expect(power?.reason).toContain('слот сейчас не нужен');
+
+    expect(spendPlan(state, { cards }).steps.some((s) => s.recommendation.action === 'heroPower')).toBe(
+      true,
+    );
+  });
+
+  /**
    * Ход 3: витрина заморожена ИГРОКОМ (00:37:34), советник о заморозке
    * молчит — и это не дыра, а замеренное «разницы нет» (docs/tavern.md).
    * Тест держит нынешнее поведение: правило заморозки ради заклинания

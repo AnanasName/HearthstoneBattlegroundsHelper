@@ -55,6 +55,19 @@
    "BG36_503",
    "BG36_503_G"
   ],
+  "delayedRewardWords": [
+   "BG22_HERO_000p_Alt",
+   "BG27_Anomaly_805",
+   "BG27_Anomaly_805t",
+   "BG28_884",
+   "BG28_884e",
+   "BG35_MagicItem_431t",
+   "BG36_883",
+   "BG36_883e",
+   "TB_BaconShop_HP_017",
+   "TB_BaconShop_HP_053",
+   "TB_BaconShop_HP_081"
+  ],
   "discountRefreshWords": [
    "BG35_MagicItem_755",
    "BG35_MagicItem_755t"

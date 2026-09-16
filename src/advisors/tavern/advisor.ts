@@ -4194,6 +4194,26 @@ export function heroPowerRule(
   if (cost === null) return null;
   if (!heroPowerReady(hero)) return null;
 
+  const info = deps.cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+
+  // Награда, которая придёт ПОСЛЕ БОЯ, слота в этом ходу не занимает.
+  //
+  // Вычет жертвы ниже поставлен по фактуре part31/part40, где миньон приходит
+  // в руку СЕЙЧАС и место ему нужно СЕЙЧАС. У Рафаама («Мне это нужно!»
+  // `TB_BaconShop_HP_053`: «Next combat, get a plain copy of the first minion
+  // you kill») карта приходит на конце СЛЕДУЮЩЕГО боя — к тому времени борд
+  // уже перетасован боем и продажами, и платить за слот сейчас не за что.
+  // А платило правило ценностью КРУПНЕЙШЕЙ карты борда, то есть ровно там,
+  // где награда самая жирная: на part52 оно молчало на ходах 21 и 23 — обоих,
+  // где борд полон и развит, и на 23-м игрок нажал силу последним золотым.
+  //
+  // Условие узкое НАМЕРЕННО — по словам, а не по «миньон приходит в руку»:
+  // широкая формулировка развалила бы D008 и вернула ошибку part31 (план
+  // начинался с покупки за 3 на полном борде). Карт, у которых есть и «next
+  // combat», и слова `givesMinionWords`, в снапшоте РОВНО ОДНА — эта.
+  const delayed = rules.delayedRewardWords.some((w) => new RegExp(w, 'i').test(text));
+
   // Найденный миньон приходит в руку, и на полном борде место ему освобождает
   // ПРОДАЖА — та самая, что приносит золотой. Значит «по карману» считается
   // вместе с ней, ровно как у покупки (part36, ход 13). Случай part40 (ход 13):
@@ -4202,11 +4222,8 @@ export function heroPowerRule(
   // Прибавка идёт ТОЛЬКО там, где продажа и так подразумевается: `victim`
   // не пуст лишь на полном борде, и продавать «просто ради монеты» правило
   // по-прежнему не предлагает.
-  const victim = handMinionVictim(state, deps, rules);
+  const victim = delayed ? null : handMinionVictim(state, deps, rules);
   if (cost > state.gold + (victim === null ? 0 : rules.sellGold)) return null;
-
-  const info = deps.cards.info(hero.heroPowerCardId);
-  const text = info?.text ?? '';
 
   // Миньона обещает и ПЛЕМЯ без слова «minion»: «Discover a Mech. Swaps
   // type each turn» у Крысиного короля (part30) — тот же случай, что
@@ -4252,6 +4269,10 @@ export function heroPowerRule(
       (discounted && cost < rules.minionCost
         ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки`
         : '') +
+      // Слово про слот обязательно: без него совет «жать на полном борде»
+      // читается как ошибка — игрок видит семь тел и не видит, куда придёт
+      // обещанное. Приходит оно после боя, и место к тому времени будет.
+      (delayed ? '; награда придёт после боя, слот сейчас не нужен' : '') +
       (hurry.note === null ? '' : `; ${hurry.note}`) +
       (victim === null ? '' : `; ${victim.note}`),
   };

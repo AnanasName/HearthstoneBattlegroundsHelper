@@ -357,6 +357,24 @@ export interface TavernRules {
   readonly givesMinionWords: readonly string[];
 
   /**
+   * Признак «награда придёт ПОСЛЕ БОЯ, а не в этом ходу».
+   *
+   * Случай part52 (Рафаам, «Мне это нужно!» `TB_BaconShop_HP_053`: «Next
+   * combat, get a plain copy of the first minion you kill»). Обещанный
+   * миньон ложится в руку на конце следующего боя, и место ему нужно
+   * не сейчас, а к следующей таверне — когда борд уже перетасован боем
+   * и продажами. Правило же вычитало ценность жертвы продажи, то есть
+   * платило за слот, который не понадобится, и платило КРУПНЕЙШЕЙ картой
+   * борда — на ходах 21 и 23 part52 совет из-за этого молчал вовсе.
+   *
+   * Шаблон узкий по словам, а не по смыслу «приходит в руку»: широкая
+   * формулировка сняла бы вычет и там, где он верен (D008, part31),
+   * и вернула бы план, начинающийся с покупки на полном борде. Карт,
+   * у которых есть и эти слова, и `givesMinionWords`, в снапшоте одна.
+   */
+  readonly delayedRewardWords: readonly string[];
+
+  /**
    * Признак «миньон придёт ИЗ ВИТРИНЫ, а не из пула»: «Steal a random minion
    * from the Tavern» (Enchanted Lasso).
    *
@@ -1482,6 +1500,11 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     // слова «minion» в тексте силы нет вовсе.
     'discover[^.]*\\bbuddy\\b',
   ],
+
+  // «Next combat, get a plain copy…» — Рафаам, part52. Форма одна, но обе
+  // приставки игра пишет по-разному у разных карт, поэтому начало фразы
+  // не закрепляется: важно само «следующим боем», где бы оно ни стояло.
+  delayedRewardWords: ['\\bnext combat\\b', '\\bat the start of (?:your\\s+)?next combat\\b'],
 
   givesMinionFromShopWords: ['from\\s+the\\s+tavern'],
 
