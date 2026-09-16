@@ -1027,6 +1027,17 @@ export interface TavernRules {
    * значение, для которого живого числа у нас нет.
    */
   readonly boardWideBuffExcludeWords: readonly string[];
+  /**
+   * Усиление, у которого ЧИСЛО своих названо фразой: «Give four friendly
+   * minions +{0} Attack» (Hostile Bounty и Healthy Bounty, part55). Группа 1 —
+   * число словом или цифрой. Тел не больше названного и не больше борда;
+   * по логу один Hostile Bounty дал +4 атаки четырём разным сущностям
+   * (17:19:17, блок PLAY `BG33_812`).
+   *
+   * «Give 3 friendly minions of different types» (Menagerie Mug, Tea Master
+   * Theotar) шаблон не ловит намеренно: там тела выбирает племя, а не число.
+   */
+  readonly boardCountBuffWords: readonly string[];
 
   /**
    * Признаки заклинания, бьющего ПО ВИТРИНЕ: «Give minions in the Tavern
@@ -1833,6 +1844,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\bnext\\s+turn\\b',
     '\\bstart\\s+of\\b',
     '\\bimproves?\\b',
+  ],
+  boardCountBuffWords: [
+    '\\bgive\\s+(two|three|four|five|six|seven|\\d+)\\s+friendly\\s+minions\\s+\\+',
   ],
 
   // «Give minions in the Tavern +{0}/+{1}» — Them Apples, part30; между

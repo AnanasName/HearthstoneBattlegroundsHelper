@@ -66,6 +66,10 @@
    "BG35_MagicItem_431t"
   ],
   "bloodGemWords": 199,
+  "boardCountBuffWords": [
+   "BG33_811",
+   "BG33_812"
+  ],
   "boardWideBuffExcludeWords": 773,
   "boardWideBuffWords": 120,
   "buffsShopAllGameWords": 288,

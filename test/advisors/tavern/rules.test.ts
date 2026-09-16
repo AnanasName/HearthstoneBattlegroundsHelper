@@ -1786,6 +1786,7 @@ describe('заклинания руки', () => {
       untargeted: false,
       // Весь борд — только «Give your minions +X/+Y» (part51).
       boardWide: false,
+      boardCount: null,
       givesMinion: false,
       // «Get N карт» — счёт обещанных карт, у усиления его нет (part52).
       givesCards: 0,
@@ -1916,6 +1917,7 @@ describe('заклинания руки', () => {
       targetRace: null,
       untargeted: false,
       boardWide: false,
+      boardCount: null,
       // Жертву игрок выбирает, но «Destroy» — не «Give a minion»: повтор
       // заклинания жертвой не считается (D219).
       targetsFriendly: false,
@@ -2008,8 +2010,12 @@ describe('заклинания руки', () => {
     expect(wide('WAVE')).toBe(false);
     expect(wide('MENAG')).toBe(false);
     expect(wide('RANDOM')).toBe(false);
-    expect(wide('FOUR')).toBe(false);
+    // «Four friendly» — множитель тоже из фразы, но с потолком в четыре тела
+    // (part55, `boardCountBuffWords`): всемеро он не раздувается.
+    expect(wide('FOUR')).toBe(true);
+    expect(spellEffect('FOUR', [1, 1], idx)?.boardCount).toBe(4);
     expect(wide('ALL')).toBe(true);
+    expect(spellEffect('ALL', [1, 1], idx)?.boardCount).toBeNull();
   });
 
   it('«twice» удваивает немедленное усиление; «в начале следующего хода» не оценивается (part51)', () => {

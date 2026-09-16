@@ -6419,6 +6419,12 @@ export interface SpellEffect {
    */
   readonly boardWide: boolean;
   /**
+   * Сколько своих получает усиление, когда число названо фразой («Give four
+   * friendly minions», `boardCountBuffWords`, part55). `null` — не названо.
+   * Ставится вместе с `boardWide`: множитель тот же, только с потолком.
+   */
+  readonly boardCount: number | null;
+  /**
    * Цель — СВОЙ миньон по выбору игрока (`targetsFriendlyWords`, D219).
    *
    * Нужен ровно удвоителю заклинаний по своим (Balinda Stonehearth): лог
@@ -6684,7 +6690,9 @@ export function effectOnBoard(
   readonly casts: number;
 } {
   const bodiesOf = (e: SpellEffect): number =>
-    e.boardWide ? Math.max(1, Math.min(board.length, rules.boardSize)) : 1;
+    e.boardWide
+      ? Math.max(1, Math.min(board.length, rules.boardSize, e.boardCount ?? rules.boardSize))
+      : 1;
   const repeat = cards === undefined ? 1 : friendlyCastMultiplier(board, cards, rules);
   // Положительный признак цели И отрицательный вместе: «Give a friendly
   // minion of each type» (Misplaced Tea Set) начинается как направленное,
@@ -7466,6 +7474,16 @@ export function spellMagnetGain(
   return { gain: 0, note: '' };
 }
 
+/** Число тел словом — для `boardCountBuffWords` («Give four friendly minions»). */
+const BODY_COUNT_WORDS: Readonly<Record<string, number>> = {
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+};
+
 /**
  * Разбор заклинания — с кэшем, потому что спрашивают его на КАЖДОГО
  * кандидата, а ответ зависит только от карты и её тегов.
@@ -7615,11 +7633,19 @@ function computeSpellEffect(
     (destroy === null && rules.untargetedSpellWords.some((w) => new RegExp(w, 'i').test(text)));
   // Весь борд — только простая форма (part51); уточнение, условная вторая
   // половина и отложенность выводят карту из неё.
+  const excluded = rules.boardWideBuffExcludeWords.some((w) => new RegExp(w, 'i').test(text));
+  // Число тел, названное фразой («Give four friendly minions», part55): до
+  // этого Bounty считались усилением ОДНОГО тела — +4 статов вместо +16.
+  const countWord =
+    buffsShop || stats <= 0 || excluded ? null : firstMatch(rules.boardCountBuffWords, text);
+  const counted =
+    countWord === null ? NaN : (BODY_COUNT_WORDS[countWord.toLowerCase()] ?? Number(countWord));
+  const boardCount = Number.isFinite(counted) && counted > 0 ? counted : null;
   const boardWide =
     !buffsShop &&
     stats > 0 &&
-    rules.boardWideBuffWords.some((w) => new RegExp(w, 'i').test(text)) &&
-    !rules.boardWideBuffExcludeWords.some((w) => new RegExp(w, 'i').test(text));
+    !excluded &&
+    (boardCount !== null || rules.boardWideBuffWords.some((w) => new RegExp(w, 'i').test(text)));
 
   // «Даёт миньона» — та же таблица шаблонов, что у силы героя: факт записан
   // в тексте, а не в том, кто его произносит. Замена («…destroy … to get
@@ -7681,6 +7707,7 @@ function computeSpellEffect(
     targetRace,
     untargeted,
     boardWide,
+    boardCount,
     targetsFriendly,
     givesMinion,
     givesCards,
@@ -8038,6 +8065,7 @@ export function buffTarget(
     targetRace: null,
     untargeted: false,
     boardWide: false,
+    boardCount: null,
     targetsFriendly: true,
     givesMinion: false,
     givesCards: 0,
