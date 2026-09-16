@@ -318,6 +318,12 @@ export interface ValueBreakdown {
    * у своего миньона борда клич уже отыграл, и `ownValue` его вычитает.
    */
   readonly battlecryPayoff: number;
+  /**
+   * Статы, которые Discover этого кличевого положит на борд через своих
+   * плательщиков за Discover (Hooktusk, D232). Про ПРИОБРЕТЕНИЕ, как
+   * `battlecryPayoff`: у своего миньона борда клич уже отыграл.
+   */
+  readonly discoverPayoff: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1161,6 +1167,24 @@ export function minionValue(
   const battlecryPayoff =
     payoff === null ? 0 : battlecryPayoffPoints(payoff, state.board, candidate, cards, rules);
 
+  // Discover кормит плательщиков борда (D232): кличевой с Discover — это
+  // прибавка их племени за каждое срабатывание клича (при Бранне — два).
+  // Сам кандидат к тому моменту на борде и получает свою долю.
+  const discoverEvents = (info?.mechanics ?? []).includes('BATTLECRY')
+    ? discoverCountOf(text, 'battlecry', rules) * battlecryTimesOn(state.board, cards, rules)
+    : 0;
+  const discoverPay =
+    discoverEvents === 0
+      ? null
+      : discoverPayoffOf(
+          state.board.some((m) => m.entityId === candidate.entityId)
+            ? state.board
+            : [...state.board, candidate],
+          cards,
+          rules,
+        );
+  const discoverPayoff = discoverPay === null ? 0 : discoverPay.points * discoverEvents;
+
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
   // 2 Mechs that died») на борде из мехов была слабейшей по голым статам,
@@ -1352,6 +1376,7 @@ export function minionValue(
     combatGrant:
       combatGrant === null ? null : { field: combatGrant.field, recipient: combatGrant.recipient },
     battlecryPayoff,
+    discoverPayoff,
     total:
       tech +
       stats +
@@ -1370,7 +1395,8 @@ export function minionValue(
       activation +
       heroPowerPlay +
       heroPowerBuy +
-      battlecryPayoff,
+      battlecryPayoff +
+      discoverPayoff,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -1761,6 +1787,121 @@ const BATTLECRY_PAYOFF_CACHE = new WeakMap<
   TavernRules,
   WeakMap<CardIndex, Map<string, BattlecryPayoffText>>
 >();
+
+/** Во сколько раз клич срабатывает на этом борде: 1, при Бранне 2, при золотом 3. */
+function battlecryTimesOn(board: readonly Minion[], cards: CardIndex, rules: TavernRules): number {
+  return board.reduce(
+    (times, m) => Math.max(times, battlecryPayoffTextOf(m.cardId, cards, rules).times),
+    1,
+  );
+}
+
+interface DiscoverPayoffText {
+  readonly race: string;
+  readonly other: boolean;
+  readonly attack: readonly [string | undefined, string | undefined];
+  readonly health: readonly [string | undefined, string | undefined];
+}
+
+function discoverPayoffTextOf(
+  cardId: string,
+  cards: CardIndex,
+  rules: TavernRules,
+): DiscoverPayoffText | null {
+  return memoByCard(DISCOVER_PAYOFF_CACHE, cardId, cards, rules, () => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (!/discover/i.test(text)) return null;
+    for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+      for (const pattern of rules.discoverPayoffWords) {
+        const found = new RegExp(pattern.replace('{tribe}', `(?:${tribe})`), 'i').exec(text);
+        if (found === null) continue;
+        return {
+          race,
+          other: found[1] !== undefined,
+          attack: [found[2], found[3]] as const,
+          health: [found[4], found[5]] as const,
+        };
+      }
+    }
+    return null;
+  });
+}
+
+const DISCOVER_PAYOFF_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, DiscoverPayoffText | null>>
+>();
+
+/**
+ * Что даёт своим ОДИН Discover (D232): прибавки плательщиков борда
+ * («After you Discover a card, give your other Pirates +{0}/+{1}», Hooktusk)
+ * в очках на шкале статов. `null` — плательщиков нет.
+ *
+ * Числа — живые плейсхолдеры носителя (у Hooktusk они растут от сыгранных
+ * золотых: на part55 +4/+4 к ходу 17, +11/+11 к ходу 23). Получатели —
+ * свои того племени на `board`, кроме самого носителя при «other»; тело,
+ * которое к моменту Discover уже продано или ещё не выставлено, решает
+ * вызывающий — тем, какой борд передаёт.
+ */
+export function discoverPayoffOf(
+  board: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly points: number; readonly payers: readonly string[] } | null {
+  let stats = 0;
+  const payers: string[] = [];
+  for (const m of board) {
+    const spec = discoverPayoffTextOf(m.cardId, cards, rules);
+    if (spec === null) continue;
+    const read = (ph: string | undefined, lit: string | undefined): number =>
+      ph !== undefined ? (m.scriptData[Number(ph)] ?? 0) : Number(lit ?? 0);
+    const each = read(spec.attack[0], spec.attack[1]) + read(spec.health[0], spec.health[1]);
+    if (each <= 0) continue;
+    const members = board.filter((o) => {
+      if (spec.other && o.entityId === m.entityId) return false;
+      const races = racesOf(o, cards);
+      return races.includes(spec.race) || races.includes(RACE_ALL);
+    }).length;
+    if (members === 0) continue;
+    stats += each * members;
+    payers.push(cards.info(m.cardId)?.name ?? m.cardId);
+  }
+  return payers.length === 0 ? null : { points: stats * rules.value.perStatPoint, payers };
+}
+
+/**
+ * Сколько Discover делает текст там, где Discover — ДЕЙСТВИЕ (D232):
+ * `where` — клич, продажа или начало текста (заклинание, активация, сила).
+ * Число — после глагола («Discover 2 Tavern spells»); плейсхолдер и прочие
+ * формы — один (оценка нижняя). Нет такого действия — ноль.
+ */
+function discoverCountOf(
+  text: string,
+  where: 'battlecry' | 'sell' | 'lead',
+  rules: TavernRules,
+): number {
+  const patterns =
+    where === 'battlecry'
+      ? rules.discoverBattlecryWords
+      : where === 'sell'
+        ? rules.discoverSellWords
+        : rules.discoverLeadWords;
+  if (!patterns.some((w) => new RegExp(w, 'i').test(text))) return 0;
+  const numbers: Readonly<Record<string, number>> = { two: 2, three: 3 };
+  const raw = firstMatch(rules.discoverCountWords, text)?.toLowerCase();
+  if (raw === undefined || raw === null) return 1;
+  const count = numbers[raw] ?? Number(raw);
+  return Number.isFinite(count) && count > 0 ? count : 1;
+}
+
+/** Причина к совету: чем Discover платит на этом борде. */
+function discoverPayoffNote(
+  payoff: { readonly points: number; readonly payers: readonly string[] },
+  count: number,
+): string {
+  const times = count > 1 ? ` ×${String(count)}` : '';
+  return `${payoff.payers.join(', ')}: Discover кормит своих (${payoff.points.toFixed(1)}${times})`;
+}
 
 /**
  * Что обещает стартовый эффект миньона — по тексту и тегам самого миньона.
@@ -2463,9 +2604,14 @@ function ownValue(
   // Доля награды за покупку (part34) — тоже про приобретение: свой кличевой
   // миньон второй раз не покупается, и Бранна за него больше не дадут.
   // Цена клича через плательщиков (D224) — туда же: клич своего миньона
-  // борда уже отыграл.
+  // борда уже отыграл. И Discover его клича (D232) — тоже.
   return (
-    value.total - value.copies - value.heroPowerPlay - value.heroPowerBuy - value.battlecryPayoff
+    value.total -
+    value.copies -
+    value.heroPowerPlay -
+    value.heroPowerBuy -
+    value.battlecryPayoff -
+    value.discoverPayoff
   );
 }
 
@@ -3309,12 +3455,17 @@ export function spinRule(
   // слот свободен. Без плательщика полный борд, как прежде, прокрутку
   // не допускает.
   const payoff = battlecryPayoffOf(state.board, deps.cards, rules);
+  // Плательщик за Discover (D232) открывает полный борд так же, как
+  // плательщик за клич: Discover прокрутки кормит своих, и слот под неё
+  // стоит продажи слабейшего.
+  const discoverPayer = discoverPayoffOf(state.board, deps.cards, rules) !== null;
   const full = state.board.length >= rules.boardSize;
   let victim: { minion: Minion; value: number } | null = null;
   if (full) {
-    if (payoff === null) return null;
+    if (payoff === null && !discoverPayer) return null;
     for (const m of state.board) {
       if (feedsBattlecries(m, deps.cards, rules)) continue;
+      if (discoverPayoffTextOf(m.cardId, deps.cards, rules) !== null) continue;
       const value = ownValue(m, state, deps, rules);
       if (victim === null || value < victim.value) victim = { minion: m, value };
     }
@@ -3370,13 +3521,29 @@ export function spinRule(
         : 0;
     const kind = generator ?? (fed > 0 ? 'battlecry' : null);
     if (kind === null) continue;
-    // Через проданный слот крутится только клич, который кормит плательщиков.
-    if (victim !== null && (kind !== 'battlecry' || fed <= 0)) continue;
+    // Discover прокрутки (D232): клич — столько раз, сколько клич срабатывает,
+    // продажа — один. Прокрученное тело к тому моменту продано или будет
+    // продано, и своя доля ему не впрок.
+    const discovers =
+      kind === 'battlecry'
+        ? discoverCountOf(text, 'battlecry', rules) * battlecryTimesOn(boardAfterSale, deps.cards, rules)
+        : discoverCountOf(text, 'sell', rules);
+    const discoverPay = discovers > 0 ? discoverPayoffOf(boardAfterSale, deps.cards, rules) : null;
+    const discoverFed = discoverPay === null ? 0 : discoverPay.points * discovers;
+    // Через проданный слот крутится только то, что кормит плательщиков.
+    if (victim !== null && !((kind === 'battlecry' && fed > 0) || discoverFed > 0)) continue;
     // Батлкрайного генератора, который сам — лучшая покупка, не прокручивают.
     // Кличевого без добычи при плательщике — прокручивают: лучшей покупкой
     // его делает та же прибавка, что получит и прокрутка, а «купить или
-    // крутить» решают очки двух советов.
-    if (generator === 'battlecry' && bestBuy?.minion?.entityId === minion.entityId) continue;
+    // крутить» решают очки двух советов. Генератор с Discover при плательщике
+    // (D232) — тот же случай.
+    if (
+      generator === 'battlecry' &&
+      discoverFed <= 0 &&
+      bestBuy?.minion?.entityId === minion.entityId
+    ) {
+      continue;
+    }
 
     const net = cost - rules.sellGold;
     let base: number;
@@ -3385,21 +3552,24 @@ export function spinRule(
       const count = generator === 'battlecry' ? promisedCards(text) : 0;
       base =
         count * rules.heroPowerSpellValue +
-        fed -
+        fed +
+        discoverFed -
         net * rules.goldPointValue -
         (victim?.value ?? 0);
       const notes: string[] = [];
       if (count > 0) notes.push(`клич даст ${String(count)} карт.`);
       if (fed > 0 && payoff !== null) notes.push(payoffNote(payoff, deps.cards));
+      if (discoverPay !== null) notes.push(discoverPayoffNote(discoverPay, discovers));
       note = notes.join(', ');
     } else {
       const spun = sellSpinValue(minion, state, deps, rules, true);
       if (spun === null) continue;
-      base = spun.score;
+      base = spun.score + discoverFed - (victim?.value ?? 0);
       note =
-        spun.tier === null
+        (spun.tier === null
           ? 'продажа даст миньона'
-          : `продажа даст миньона тира ${String(spun.tier)}`;
+          : `продажа даст миньона тира ${String(spun.tier)}`) +
+        (discoverPay === null ? '' : `, ${discoverPayoffNote(discoverPay, discovers)}`);
     }
     if (base <= 0) continue;
 
@@ -4867,7 +5037,10 @@ export function heroPowerRule(
 
   // Цена СПЕШКИ у силы с ЛЕСТНИЧНОЙ ценой — см. `heroPowerHurryCost`.
   const hurry = heroPowerHurryCost(text, source ?? null, average, state, deps, rules);
-  const hurried = score - hurry.cost;
+  // Сила с Discover при плательщике за Discover кормит своих (D232).
+  const discovers = discoverCountOf(text, 'lead', rules);
+  const discoverPay = discovers > 0 ? discoverPayoffOf(state.board, deps.cards, rules) : null;
+  const hurried = score - hurry.cost + (discoverPay?.points ?? 0) * discovers;
   if (hurry.cost > 0 && hurried <= 0) return null;
 
   // Найденный миньон приходит в руку — на полном борде жертва вычитается,
@@ -4895,6 +5068,7 @@ export function heroPowerRule(
       // обещанное. Приходит оно после боя, и место к тому времени будет.
       (delayed ? '; награда придёт после боя, слот сейчас не нужен' : '') +
       (hurry.note === null ? '' : `; ${hurry.note}`) +
+      (discoverPay === null ? '' : `; ${discoverPayoffNote(discoverPay, discovers)}`) +
       (victim === null ? '' : `; ${victim.note}`),
   };
 }
@@ -6238,6 +6412,14 @@ export function activationRules(
       // Приносимое тело оценивается как средний миньон текущего тира.
       score = rules.value.perTechLevel * state.techLevel - cost * rules.goldPointValue;
       what = 'принесёт миньона';
+    }
+    // «Activate: Discover a Tavern spell» (Clever Castaway) при плательщике
+    // за Discover кормит своих (D232).
+    const discovers = discoverCountOf(effectText, 'lead', rules);
+    const discoverPay = discovers > 0 ? discoverPayoffOf(state.board, deps.cards, rules) : null;
+    if (discoverPay !== null) {
+      score += discoverPay.points * discovers;
+      what += `${what === '' ? '' : '; '}${discoverPayoffNote(discoverPay, discovers)}`;
     }
     if (score <= 0) return [];
 
@@ -8263,6 +8445,28 @@ export function spellRules(
       }
     }
 
+    // Discover из руки при плательщике за Discover (D232): награда за тройку
+    // «Discover a minion from Tier N» статов не даёт, а Hooktusk кормит ею
+    // своих (part55, 17:15:31 — триггер сразу за выбором награды).
+    const discovers = discoverCountOf(deps.cards.info(spell.cardId)?.text ?? '', 'lead', rules);
+    if (discovers > 0 && effect.stats <= 0 && spell.cost <= state.gold) {
+      const pay = discoverPayoffOf(state.board, deps.cards, rules);
+      const fedScore = (pay?.points ?? 0) * discovers - spell.cost * rules.goldPointValue;
+      if (pay === null || fedScore <= 0) return [];
+      return [
+        {
+          action: 'play' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score: fedScore,
+          cost: spell.cost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason: `${name} — ${discoverPayoffNote(pay, discovers)}`,
+        },
+      ];
+    }
+
     // Усиление или замена: бесплатная ценность перед боем.
     if (spell.cost > state.gold || state.board.length === 0) return [];
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
@@ -8609,8 +8813,13 @@ export function shopSpellRules(
       // продажа, и жертва вычитается, как у покупки и у ветви part28
       // (part31, ход 13: A New Sprout 7.1 при слабейшем своём 9.0 — молчит).
       // Превосходство обязано перебивать `sellMargin`, как у покупок.
+      // «Discover a Battlecry minion» (Hired Headhunter) при плательщике
+      // за Discover кормит своих (D232; part55, 17:15:58 — +56 статов).
+      const discovers = discoverCountOf(info?.text ?? '', 'lead', rules);
+      const discoverPay = discovers > 0 ? discoverPayoffOf(state.board, deps.cards, rules) : null;
+      const gained = score + (discoverPay?.points ?? 0) * discovers;
       const victim = handMinionVictim(state, deps, rules);
-      if (victim !== null && score - victim.value <= rules.sellMargin) return [];
+      if (victim !== null && gained - victim.value <= rules.sellMargin) return [];
       const cheaper = rules.minionCost - goldCost;
       // Модальное «даёт миньона» (The Road Less Traveled, Boundless
       // Potential) спросит игрока сразу после покупки — ветви называются
@@ -8622,7 +8831,7 @@ export function shopSpellRules(
           minion: null,
           spellCardId: spell.cardId,
           spellBranches: branch.branches,
-          score: score - (victim?.value ?? 0),
+          score: gained - (victim?.value ?? 0),
           cost: goldCost,
           requiresSlot: false,
           sellFirst: null,
@@ -8634,6 +8843,7 @@ export function shopSpellRules(
               : discounted && cheaper > 0
                 ? `, но на ${String(cheaper)} золота дешевле покупки`
                 : ', и это дешёвое тело, а не лучшее') +
+            (discoverPay === null ? '' : `; ${discoverPayoffNote(discoverPay, discovers)}`) +
             (victim === null ? '' : `; ${victim.note}`) +
             (branch.note === '' ? '' : `; ${branch.note}`),
         },
@@ -8831,7 +9041,12 @@ export function darkGiftRule(
     }
   }
 
-  const score = body + rules.darkGift.bonus - holdCost;
+  // Дар — это Discover (выбор из трёх), и плательщики за Discover получают
+  // своё при каждом нажатии (D232; part55, 17:14:40 — триггер Hooktusk
+  // сразу за выбором дара). Прибавка от ожидания не зависит: цену спешки
+  // она не трогает.
+  const discoverPay = discoverPayoffOf(state.board, deps.cards, rules);
+  const score = body + rules.darkGift.bonus - holdCost + (discoverPay?.points ?? 0);
   if (score <= 0) return null;
 
   return {
@@ -8843,7 +9058,8 @@ export function darkGiftRule(
     sellFirst: null,
     reason:
       `тёмный дар за ${String(cost)} — раскопка из трёх миньонов с даром, ` +
-      `тир ${tiers.join(' или ')} (${body.toFixed(1)}); ${holdNote}`,
+      `тир ${tiers.join(' или ')} (${body.toFixed(1)}); ${holdNote}` +
+      (discoverPay === null ? '' : `; ${discoverPayoffNote(discoverPay, 1)}`),
   };
 }
 

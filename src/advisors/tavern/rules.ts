@@ -445,6 +445,34 @@ export interface TavernRules {
   readonly battlecryTimesWords: readonly string[];
 
   /**
+   * Свой миньон, который ПЛАТИТ за каждый Discover статами племени:
+   * «After you Discover a card, give your other Pirates +{0}/+{1}» (Hooktusk,
+   * Master Marauder `BG36_344`, D232). Группы: 1 — «other» (сам носитель
+   * прибавки не получает), 2/3 — атака (плейсхолдер/литерал), 4/5 — здоровье;
+   * `{tribe}` — из `tribeTextWords`.
+   *
+   * part55: на ходу 19 четыре Discover дали пиратам 246 статов, на ходу 23
+   * семь срабатываний — 65 % прироста борда, а советник не видел этого ни
+   * у дара, ни у прокрутки Rodeo Performer и Patient Scout, ни у Hired
+   * Headhunter. Против поля хода таверны 10: борд игрока 55.3 %, план
+   * советника 35.2 %. В пуле такой текст один; на своём борде — в 34 точках
+   * восьми партий списка замеров.
+   */
+  readonly discoverPayoffWords: readonly string[];
+
+  /**
+   * Где Discover — ДЕЙСТВИЕ самой карты, а не слово в триггере («After you
+   * Discover», «When you buy or Discover this»): после клича, при продаже
+   * и в начале текста заклинания или активации (D232).
+   */
+  readonly discoverBattlecryWords: readonly string[];
+  readonly discoverSellWords: readonly string[];
+  readonly discoverLeadWords: readonly string[];
+
+  /** Сколько карт за раз: «Discover 2 Tavern spells», «Discover two Tier 6 minions». */
+  readonly discoverCountWords: readonly string[];
+
+  /**
    * Тело, которое бьёт без ответного урона: «Immune while attacking»
    * (Warpwing `BG24_004`, Viper). Прибавка ТОЛЬКО К АТАКЕ (сила «Attack
    * equal to your Tier», «Give a minion +{0} Attack») достаётся ему, а не
@@ -2062,6 +2090,25 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   battlecryTimesWords: [
     '\\bbattlecr(?:y|ies)\\b(?:<\\/b>)?[^.]*?\\btriggers?\\s+(twice|three\\s+times|an\\s+extra\\s+time)\\b',
   ],
+
+  // «[x]After you <b>Discover</b> a card, give your other Pirates +{0}/+{1}.»
+  discoverPayoffWords: [
+    '\\bafter\\s+you\\s+(?:<b>)?discover(?:<\\/b>)?\\s+a\\s+card\\s*,\\s*give\\s+your\\s+(other\\s+)?{tribe}\\s+' +
+      '\\+(?:\\{(\\d)\\}|(\\d+))\\s*\\/\\s*\\+(?:\\{(\\d)\\}|(\\d+))',
+  ],
+  // Клич: «<b>Battlecry:</b> <b>Discover</b> a Tavern spell» (Rodeo Performer).
+  // Продажа: «When you sell this, <b>Discover</b> a Tier 1 minion» (Patient
+  // Scout). Начало текста: «<b>Discover</b> a minion from <b>Tier 0</b>»
+  // (Triple Reward), «[x]<b><b>Choose One - </b>Discover</b>…», хвост
+  // активации « Discover</b> a Tavern spell» (Clever Castaway).
+  // Двоеточие после «Battlecry» обязательно: «Trigger a friendly minion's
+  // <b>Battlecry</b>; or <b>Discover</b>…» (Disco Shuffler) — не клич.
+  discoverBattlecryWords: ['\\bbattlecry:(?:<\\/b>)?[^.]*?\\bdiscover\\b'],
+  discoverSellWords: ['\\bwhen\\s+you\\s+sell\\s+this\\s*,?\\s*(?:<b>)?discover\\b'],
+  discoverLeadWords: [
+    '^\\s*(?:\\[x\\])?\\s*(?:<\\/?b>\\s*)*(?:choose\\s+one\\s*-\\s*(?:<\\/b>)?\\s*)?discover\\b',
+  ],
+  discoverCountWords: ['\\bdiscover(?:<\\/b>)?\\s+(two|three|\\d+)\\b'],
 
   immuneAttackerWords: ['\\bimmune(?:<\\/b>)?\\s+while\\s+attacking\\b'],
 
