@@ -8370,6 +8370,33 @@ export function spellRules(
         }
       }
 
+      // Заклинание витрины, которое откроется (D233). part55, ход 9: сила
+      // за 1 и подъём за 5 оставляют золотой, а Search Through Time стоит 2 —
+      // без этой ветки монетка молчала, золотой сгорал, и развилка меняла
+      // подъём на цепочку покупок, хотя игрок поднялся и купил всё.
+      const spellUnlocked = shopSpellRules(richer, deps, rules)
+        .filter((rec) => rec.cost > state.gold && rec.cost <= richer.gold && rec.score > 0)
+        .reduce((a: Recommendation | null, b) => (a === null || b.score > a.score ? b : a), null);
+      if (spellUnlocked?.spellCardId != null) {
+        const spellName = deps.cards.info(spellUnlocked.spellCardId)?.name ?? spellUnlocked.spellCardId;
+        return [
+          {
+            action: 'play' as const,
+            minion: null,
+            spellCardId: spell.cardId,
+            score: spellUnlocked.score,
+            cost: spell.cost,
+            // Валовыми: цену `applyRecommendation` вычтет само.
+            grantsGold: effect.gold,
+            requiresSlot: false,
+            sellFirst: null,
+            reason:
+              `${name} даёт ${String(net)} золота — откроется покупка ` +
+              `${spellName} (${spellUnlocked.score.toFixed(1)})`,
+          },
+        ];
+      }
+
       // Подъём таверны, до которого не хватает ровно этой добавки.
       const upgrade = state.tavernUpgradeCost;
       if (upgrade !== null && state.gold < upgrade && richer.gold >= upgrade) {

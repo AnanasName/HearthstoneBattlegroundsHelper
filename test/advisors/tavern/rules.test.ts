@@ -2278,6 +2278,35 @@ describe('заклинания руки', () => {
     expect(spellRules(s, spellDeps)).toHaveLength(0);
   });
 
+  it('монетка открывает и заклинание витрины (D233, part55 ход 9)', () => {
+    const idx = createCardIndex([
+      { id: 'COIN', name: 'Монетка таверны', type: 'Battleground_spell', text: 'Gain 1 Gold.' },
+      { id: 'S_BUFF', name: 'Усиление', type: 'Battleground_spell', text: 'Give a minion +4/+4.' },
+      { id: 'MINION_X', name: 'Миньон', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+    ]);
+    const spell = {
+      entityId: 901,
+      cardId: 'S_BUFF',
+      cost: 2,
+      scriptData: [],
+      zonePos: 1,
+      unplayable: false,
+      costsHealth: false,
+    };
+    const s = state({
+      gold: 1,
+      board: [minion(1, { cardId: 'MINION_X', attack: 3, health: 3 })],
+      shopSpells: [spell],
+      handSpells: [handSpell('COIN')],
+    });
+    const recs = spellRules(s, { cards: idx });
+    expect(recs).toHaveLength(1);
+    expect(recs[0]?.grantsGold).toBe(1);
+    expect(recs[0]?.reason).toContain('откроется покупка Усиление');
+    // Хватает и без монетки — монетка молчит.
+    expect(spellRules({ ...s, gold: 2 }, { cards: idx })).toHaveLength(0);
+  });
+
   it('бафф-заклинание советуется с целью, числа — из тегов сущности (part10, ход 9)', () => {
     // Тавматургия: «+{1}/+{1}», единица улучшения лежит в NUM_2.
     const s = state({
