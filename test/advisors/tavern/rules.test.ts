@@ -1217,6 +1217,20 @@ describe('правило тёмного дара', () => {
     expect(darkGiftRule(s, deps)).toBeNull();
   });
 
+  it('подъёму, запрещённому порогом здоровья, золото не уступается (D230, part55 ход 21)', () => {
+    // То же отставание, но здоровья 10 при пороге 15: `levelUpRule` ставит
+    // подъёму ноль, и дар молчать не должен.
+    const s = giftable({
+      turn: 9,
+      techLevel: 2,
+      gold: 5,
+      tavernUpgradeCost: 5,
+      tavernUpgradeTarget: 3,
+      hero: hero(40, 30),
+    });
+    expect(darkGiftRule(s, deps)?.action).toBe('darkGift');
+  });
+
   it('по графику дар не блокируется доступным подъёмом', () => {
     // Тир 3 к ходу 5 — по графику; подъём доступен, но не срочен.
     const s = giftable({
@@ -2230,6 +2244,15 @@ describe('заклинания руки', () => {
     const rec = spellRules(s, { cards: idx })[0];
     expect(rec?.targetMinion?.cardId).toBe('SELFTRIG');
     expect(rec?.reason).toContain('не на кандидата в продажу');
+  });
+
+  it('«If you win your next combat, gain 3 Gold» — золото завтрашнее (D231, part55 ход 21)', () => {
+    const idx = createCardIndex([
+      { id: 'OVER', text: 'If you win your next combat, gain 3 Gold. If you tie, gain 1.' },
+    ]);
+    const effect = spellEffect('OVER', [], idx);
+    expect(effect?.gold).toBe(0);
+    expect(effect?.goldNextTurn).toBe(3);
   });
 
   it('монетка советуется, когда её золото открывает покупку (part10, ход 5)', () => {

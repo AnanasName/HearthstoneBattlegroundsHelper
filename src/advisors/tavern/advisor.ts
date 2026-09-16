@@ -7552,8 +7552,13 @@ function computeSpellEffect(
 
   // «Gain 2 Gold next turn» / «Gain 4 Gold in two turns» — золото
   // ОТЛОЖЕННОЕ, и складывать его с живым нельзя (part30, ход 9).
+  // «If you win your next combat, gain 3 Gold» (Overconfidence, part55,
+  // ход 21) — тоже отложенное: прочитанное как живое, оно оплачивало в плане
+  // подъём, на который золота не было (D231). Признак тот же, что у награды
+  // силы после боя (`delayedRewardWords`, D217).
   const gold = /gain\s+(\d+)\s+gold(\s+next\s+turn|\s+in\s+two\s+turns)?/i.exec(text);
-  const deferredGold = gold?.[2] !== undefined;
+  const afterCombat = rules.delayedRewardWords.some((w) => new RegExp(w, 'i').test(text));
+  const deferredGold = gold?.[2] !== undefined || (gold !== null && afterCombat);
 
   // Числа усиления: литерал или плейсхолдер-индекс в теги сущности.
   // Заодно считается, сколько из них выветрится: пометка временности
@@ -8779,7 +8784,14 @@ export function darkGiftRule(
   // графика. Первая версия блокировала дар всякий раз, когда подъём был
   // «по карману», — а по карману он при нетронутом золоте почти всегда,
   // и на part8 дар не был посоветован ни разу за партию.
-  const behind = targetTier(state.turn, rules) > state.techLevel;
+  //
+  // И только тому подъёму, который правило подъёма вообще разрешает (D230).
+  // part55, ход 21: hp 11 при пороге 15 — `levelUpRule` ставит подъёму ноль
+  // (`blockedByHp`, D214), а дар молчал, уступая ему золото, и последний
+  // заряд пропадал; игрок нажал дар сам.
+  const behind =
+    targetTier(state.turn, rules) > state.techLevel &&
+    effectiveHp(state) >= rules.levellingHpFloor;
   const upgrade = state.tavernUpgradeCost;
   if (behind && upgrade !== null && state.gold >= upgrade && state.gold - cost < upgrade) {
     return null;
