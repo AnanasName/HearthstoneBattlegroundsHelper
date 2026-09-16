@@ -32,6 +32,7 @@ const ACTION_WORD: Readonly<Record<PlayerActionType, string>> = {
   heroPower: 'нажал силу героя',
   darkGift: 'нажал тёмный дар',
   activate: 'активировал',
+  trinket: 'взял тринкет',
 };
 
 function readGame(ref: string): { label: string; text: string } {

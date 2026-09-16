@@ -110,6 +110,8 @@ const CHOICE_HEADER_RE = /^id=(\d+) Player=(.+?) TaskList=\S* ChoiceType=(\w+)/;
 const CHOICE_OPTION_RE = /^Entities\[\d+\]=/;
 /** Заголовок закрытия: `id=3 ChoiceType=GENERAL` в канале SendChoices. */
 const SEND_CHOICES_RE = /^id=(\d+) ChoiceType=/;
+/** Выбранный вариант в канале SendChoices: `m_chosenEntities[0]=[дескриптор]`. */
+const CHOSEN_OPTION_RE = /^m_chosenEntities\[\d+\]=/;
 
 /** Теги-признаки, которые нас интересуют у миньона. */
 interface Entity {
@@ -351,6 +353,30 @@ export function createReducer(players: Players): Reducer {
 
   const stepChoice = (source: string, content: string): void => {
     if (source === 'GameState.SendChoices') {
+      // Взятый тринкет — единственный выбор, который журнал не видит блоком
+      // PLAY. Признаки те же, что у открытого предложения в снимке: свой
+      // тринкет в SETASIDE с `BACON_TRINKET`. Проверка по сущности, а не
+      // по заголовку выбора: тем же каналом закрываются раскопки и тройки.
+      if (CHOSEN_OPTION_RE.test(content)) {
+        const d = parseEntityDescriptor(content);
+        const e = d === null ? undefined : entities.get(d.id);
+        if (
+          e !== undefined &&
+          e.cardType === 'BATTLEGROUND_TRINKET' &&
+          e.controller === players.selfPlayerId &&
+          e.zone === 'SETASIDE' &&
+          flag(e, 'BACON_TRINKET')
+        ) {
+          actions.push({
+            turn,
+            type: 'trinket',
+            cardId: e.cardId === '' ? null : e.cardId,
+            entityId: e.id,
+            subOption: null,
+          });
+        }
+        return;
+      }
       const done = SEND_CHOICES_RE.exec(content);
       if (done?.[1] === undefined) return;
       const id = Number(done[1]);

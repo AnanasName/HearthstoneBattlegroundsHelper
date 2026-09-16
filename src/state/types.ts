@@ -525,7 +525,15 @@ export type PlayerActionType =
   | 'play'
   | 'heroPower'
   | 'darkGift'
-  | 'activate';
+  | 'activate'
+  /**
+   * Взятый тринкет. Блока PLAY у выбора нет: карту называет строка
+   * `m_chosenEntities[i]=` канала `GameState.SendChoices`, а цена
+   * списывается следом ростом `RESOURCES_USED` вне блоков (part54,
+   * 16:24:38). До 17.09.2026 журнал этого действия не знал, и ход выбора
+   * выглядел для датасета как ход без трёх–пяти золотых.
+   */
+  | 'trinket';
 
 export interface PlayerAction {
   /** Ход партии (`GameState.turn`), на котором действие сделано. */

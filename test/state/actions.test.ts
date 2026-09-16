@@ -16,6 +16,12 @@ import { part17Game } from '../fixtures.js';
  * 27 обновлений витрины, 4 подъёма таверны, 5 заморозок, 86 розыгрышей
  * из руки (zone=HAND в дескрипторе строки BLOCK_START), 12 активаций
  * миньонов на борде (BG36_180 и его золотая версия), 3 тёмных дара.
+ *
+ * Выбор тринкета идёт мимо блоков PLAY: строка `m_chosenEntities[0]=`
+ * канала `GameState.SendChoices`, а золото списывается следом ростом
+ * `RESOURCES_USED` без блока (part54, 16:24:38). В part17 таких строк две:
+ * 16:03:58 «Портрет продажементаля» `BG32_MagicItem_831` и 16:10:24
+ * «Карманный смерч» `BG35_MagicItem_850t`.
  */
 
 let state: GameState;
@@ -41,6 +47,7 @@ describe('журнал действий (part17)', () => {
       play: 86,
       activate: 12,
       darkGift: 3,
+      trinket: 2,
     });
   });
 
@@ -70,6 +77,13 @@ describe('журнал действий (part17)', () => {
     for (let i = 1; i < turns.length; i += 1) {
       expect(turns[i]).toBeGreaterThanOrEqual(turns[i - 1] ?? 0);
     }
+  });
+
+  it('взятый тринкет пишется с картой и ходом выбора, отвергнутые — нет', () => {
+    expect(ofType('trinket').map((a) => [a.turn, a.cardId, a.entityId])).toEqual([
+      [11, 'BG32_MagicItem_831', 3044],
+      [17, 'BG35_MagicItem_850t', 6985],
+    ]);
   });
 
   it('кнопки без карты-цели журналируются без cardId', () => {

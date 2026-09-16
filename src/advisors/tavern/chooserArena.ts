@@ -83,7 +83,11 @@ import { adviseTavern, buyCostOf, weakestOwn } from './advisor.js';
 import { DEFAULT_TAVERN_RULES, type TavernRules } from './rules.js';
 import { readTavernTurns, readTavernTurnsAsync } from './turns.js';
 
-/** Действия, которые тратят золото. Заморозка и розыгрыш из руки — не тратят. */
+/**
+ * Действия, которые тратят золото. Заморозка и розыгрыш из руки — не тратят.
+ * Взятый тринкет тратит (до 17.09.2026 журнал его не видел, и первой тратой
+ * хода выбора числилась покупка, сделанная уже на остаток).
+ */
 const SPENDING_ACTIONS = new Set<PlayerAction['type']>([
   'buy',
   'levelUp',
@@ -91,6 +95,7 @@ const SPENDING_ACTIONS = new Set<PlayerAction['type']>([
   'darkGift',
   'heroPower',
   'activate',
+  'trinket',
 ]);
 
 /** Золотая копия — та же карта: суффикс снимается, как во всех сверках. */
