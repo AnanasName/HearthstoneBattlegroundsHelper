@@ -307,6 +307,11 @@ export interface ValueBreakdown {
    * Его цена уже внутри `keywords`; поле — для причины совета.
    */
   readonly thresholdKeyword: { readonly field: BinaryKeywordField; readonly attack: number } | null;
+  /**
+   * Слово, которое стартовый эффект кандидата подарит своему (D223), и кому
+   * (лучший получатель). Цена — внутри `battle`; поле — для причины совета.
+   */
+  readonly combatGrant: { readonly field: BinaryKeywordField; readonly recipient: Minion } | null;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1020,24 +1025,42 @@ function tribePayoffWithoutCarriers(
   cards: CardIndex,
   rules: TavernRules,
 ): boolean {
-  const text = cards.info(candidate.cardId)?.text ?? '';
-  if (text === '') return false;
-  const tribes = Object.entries(rules.tribeTextWords)
-    .filter(([, word]) =>
-      rules.tribeRecipientWords.some((w) =>
-        new RegExp(w.replace('{tribe}', `(?:${word})`), 'i').test(text),
-      ),
-    )
-    .map(([race]) => race);
+  const tribes = payoffTribesOf(candidate.cardId, cards, rules);
   if (tribes.length === 0) return false;
-  const kept = [...rules.tavernTriggerWords, ...rules.triggerGetWords, ...rules.tribePremiumKeepWords];
-  if (kept.some((w) => new RegExp(w, 'i').test(text))) return false;
   return ![...state.board, ...state.hand].some((m) => {
     if (m.entityId === candidate.entityId) return false;
     const races = racesOf(m, cards);
     return races.includes(RACE_ALL) || tribes.some((r) => races.includes(r));
   });
 }
+
+/**
+ * Племена-получатели, за которые карта берёт надбавку тира (D220), —
+ * пусто, если получателей нет или карта окупается вне боя. Ответ про карту,
+ * кэшируется по ней: без кэша три десятка регулярок собирались на каждый
+ * вызов ценности.
+ */
+function payoffTribesOf(cardId: string, cards: CardIndex, rules: TavernRules): readonly string[] {
+  return memoByCard(PAYOFF_TRIBES_CACHE, cardId, cards, rules, () => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (text === '') return [];
+    const tribes = Object.entries(rules.tribeTextWords)
+      .filter(([, word]) =>
+        rules.tribeRecipientWords.some((w) =>
+          new RegExp(w.replace('{tribe}', `(?:${word})`), 'i').test(text),
+        ),
+      )
+      .map(([race]) => race);
+    if (tribes.length === 0) return [];
+    const kept = [...rules.tavernTriggerWords, ...rules.triggerGetWords, ...rules.tribePremiumKeepWords];
+    return kept.some((w) => new RegExp(w, 'i').test(text)) ? [] : tribes;
+  });
+}
+
+const PAYOFF_TRIBES_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, readonly string[]>>
+>();
 
 /** Ценность миньона: во что складываются веса из таблицы правил. */
 export function minionValue(
@@ -1119,6 +1142,10 @@ export function minionValue(
       });
     if (anyMates) battle = w.battleEffect;
   }
+  // Стартовый эффект, дарящий своему слово и статы (D223): цена — на той же
+  // шкале слов и статов, что у покупки, своего веса у слагаемого нет.
+  const combatGrant = combatKeywordGrant(candidate, state, cards, rules);
+  if (combatGrant !== null) battle += combatGrant.value;
 
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
@@ -1308,6 +1335,8 @@ export function minionValue(
     heroPowerBuyLeft,
     heroPowerBuyReward: heroPowerBuyRewardName,
     thresholdKeyword: reached,
+    combatGrant:
+      combatGrant === null ? null : { field: combatGrant.field, recipient: combatGrant.recipient },
     total:
       tech +
       stats +
@@ -1471,24 +1500,175 @@ function thresholdKeywordReached(
   cards: CardIndex,
   rules: TavernRules,
 ): { field: BinaryKeywordField; attack: number } | null {
-  const text = cards.info(candidate.cardId)?.text ?? '';
-  if (text === '') return null;
-  for (const pattern of rules.attackThresholdKeywordWords) {
-    const m = new RegExp(pattern, 'i').exec(text);
-    if (m === null) continue;
-    const threshold = candidate.scriptData[Number(m[1])] ?? null;
-    const named = (m[2] ?? '').toLowerCase().replace(/\s+/g, ' ');
-    const field = BINARY_KEYWORDS.map(([, f]) => f).find((f) => KEYWORD_WORD[f] === named);
-    if (threshold === null || field === undefined || candidate[field]) return null;
-    const size = (x: Minion): number => (x.attack ?? 0) + (x.health ?? 0);
-    const rival = state.board.some(
-      (o) => o.entityId !== candidate.entityId && size(o) >= size(candidate),
-    );
-    if (rival) return null;
-    const attack = (candidate.attack ?? 0) + turnAttackGain(state, cards, rules);
-    return attack >= threshold ? { field, attack } : null;
+  const parsed = memoByCard(THRESHOLD_CACHE, candidate.cardId, cards, rules, () => {
+    const text = cards.info(candidate.cardId)?.text ?? '';
+    for (const pattern of rules.attackThresholdKeywordWords) {
+      const m = new RegExp(pattern, 'i').exec(text);
+      if (m === null) continue;
+      const named = (m[2] ?? '').toLowerCase().replace(/\s+/g, ' ');
+      const field = BINARY_KEYWORDS.map(([, f]) => f).find((f) => KEYWORD_WORD[f] === named);
+      return field === undefined ? null : { index: Number(m[1]), field };
+    }
+    return null;
+  });
+  if (parsed === null) return null;
+  const threshold = candidate.scriptData[parsed.index] ?? null;
+  if (threshold === null || candidate[parsed.field]) return null;
+  const size = (x: Minion): number => (x.attack ?? 0) + (x.health ?? 0);
+  const rival = state.board.some(
+    (o) => o.entityId !== candidate.entityId && size(o) >= size(candidate),
+  );
+  if (rival) return null;
+  const attack = (candidate.attack ?? 0) + turnAttackGain(state, cards, rules);
+  return attack >= threshold ? { field: parsed.field, attack } : null;
+}
+
+const THRESHOLD_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, { index: number; field: BinaryKeywordField } | null>>
+>();
+
+/**
+ * Стартовый эффект боя, дарящий своему миньону племени статы и слово (D223).
+ *
+ * part54, ход 9: Thousandth Paper Drake («Start of Combat: Give your
+ * left-most Dragon +1/+2 and Windfury») стоил 9.5 с «текст 0, бой 0»,
+ * и советник звал вместо него вторую Scarlet Survivor. Игрок взял Drake
+ * и поставил свою Survivor 17/19 со щитом крайней левой — вихрь достался
+ * главному телу борда, и против поля 6-го хода таверны это 83.6 % боёв
+ * против 74.9 %.
+ *
+ * Получатель «left-most» — ЛУЧШИЙ свой того племени: крайним левым игрок
+ * ставит его сам, и расстановка это найдёт. «Two left-most» (золотой) —
+ * два лучших. «Another friendly» — случайный из своих, и цена средняя.
+ *
+ * Слово, которое у получателя уже есть, не платится; статы — всегда.
+ * Крайнему левому слово уже может дарить СВОЙ миньон борда: второй Drake
+ * даёт вихрь тому же дракону, что и первый, и за слово платить нечего —
+ * складываются только статы.
+ */
+function combatKeywordGrant(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { field: BinaryKeywordField; recipient: Minion; value: number } | null {
+  const grant = combatGrantSpec(candidate, cards, rules);
+  if (grant === null) return null;
+  const others = state.board.filter((o) => o.entityId !== candidate.entityId);
+  const mates = others.filter((o) => {
+    const races = racesOf(o, cards);
+    return races.includes(grant.race) || races.includes(RACE_ALL);
+  });
+  if (mates.length === 0) return null;
+
+  const statsGain = (grant.attack + grant.health) * rules.value.perStatPoint;
+  const wordGain = (o: Minion): number =>
+    o[grant.field]
+      ? 0
+      : keywordValue(grant.field, (o.attack ?? 0) + grant.attack, (o.health ?? 0) + grant.health, rules);
+  const ranked = [...mates].sort((a, b) => wordGain(b) - wordGain(a));
+
+  if (grant.recipients === null) {
+    const value = ranked.reduce((s, o) => s + wordGain(o), 0) / ranked.length + statsGain;
+    return { field: grant.field, recipient: ranked[0]!, value };
   }
-  return null;
+  const covered = others
+    .map((o) => combatGrantSpec(o, cards, rules))
+    .filter((g) => g !== null && g.recipients !== null && g.field === grant.field && g.race === grant.race)
+    .reduce((s, g) => s + (g?.recipients ?? 0), 0);
+  const hit = ranked.slice(0, grant.recipients);
+  const value =
+    hit.slice(covered).reduce((s, o) => s + wordGain(o), 0) + hit.length * statsGain;
+  return { field: grant.field, recipient: ranked[0]!, value };
+}
+
+/**
+ * Что обещает стартовый эффект миньона — по тексту и тегам самого миньона.
+ * `recipients` — сколько крайних левых получат дар; `null` — случайный свой.
+ */
+function combatGrantSpec(
+  m: Minion,
+  cards: CardIndex,
+  rules: TavernRules,
+): {
+  race: string;
+  field: BinaryKeywordField;
+  attack: number;
+  health: number;
+  recipients: number | null;
+} | null {
+  const parsed = combatGrantTextOf(m.cardId, cards, rules);
+  if (parsed === null) return null;
+  const read = (ph: string | undefined, lit: string | undefined): number =>
+    ph !== undefined ? (m.scriptData[Number(ph)] ?? 0) : Number(lit ?? 0);
+  return {
+    race: parsed.race,
+    field: parsed.field,
+    attack: read(parsed.attack[0], parsed.attack[1]),
+    health: read(parsed.health[0], parsed.health[1]),
+    recipients: parsed.recipients,
+  };
+}
+
+interface CombatGrantText {
+  readonly race: string;
+  readonly field: BinaryKeywordField;
+  /** Плейсхолдер и литерал: одно из двух задано. */
+  readonly attack: readonly [string | undefined, string | undefined];
+  readonly health: readonly [string | undefined, string | undefined];
+  readonly recipients: number | null;
+}
+
+/**
+ * Разбор текста стартового эффекта — ответ про КАРТУ, кэшируется по ней:
+ * без кэша десять племён на шаблон пересобирались на каждого соседа каждого
+ * кандидата, и план хода дорожал впятеро (part25: 0.3 → 1.4 с).
+ */
+function combatGrantTextOf(
+  cardId: string,
+  cards: CardIndex,
+  rules: TavernRules,
+): CombatGrantText | null {
+  return memoByCard(COMBAT_GRANT_CACHE, cardId, cards, rules, () => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (text === '' || !/start\s+of\s+combat/i.test(text)) return null;
+    for (const [race, word] of Object.entries(rules.tribeTextWords)) {
+      for (const pattern of rules.combatKeywordGrantWords) {
+        const found = new RegExp(pattern.replace('{tribe}', `(?:${word})`), 'i').exec(text);
+        if (found === null) continue;
+        const named = (found[6] ?? '').toLowerCase().replace(/\s+/g, ' ');
+        const field = BINARY_KEYWORDS.map(([, f]) => f).find((f) => KEYWORD_WORD[f] === named);
+        if (field === undefined) return null;
+        const who = (found[1] ?? '').toLowerCase();
+        return {
+          race,
+          field,
+          attack: [found[2], found[3]] as const,
+          health: [found[4], found[5]] as const,
+          recipients: /left-most/.test(who) ? (/\btwo\b/.test(who) ? 2 : 1) : null,
+        };
+      }
+    }
+    return null;
+  });
+}
+
+const COMBAT_GRANT_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, CombatGrantText | null>>
+>();
+
+/** «в бою даст неистовство ветра: Scarlet Survivor 17/19» */
+function combatGrantNote(
+  grant: { field: BinaryKeywordField; recipient: Minion },
+  cards: CardIndex,
+): string {
+  const r = grant.recipient;
+  return (
+    `в бою даст ${KEYWORD_NAME_RU[grant.field]}: ` +
+    `${cards.info(r.cardId)?.name ?? r.cardId} ${String(r.attack ?? '?')}/${String(r.health ?? '?')}`
+  );
 }
 
 /** «усиления хода доведут атаку до 6: божественный щит» */
@@ -2411,6 +2591,7 @@ export function buyRules(
         notes.unshift('вторая копия');
       }
       if (value.thresholdKeyword !== null) notes.push(thresholdKeywordNote(value.thresholdKeyword));
+      if (value.combatGrant !== null) notes.push(combatGrantNote(value.combatGrant, deps.cards));
       if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
       if (value.textTribeMates > 0) {
         notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
@@ -2667,6 +2848,7 @@ export function playRules(
     else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
     if (minion.golden) notes.push('золотой');
     if (value.thresholdKeyword !== null) notes.push(thresholdKeywordNote(value.thresholdKeyword));
+    if (value.combatGrant !== null) notes.push(combatGrantNote(value.combatGrant, deps.cards));
     if (value.tribeMates > 0) notes.push(`своих по племени ${String(value.tribeMates)}`);
     if (value.textTribeMates > 0) {
       notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);

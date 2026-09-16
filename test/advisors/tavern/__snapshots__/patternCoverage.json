@@ -53,6 +53,11 @@
   "boardWideBuffWords": 120,
   "buffsShopAllGameWords": 288,
   "buffsShopWords": 70,
+  "combatKeywordGrantWords": [
+   "BG24_500",
+   "BG29_810",
+   "BG29_810_G"
+  ],
   "consumeTavernWords": [
    "BG21_005",
    "BG21_005_G",

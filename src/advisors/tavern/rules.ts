@@ -404,6 +404,23 @@ export interface TavernRules {
   readonly attackThresholdKeywordWords: readonly string[];
 
   /**
+   * Стартовый эффект боя, дарящий СВОЕМУ миньону племени статы и слово.
+   * `{tribe}` — из `tribeTextWords`. Группы: 1 — кому («your left-most»,
+   * «your two left-most», «another friendly»), 2/3 — атака (плейсхолдер/
+   * литерал), 4/5 — здоровье, 6 — слово.
+   *
+   * Thousandth Paper Drake `BG29_810` («Start of Combat: Give your left-most
+   * Dragon +1/+2 and Windfury»), part54 ход 9: советник звал вторую Scarlet
+   * Survivor (11.0) вместо Drake (9.5, «текст 0, бой 0»), игрок взял Drake
+   * и поставил свою Survivor 17/19 со щитом крайней левой. Замер против
+   * поля: 95.6 % против 93.9 % на 5-м ходу таверны и 83.6 % против 74.9 %
+   * на 6-м; сам текст Drake (тот же дракон без текста) — 4–6 п.п. на ходах
+   * 6–9 (D223). Amber Guardian `BG24_500` («Give another friendly Dragon
+   * +{0}/+{1} and Divine Shield») — тот же класс со случайным получателем.
+   */
+  readonly combatKeywordGrantWords: readonly string[];
+
+  /**
    * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -1972,6 +1989,11 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   attackThresholdKeywordWords: [
     '\\bonce\\s+this\\s+reaches\\s+\\{(\\d)\\}\\s+attack\\b[^.]*?\\bgain\\s+(?:<b>)*(divine\\s+shield|taunt|windfury|reborn)\\b',
+  ],
+
+  combatKeywordGrantWords: [
+    '\\bstart\\s+of\\s+combat:(?:\\s*<\\/b>)?\\s*give\\s+(your\\s+(?:two\\s+)?left-most|another\\s+friendly)\\s+{tribe}\\s+' +
+      '\\+(?:\\{(\\d)\\}|(\\d+))\\s*\\/\\s*\\+(?:\\{(\\d)\\}|(\\d+))\\s+and\\s+(?:<b>)*(divine\\s+shield|taunt|windfury|reborn)\\b',
   ],
 
   rerollMarginOverTier: 2,

@@ -3642,6 +3642,63 @@ describe('синергия с механикой из текста (part15, Titu
     });
   });
 
+  describe('стартовый эффект дарит своему дракону слово (part54, D223)', () => {
+    const grantCards = createCardIndex([
+      {
+        id: 'DRAKE_PAPER',
+        name: 'Бумажный дракон',
+        type: 'Minion',
+        techLevel: 2,
+        races: ['DRAGON'],
+        isBaconPool: true,
+        text: '[x]<b>Start of Combat:</b> Give your left-most Dragon +1/+2 and <b>Windfury</b>.',
+      },
+      {
+        id: 'AMBER',
+        name: 'Янтарный страж',
+        type: 'Minion',
+        techLevel: 3,
+        races: ['DRAGON'],
+        isBaconPool: true,
+        text: '[x]<b>Taunt</b> <b>Start of Combat:</b> Give another friendly Dragon +{0}/+{1} and <b>Divine Shield</b>.',
+      },
+      { id: 'WYRM', name: 'Дракон', type: 'Minion', techLevel: 1, races: ['DRAGON'], isBaconPool: true },
+      { id: 'PIRATE_B', name: 'Пират', type: 'Minion', techLevel: 1, races: ['PIRATE'], isBaconPool: true },
+    ]);
+    const grantDeps = { cards: grantCards };
+    const w = DEFAULT_TAVERN_RULES.value;
+    const drake = minion(9, { cardId: 'DRAKE_PAPER', attack: 2, health: 3, techLevel: 2 });
+    const carry = minion(1, { cardId: 'WYRM', attack: 17, health: 19, divineShield: true });
+
+    it('вихрь крайнему левому — лучшему своему дракону, плюс его статы', () => {
+      const value = minionValue(drake, state({ board: [carry, minion(2, { cardId: 'WYRM' })] }), grantDeps);
+      expect(value.combatGrant?.field).toBe('windfury');
+      expect(value.combatGrant?.recipient.entityId).toBe(1);
+      expect(value.battle).toBe(w.windfury + (1 + 2) * w.perStatPoint);
+    });
+
+    it('без своих драконов дарить некому', () => {
+      const pirates = [minion(1, { cardId: 'PIRATE_B', attack: 17, health: 19 })];
+      const value = minionValue(drake, state({ board: pirates }), grantDeps);
+      expect(value.combatGrant).toBeNull();
+      expect(value.battle).toBe(0);
+    });
+
+    it('второй такой же дарит тому же крайнему — за слово не платится', () => {
+      const first = minion(3, { cardId: 'DRAKE_PAPER', attack: 2, health: 3 });
+      const value = minionValue(drake, state({ board: [carry, first] }), grantDeps);
+      expect(value.battle).toBe((1 + 2) * w.perStatPoint);
+    });
+
+    it('«another friendly» — случайный свой: цена средняя, щит у носителя не платится', () => {
+      const amber = minion(9, { cardId: 'AMBER', attack: 3, health: 2, scriptData: [2, 2] });
+      const bare = minion(2, { cardId: 'WYRM', attack: 3, health: 3 });
+      const value = minionValue(amber, state({ board: [carry, bare] }), grantDeps);
+      const bareShield = Math.min(w.divineShield, (3 + 2 + 3 + 2) * w.perStatPoint);
+      expect(value.battle).toBe((0 + bareShield) / 2 + (2 + 2) * w.perStatPoint);
+    });
+  });
+
   it('своя механика синергией не считается: хрип про свой же хрип молчит', () => {
     // Buzzing Vermin пишет «Deathrattle:» о себе — это описание, не связь.
     const board = [minion(1, { cardId: 'RATTLER' })];

@@ -158,6 +158,27 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
   });
 
   /**
+   * Ход 9 (5-й ход таверны): советник звал вторую Scarlet Survivor (11.0),
+   * Thousandth Paper Drake («Start of Combat: Give your left-most Dragon
+   * +1/+2 and Windfury») стоил 9.5 с «текст 0, бой 0». Игрок взял Drake
+   * (16:16:44), и к ходу 11 его Survivor 25/21 со щитом стоит крайней
+   * левой. Против поля: 95.6 % против 93.9 % на ходу таверны 5 и 83.6 %
+   * против 74.9 % на 6-м (D223).
+   */
+  it('ход 9: Paper Drake дарит вихрь Survivor, и план берёт его', () => {
+    const state = decisionPoint(9);
+    const drake = state.shop.find((m) => m.cardId === 'BG29_810');
+    const grant = minionValue(drake!, state, { cards }).combatGrant;
+    expect(grant?.field).toBe('windfury');
+    expect(grant?.recipient.cardId).toBe('BG35_814');
+
+    const bought = spendPlan(state, { cards })
+      .steps.filter((s) => s.recommendation.action === 'buy')
+      .map((s) => s.recommendation.minion?.cardId);
+    expect(bought).toEqual(['BG29_810']);
+  });
+
+  /**
    * Жалоба игрока №2 (кадр 16:24:52): «предлагает демона, от которого
    * не вижу смысла в этой композиции». План кадра начинался словами
    * «КУПИТЬ Tichondrius 4/4 за 3» — балл 14.0 = тир 10 + статы 4, при

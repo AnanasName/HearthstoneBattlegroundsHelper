@@ -965,6 +965,7 @@ describe('вид оверлея', () => {
       spellMagnet: 0,
       total,
       thresholdKeyword: null,
+      combatGrant: null,
       tribeMates: 0,
       textTribeMates: 0,
       textMechMates: 0,
