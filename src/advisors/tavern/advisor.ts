@@ -7738,7 +7738,16 @@ function computeSpellEffect(
   // ход 21) — тоже отложенное: прочитанное как живое, оно оплачивало в плане
   // подъём, на который золота не было (D231). Признак тот же, что у награды
   // силы после боя (`delayedRewardWords`, D217).
-  const gold = /gain\s+(\d+)\s+gold(\s+next\s+turn|\s+in\s+two\s+turns)?/i.exec(text);
+  //
+  // «Gain 1 Mana Crystal this turn only» — золото ЭТОГО хода: в BG золото
+  // и есть мана. Так написана `SW_COIN2`, монета силы Рафаама, которую игра
+  // показывает «Золотой монеткой» (тег `OVERRIDECARDNAME` подменяет только
+  // имя: у миньонов part11 и part26 он тоже есть). Розыгрыш в part52
+  // (00:39:35) снял `RESOURCES_USED` с 6 до 5.
+  const gold =
+    /gain\s+(\d+)\s+(?:gold|mana\s+crystals?(?=\s+this\s+turn\s+only))(\s+next\s+turn|\s+in\s+two\s+turns)?/i.exec(
+      text,
+    );
   const afterCombat = rules.delayedRewardWords.some((w) => new RegExp(w, 'i').test(text));
   const deferredGold = gold?.[2] !== undefined || (gold !== null && afterCombat);
 

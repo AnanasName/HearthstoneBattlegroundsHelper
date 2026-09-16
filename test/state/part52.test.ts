@@ -255,6 +255,24 @@ describe('part52: реванш и порядок строк про героя с
   });
 
   /**
+   * Монета силы Рафаама — `SW_COIN2` с текстом «Gain 1 Mana Crystal this
+   * turn only»; игра показывает её «Золотой монеткой» (`OVERRIDECARDNAME`
+   * меняет только имя). Розыгрыш в 00:39:35 снял `RESOURCES_USED` с 6 до 5.
+   * Ход 7: игрок поднял таверну, сыграл монету, нажал силу и разыграл
+   * Ancestral Automaton — план без монеты этой линии построить не мог
+   * и писал «остаётся 1 — сгорит».
+   */
+  it('ход 7: монета Рафаама — золото, и план идёт линией игрока', () => {
+    const state = decisionPoint(7);
+    expect(state.handSpells.map((s) => s.cardId)).toContain('SW_COIN2');
+    const plan = spendPlan(state, { cards });
+    const actions = plan.steps.map((s) => `${s.recommendation.action}:${s.recommendation.spellCardId ?? ''}`);
+    expect(actions).toContain('play:SW_COIN2');
+    expect(actions).toContain('levelUp:');
+    expect(plan.goldLeft).toBe(0);
+  });
+
+  /**
    * Ход 13, выбор тёмного дара (00:44:18). Дар кладётся на вариант ДО экрана:
    * Soulkeeping Jailer `BG36_503` родился 3/5 и в 00:44:17 стал 15/17.
    * Оценка по снапшоту ставила его ниже Glambot; по сущности — выше, и так же
