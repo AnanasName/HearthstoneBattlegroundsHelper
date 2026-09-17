@@ -614,6 +614,58 @@ describe('шаг, который план сам отменяет продаже
     expect(undoneValue(plan, start, { cards: idx }, DEFAULT_TAVERN_RULES)).toBe(14.5 - fed + 2 * g);
   });
 
+  /**
+   * Шаг «активировать, затем купить» (part57, D245) — составной: покупка
+   * внутри него отменяется той же продажей, что и обычная. А прибавка
+   * статов активации ПОСТОЯННА и продажу купленного тела переживает
+   * (лог part57: Living Prison 41/43 → 69/62 после Fire Baller, и сам Fire
+   * Baller продан ходом позже), поэтому в штраф она не входит: штраф
+   * считается по `thenBuys.score` и `thenBuys.cost`, а не по очкам шага.
+   *
+   * Без этой ветки цепочка «купил связкой → продал» шла в развилку
+   * как непотраченная — на part17 (ход 17) штраф выходил 0.00 вместо 21.00.
+   */
+  it('покупка ВНУТРИ шага «активировать, затем купить» штрафуется как обычная', () => {
+    const prison = minion(2, { cardId: 'KEEP', attack: 4, health: 5 });
+    const bought = shopMinion(30, 'KEEP');
+    const start = state({ board: [prison] });
+    const activateStep = {
+      recommendation: {
+        action: 'activate' as const,
+        minion: prison,
+        // Очки шага — покупка ПЛЮС прибавка статов; штраф возьмёт только первое.
+        score: 14.5 + 20,
+        cost: 1 + 3,
+        requiresSlot: true,
+        sellFirst: null,
+        thenBuys: { minion: bought, cost: 3, score: 14.5 },
+        boardGains: [{ entityId: prison.entityId, attack: 10, health: 10 }],
+        reason: 'тест',
+      },
+      goldBefore: 6,
+      goldAfter: 2,
+      opaque: false,
+      stateAfter: { ...start, board: [prison, bought] },
+    };
+    const playStep = {
+      recommendation: {
+        action: 'play' as const,
+        minion: shopMinion(40, 'KEEP'),
+        score: 20,
+        cost: 0,
+        requiresSlot: true,
+        sellFirst: bought,
+        reason: 'тест',
+      },
+      goldBefore: 2,
+      goldAfter: 3,
+      opaque: false,
+      stateAfter: start,
+    };
+    const plan = { steps: [activateStep, playStep], goldLeft: 3, truncated: false };
+    expect(undoneValue(plan, start, { cards: idx }, DEFAULT_TAVERN_RULES)).toBe(14.5 + 2 * g);
+  });
+
   it('прокрутка на полном борде продаёт жертву и возвращает её золото', () => {
     const victim = shopMinion(5, 'KEEP');
     const spun = shopMinion(31, 'DJINN');

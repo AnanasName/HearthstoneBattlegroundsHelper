@@ -504,6 +504,28 @@ export interface TavernRules {
    * множитель 2 у `BG36_205_G`).
    */
   readonly fishbaitBuff: number;
+  /**
+   * Активация, ЗАБИРАЮЩАЯ СТАТЫ следующей покупки: «Activate ({0}): Gain
+   * the stats of the next minion you buy this turn» (Living Prison
+   * `BG36_180`, part57); группа 1 — «double» у золотой.
+   *
+   * По логу part57 прибавка равна статам купленной карты витрины на момент
+   * покупки: ход 15 — Fire Baller 28/19, тело 41/43 → 69/62; ход 17 — Molten
+   * Rock 33/23, тело 71/74 → 104/97. Цена — `INTERACTABLE_OBJECT_COST=1`.
+   * Игрок жал её на каждом ходу, где тело стояло на борде, а советник молчал:
+   * в тексте нет ни «+N», ни «get/summon».
+   */
+  readonly nextBuyStatsWords: readonly string[];
+  /**
+   * Сила-УГАДЫВАНИЕ: «Look at 2 minions. Guess which one your next opponent
+   * had last combat for a Tavern Coin» («Наемный детектив»
+   * `BG23_HERO_303p2`, part26 и part57).
+   *
+   * Ценность вариантов тут ни при чём: награда — монета за верный ответ,
+   * и советовать надо ДОКАЗАТЕЛЬСТВОМ — виденным бордом соперника, — а не
+   * пользой карты (жалоба игрока по part57, кадр 18:03).
+   */
+  readonly opponentGuessWords: readonly string[];
 
   /**
    * ЗАМОК на добытом миньоне: «Discover a minion of your Tier. Lock it
@@ -2184,6 +2206,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\breplace\\s+it\\s+with\\s+an?\\s+(golden\\s+)?fishbait\\s+for\\s+your\\s+left-\\s*most\\s+([a-z]+)\\s+to\\s+attack\\b',
   ],
   fishbaitBuff: 5,
+  nextBuyStatsWords: [
+    '\\bgain\\s+(double\\s+)?the\\s+stats\\s+of\\s+the\\s+next\\s+minion\\s+you\\s+buy\\s+this\\s+turn\\b',
+  ],
+  opponentGuessWords: ['\\bguess\\s+which\\s+one\\s+your\\s+next\\s+opponent\\s+had\\b'],
   // «Lock it in your hand for 1 turn», «…for {0} turn» (Timewarped Beanstalk).
   lockInHandWords: ['\\block\\s+it\\s+in\\s+your\\s+hand\\s+for\\s+(?:\\{(\\d)\\}|(\\d+))\\s+turns?\\b'],
 

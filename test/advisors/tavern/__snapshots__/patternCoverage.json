@@ -546,6 +546,14 @@
    "TB_BaconShop_HP_101",
    "TB_BaconShop_HP_103"
   ],
+  "nextBuyStatsWords": [
+   "BG36_180",
+   "BG36_180_G"
+  ],
+  "opponentGuessWords": [
+   "BG23_HERO_303p2",
+   "BG27_Anomaly_555"
+  ],
   "selfAuraWords": 51,
   "selfTriggerWords": 65,
   "sellValueWords": 61,

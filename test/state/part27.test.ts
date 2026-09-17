@@ -220,21 +220,44 @@ describe('part27: заморозка после покупки, цель про�
    * полон, обновление бесплатно — и причина «покупать нечего» обещала
    * покупку, которой быть не могло. Обновление, после которого не на что
    * купить, годится только под заморозку, и цель обязана быть названа.
+   *
+   * 17.09 (part57) вердикт по самому кадру сменился, и прав оказался игрок:
+   * бесплатное обновление этого хода — из ЗАПАСА Leaf Through the Pages
+   * (ход 17), а запас переходит на следующий ход (`freeRefreshes`: на ходу
+   * 21 кнопка пришла с остатком 1 и потрачена в 16:33:03). Потраченное
+   * при нуле золота, оно отнимает обновление у хода с золотом.
    */
-  it('пункт 3: обновление при нуле золота называет цель заморозки', () => {
+  it('пункт 3: запасное бесплатное обновление при нуле золота не тратится', () => {
     expect(zeroGold).not.toBeNull();
     if (zeroGold === null) return;
 
     expect(zeroGold.rerollCost).toBe(0);
-    expect(zeroGold.board).toHaveLength(7);
+    expect(zeroGold.gold).toBe(0);
+    expect(zeroGold.freeRefreshes).toBeGreaterThan(0);
+    expect(rerollRule(zeroGold, { cards })).toBeNull();
+    const advice = adviseTavern(zeroGold, { cards });
+    expect(advice?.recommendations.some((r) => r.action === 'reroll')).toBe(false);
+  });
+
+  /**
+   * Ветка D025 остаётся для бесплатного обновления БЕЗ запаса — у эффектов
+   * «Refreshing the Tavern is free», которые счётчика не тратят. Проверяется
+   * на том же кадре с `freeRefreshes: 0`.
+   */
+  it('пункт 3: бесплатное обновление без запаса называет цель заморозки', () => {
+    expect(zeroGold).not.toBeNull();
+    if (zeroGold === null) return;
+    const unstocked: GameState = { ...zeroGold, freeRefreshes: 0 };
+
+    expect(unstocked.board).toHaveLength(7);
     // Две пары: Bigwig Bandit (тир 4) на борде и в руке, Dual-Wield Corsair
     // (тир 5) дважды на борде. Называется старшая по тиру — обе витрина
     // пятого тира предложить может.
-    expect(zeroGold.board.some((m) => m.cardId === 'BG33_822')).toBe(true);
-    expect(zeroGold.hand.some((m) => m.cardId === 'BG33_822')).toBe(true);
-    expect(zeroGold.board.filter((m) => m.cardId === 'BG31_824')).toHaveLength(2);
+    expect(unstocked.board.some((m) => m.cardId === 'BG33_822')).toBe(true);
+    expect(unstocked.hand.some((m) => m.cardId === 'BG33_822')).toBe(true);
+    expect(unstocked.board.filter((m) => m.cardId === 'BG31_824')).toHaveLength(2);
 
-    const reroll = rerollRule(zeroGold, { cards });
+    const reroll = rerollRule(unstocked, { cards });
     expect(reroll?.action).toBe('reroll');
     expect(reroll?.reason).toContain('купить нечего и после обновления');
     expect(reroll?.reason).toContain('искать под заморозку третью копию Dual-Wield Corsair');
@@ -249,6 +272,7 @@ describe('part27: заморозка после покупки, цель про�
     const corsairs = zeroGold.board.filter((m) => m.cardId === 'BG31_824');
     const lonely: GameState = {
       ...zeroGold,
+      freeRefreshes: 0,
       hand: zeroGold.hand.filter((m) => m.cardId !== 'BG33_822'),
       board: zeroGold.board.map((m) =>
         m.entityId === corsairs[1]?.entityId ? { ...m, golden: true } : m,
@@ -269,6 +293,7 @@ describe('part27: заморозка после покупки, цель про�
     const corsairs = zeroGold.board.filter((m) => m.cardId === 'BG31_824');
     const roomy: GameState = {
       ...zeroGold,
+      freeRefreshes: 0,
       hand: zeroGold.hand.filter((m) => m.cardId !== 'BG33_822'),
       board: zeroGold.board.filter((m) => m.entityId !== corsairs[1]?.entityId),
     };

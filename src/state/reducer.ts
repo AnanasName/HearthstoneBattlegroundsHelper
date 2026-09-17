@@ -77,6 +77,9 @@ const DARK_GIFT_BUTTON = 'BG36_Button_DarkGift';
 /** Кнопка обновления витрины — её `COST` и есть живая цена реролла. */
 const REROLL_BUTTON = 'TB_BaconShop_8p_Reroll_Button';
 
+/** Энчант игрока с запасом бесплатных обновлений (`BACON_FREE_REFRESH_COUNT`). */
+const FREE_REFRESH_ENCHANT = 'Bacon_Free_Refresh_Player_Ench';
+
 /**
  * Перетаскиватели покупки и продажи: блок `PLAY` на них несёт карту-цель
  * в `Target=[…]` (part17: 19 покупок миньонов, 9 заклинаний, 44 продажи —
@@ -1231,6 +1234,21 @@ export function createReducer(players: Players): Reducer {
   };
 
   /**
+   * Запас бесплатных обновлений — счётчик на своём энчанте, а не на кнопке:
+   * кнопка на бой обнуляется и в новом ходу приходит новой сущностью,
+   * а энчант держит остаток через смену хода (part57, см. `freeRefreshes`).
+   */
+  const freeRefreshStock = (): number => {
+    const self = players.selfPlayerId;
+    if (self === null) return 0;
+    for (const e of entities.values()) {
+      if (e.controller !== self || e.cardId !== FREE_REFRESH_ENCHANT) continue;
+      return e.tags.get('BACON_FREE_REFRESH_COUNT') ?? 0;
+    }
+    return 0;
+  };
+
+  /**
    * Кнопка тёмного дара, если она сейчас есть И заряды не исчерпаны:
    * цена нажатия и число оставшихся зарядов.
    */
@@ -1446,6 +1464,7 @@ export function createReducer(players: Players): Reducer {
       tavernUpgradeCost: upgrade.cost,
       tavernUpgradeTarget: upgrade.target,
       rerollCost: rerollButton(),
+      freeRefreshes: freeRefreshStock(),
       maxTechLevel,
       // Остаток, а не выданное на ход: в игре слева от дроби показан именно он.
       // Временное золото (`TEMP_RESOURCES`) входит в остаток, как в игре

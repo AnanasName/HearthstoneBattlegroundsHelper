@@ -635,6 +635,22 @@ export interface GameState {
    * `null` — кнопки в PLAY нет (бой, конец партии), берётся таблица.
    */
   readonly rerollCost: number | null;
+  /**
+   * Бесплатные обновления В ЗАПАСЕ — тег `BACON_FREE_REFRESH_COUNT`
+   * на своей сущности-энчанте `Bacon_Free_Refresh_Player_Ench`.
+   *
+   * Запас не сгорает с концом хода: по всем фикстурам счётчик энчанта
+   * ни разу не упал иначе как нажатием обновления, и 93 хода таверны
+   * начались с перенесённым остатком (part57: Leaf Through the Pages
+   * на ходу 15, одно обновление осталось и потрачено на ходу 17). Кнопка
+   * несёт тот же счётчик, но на бой обнуляется и приходит новой сущностью,
+   * поэтому читается энчант. Отсюда цена такого «бесплатного» обновления:
+   * потраченное при нуле золота, оно отнимает обновление у хода, где
+   * найденное будет на что купить.
+   *
+   * `0` — запаса нет или энчанта ещё нет.
+   */
+  readonly freeRefreshes: number;
   /** Предел тира в этой партии — тег `BACON_MAX_PLAYER_TECH_LEVEL`, в фикстурах 6. */
   readonly maxTechLevel: number | null;
   /**
@@ -919,6 +935,7 @@ export const EMPTY_STATE: GameState = {
   tavernUpgradeCost: null,
   tavernUpgradeTarget: null,
   rerollCost: null,
+  freeRefreshes: 0,
   maxTechLevel: null,
   gold: 0,
   goldTotal: 0,

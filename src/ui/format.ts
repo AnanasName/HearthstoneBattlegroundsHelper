@@ -76,7 +76,16 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
       : r.spellCardId != null
         ? ` ${cards.info(r.spellCardId)?.name ?? r.spellCardId}`
         : '';
-  const price = r.cost > 0 ? ` за ${String(r.cost)}` : '';
+  // Активация, забирающая статы следующей покупки, — шаг «нажать, затем
+  // купить» (part57): цены у половин свои, и покупка названа словами.
+  const then = r.thenBuys ?? null;
+  const ownCost = then === null ? r.cost : r.cost - then.cost;
+  const price = ownCost > 0 ? ` за ${String(ownCost)}` : '';
+  const thenBuy =
+    then === null
+      ? ''
+      : ` → затем ${ACTION_LABEL.buy} ${minionLabel(then.minion, cards)}` +
+        (then.cost > 0 ? ` за ${String(then.cost)}` : '');
   const victim = r.sellFirst === null ? '' : `, продав ${minionLabel(r.sellFirst, cards)}`;
   const magnet =
     r.magnetizeTo == null ? '' : `, примагнитив к ${minionLabel(r.magnetizeTo, cards)}`;
@@ -123,7 +132,7 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // и без этих слов план противоречил бы списку на глазах у игрока — тот
   // самый класс подачи, из-за которого пропадал скрытый шаг усиления.
   const burning = r.blockedByHp === true ? ' — иначе золото сгорает' : '';
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${pair}${goal}${pick}${discount}${burning}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${thenBuy}${victim}${magnet}${target}${pair}${goal}${pick}${discount}${burning}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

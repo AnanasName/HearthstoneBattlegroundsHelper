@@ -700,8 +700,11 @@ function marksView(input: ViewInput): OverlayMark[] {
     });
   };
 
-  const priced = (rec: Recommendation): string =>
-    rec.cost > 0 ? `${ACTION_LABEL[rec.action]} · ${String(rec.cost)}` : ACTION_LABEL[rec.action];
+  const priced = (rec: Recommendation): string => {
+    // У шага «активировать, затем купить» покупка подписана на своей карте.
+    const cost = rec.cost - (rec.thenBuys?.cost ?? 0);
+    return cost > 0 ? `${ACTION_LABEL[rec.action]} · ${String(cost)}` : ACTION_LABEL[rec.action];
+  };
 
   const apply = (rec: Recommendation, step: number | null): void => {
     const which = buttonOf(rec.action);
@@ -757,6 +760,12 @@ function marksView(input: ViewInput): OverlayMark[] {
     place(rec.sellFirst, 'sell', ACTION_LABEL.sell, null);
     place(rec.targetMinion ?? null, 'target', 'ЦЕЛЬ', null);
     place(rec.magnetizeTo ?? null, 'target', 'НОСИТЕЛЬ', null);
+    // Покупка, которую активация делает следом (part57), — карта витрины
+    // с кольцом покупки: её статы и заберёт нажатое тело.
+    const then = rec.thenBuys ?? null;
+    if (then !== null) {
+      place(then.minion, toneOf('buy'), `${ACTION_LABEL.buy} · ${String(then.cost)}`, null);
+    }
   };
 
   const steps = input.spendPlan?.steps ?? [];

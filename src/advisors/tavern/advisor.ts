@@ -236,6 +236,29 @@ export interface Recommendation {
     readonly health: number;
   }[];
   /**
+   * Покупка, которую шаг делает СРАЗУ ПОСЛЕ активации, — у активации,
+   * забирающей статы следующей покупки (Living Prison, part57). `cost` —
+   * цена самой покупки; цена шага (`cost` совета) — активация плюс покупка.
+   *
+   * Одним шагом, а не двумя, потому что порядок тут и есть весь смысл:
+   * купленное ДО нажатия статов не отдаёт, а план выбирает шаги по очкам
+   * и покупку поставил бы первой. Так же устроена прокрутка.
+   */
+  readonly thenBuys?: {
+    readonly minion: Minion;
+    readonly cost: number;
+    /**
+     * Очки САМОЙ покупки, без прибавки статов активации.
+     *
+     * Нужны штрафу за отменённый шаг (D222): продажа купленного отменяет
+     * покупку, но НЕ прибавку — снятые статы постоянны и продажу тела
+     * переживают (part57: Living Prison 41/43 → 69/62 после Fire Baller,
+     * и сам Fire Baller потом продан). Штраф на очки всего шага был бы
+     * переоценкой в другую сторону.
+     */
+    readonly score: number;
+  };
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется у подъёма таверны и у прокрутки — у обоих по одной причине:
@@ -2381,6 +2404,50 @@ export function rerollCostOf(state: GameState, rules: TavernRules = DEFAULT_TAVE
 }
 
 /**
+ * Базовая карта миньона: золотая копия носит суффикс `_G`.
+ *
+ * Одно определение на всех, кто сравнивает карты по имени: заморозку
+ * (одноимённые и копии) и угадывание соперника (карта с виденного борда,
+ * где золотые тела — норма). Второе такое же рядом — ровно тот способ,
+ * которым правила расходятся молча.
+ */
+export function baseMinionCardId(cardId: string): string {
+  return cardId.endsWith('_G') ? cardId.slice(0, -2) : cardId;
+}
+
+/**
+ * Бесплатное обновление берётся из ЗАПАСА, а запас не сгорает с концом хода
+ * (`GameState.freeRefreshes`, part57 ход 15).
+ *
+ * Такое обновление бесплатно только в золоте. Потраченное сейчас, когда
+ * найденное не на что купить, оно отнимает обновление у следующего хода,
+ * где на находку будет золото: число взглядов на витрину то же (сейчас
+ * плюс свежая витрина хода против свежей витрины плюс запасное), а купить
+ * можно будет всё, а не только то, что удержит заморозка. Заморозка к тому же
+ * съедает свежую витрину следующего хода. Игрок говорил об этом четырежды
+ * (part27, part37, part38, part57), и в part38 сыграл ровно так: сберёг
+ * обновление и на следующем ходу нашёл третью копию.
+ */
+function spendsStoredRefresh(state: GameState, rules: TavernRules): boolean {
+  return rerollCostOf(state, rules) === 0 && state.freeRefreshes > 0;
+}
+
+/**
+ * Чего стоит ОДНО подаренное обновление («Gain 2 free Refreshes»).
+ *
+ * Обычно — живая цена кнопки (D033): нулевая цена значит, что дарить
+ * нечего. Но ЗАПАС сам роняет кнопку в ноль (part57, 18:11:46: счётчик 2
+ * и тут же `COST=0`), а запас не сгорает — к моменту, когда он кончится,
+ * обновление снова будет стоить своё (D244). По живой цене второй такой
+ * подарок стоил бы ровно ничего, и советник молчал бы именно там, где сам
+ * же бережёт запас. Поэтому при непустом запасе берётся цена из правил.
+ */
+function refreshWorth(state: GameState, rules: TavernRules): number {
+  const live = rerollCostOf(state, rules);
+  return live === 0 && state.freeRefreshes > 0 ? rules.rerollCost : live;
+}
+
+/**
  * Есть ли смысл в ПЛАТНОМ обновлении витрины прямо сейчас.
  *
  * Смысл появляется, когда найденное будет на что купить: обновление ради
@@ -4041,6 +4108,8 @@ export function rerollRule(
   // «Не на что» — по самому дешёвому товару таверны, а не по миньону:
   // на два золота покупается заклинание витрины (part12, ход 19).
   const cannotBuy = state.gold - cost < rules.cheapestShopPrice;
+  // Запасное бесплатное обновление ждёт хода с золотом (part57, ход 15).
+  if (cannotBuy && spendsStoredRefresh(state, rules)) return null;
   const freezeGoal = cannotBuy ? rerollFreezeGoal(state, deps, rules) : null;
   if (cannotBuy && freezeGoal === null) return null;
 
@@ -4168,7 +4237,7 @@ export function freezeRule(
   // где свои — она же на борде и амальгама. Одноимённость сверяется по
   // базовому cardId: золотая копия носит суффикс `_G` и без нормализации
   // считалась «другой картой» (ход 13, дракончик при золотом дракончике).
-  const baseCardId = (id: string): string => (id.endsWith('_G') ? id.slice(0, -2) : id);
+  const baseCardId = baseMinionCardId;
   const strictMates = (candidate: Minion): number => {
     const mine = racesOf(candidate, deps.cards).filter((r) => r !== RACE_ALL);
     return state.board.filter((m) => {
@@ -6661,11 +6730,138 @@ function fishbaitOf(
   };
 }
 
+/**
+ * Активация, забирающая статы СЛЕДУЮЩЕЙ ПОКУПКИ (Living Prison, part57), —
+ * одним шагом «нажать, затем купить».
+ *
+ * Покупка берётся из советов покупки, а не из витрины напрямую: у них уже
+ * посчитаны живая цена, ценность тела и продажа на полном борде. Из них
+ * выбирается та, где ценность покупки ВМЕСТЕ с прибавкой телу больше:
+ * игрок так и делал — жал активацию и брал самую крупную карту витрины
+ * (ход 15 — Fire Baller 28/19, ход 17 — Molten Rock 33/23).
+ *
+ * Магнитные покупки и покупки, продающие само тело, не берутся: первые
+ * план кладёт на носителя, а не в слот, вторые уносят прибавку с собой.
+ */
+function nextBuyStatsStep(
+  minion: Minion,
+  effectText: string,
+  cost: number,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  buys: readonly Recommendation[],
+): Recommendation | null {
+  const found = firstMatchAll(rules.nextBuyStatsWords, effectText);
+  if (found === null) return null;
+  const times = found[1] !== undefined ? 2 : 1;
+
+  let best: { buy: Recommendation; bought: Minion; score: number } | null = null;
+  for (const buy of buys) {
+    const bought = buy.minion;
+    if (buy.action !== 'buy' || bought === null || buy.magnetizeTo != null) continue;
+    if (buy.sellFirst?.entityId === minion.entityId) continue;
+    const refund = buy.sellFirst === null ? 0 : rules.sellGold;
+    if (cost + buy.cost - refund > state.gold) continue;
+    const gain = ((bought.attack ?? 0) + (bought.health ?? 0)) * times;
+    const score = buy.score + gain * rules.value.perStatPoint - cost * rules.goldPointValue;
+    if (best === null || score > best.score) best = { buy, bought, score };
+  }
+  if (best === null || best.score <= best.buy.score) return null;
+
+  const { buy, bought } = best;
+  const attack = (bought.attack ?? 0) * times;
+  const health = (bought.health ?? 0) * times;
+  const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
+  const boughtName = deps.cards.info(bought.cardId)?.name ?? bought.cardId;
+  return {
+    action: 'activate',
+    minion,
+    score: best.score,
+    cost: cost + buy.cost,
+    requiresSlot: buy.requiresSlot,
+    sellFirst: buy.sellFirst,
+    thenBuys: { minion: bought, cost: buy.cost, score: buy.score },
+    boardGains: [{ entityId: minion.entityId, attack, health }],
+    // Покупка остаётся покупкой для силы героя: счётчик и скидка — её.
+    ...(buy.heroPowerCostAfter === undefined ? {} : { heroPowerCostAfter: buy.heroPowerCostAfter }),
+    ...(buy.heroPowerBuyLeft === undefined ? {} : { heroPowerBuyLeft: buy.heroPowerBuyLeft }),
+    reason:
+      `активация ${name} за ${String(cost)}, затем покупка ${boughtName} за ` +
+      `${String(buy.cost)}: тело заберёт её статы, +${String(attack)}/+${String(health)}; ` +
+      `купленное ДО нажатия статов не отдаёт`,
+  };
+}
+
+/**
+ * ВИСЯЩАЯ прибавка: активация «заберёт статы следующей покупки» уже нажата,
+ * а покупки ещё не было (part57: между нажатием и покупкой 7 секунд
+ * на ходах 13, 15 и 17 — и всё это время оверлей пересчитывается).
+ *
+ * Без этого в окне между половинами шага покупки ранжируются ДРУГОЙ целевой
+ * функцией: сам шаг выбирает покупку по «ценность плюс полные статы»,
+ * а после нажатия остаётся обычная ценность, где статы весят вдвое меньше.
+ * То есть совет после нажатия становился хуже, чем до.
+ *
+ * Читается ЖУРНАЛОМ действий, а не догадкой: активация этого хода, после
+ * которой покупки не было. Возвращает множитель прибавки (1, у золотой 2)
+ * или 0, если висящей прибавки нет.
+ */
+function pendingNextBuyStats(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): number {
+  let times = 0;
+  for (const action of state.actions) {
+    if (action.turn !== state.turn) continue;
+    // Покупка ПОГЛОЩАЕТ прибавку — какая бы она ни была.
+    if (action.type === 'buy') {
+      times = 0;
+      continue;
+    }
+    if (action.type !== 'activate' || action.cardId === null) continue;
+    const text = deps.cards.info(action.cardId)?.text ?? '';
+    const found = firstMatchAll(rules.nextBuyStatsWords, text);
+    if (found !== null) times = found[1] !== undefined ? 2 : 1;
+  }
+  return times;
+}
+
+/**
+ * Очки покупок с висящей прибавкой: тело достанется ещё и активированному
+ * миньону, и это ровно та же арифметика, что внутри шага «нажать, затем
+ * купить», — иначе два соседних состояния одной игры судятся по-разному.
+ */
+function withPendingNextBuyStats(
+  buys: readonly Recommendation[],
+  times: number,
+  rules: TavernRules,
+): Recommendation[] {
+  return buys.map((rec) => {
+    const minion = rec.minion;
+    if (rec.action !== 'buy' || minion === null) return rec;
+    const attack = (minion.attack ?? 0) * times;
+    const health = (minion.health ?? 0) * times;
+    const gain = attack + health;
+    if (gain <= 0) return rec;
+    return {
+      ...rec,
+      score: rec.score + gain * rules.value.perStatPoint,
+      reason:
+        `${rec.reason}; активация уже нажата — её тело заберёт эти статы, ` +
+        `+${String(attack)}/+${String(health)}`,
+    };
+  });
+}
+
 export function activationRules(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
+  buys?: readonly Recommendation[],
 ): Recommendation[] {
+  let buyList = buys;
   return state.board.flatMap((minion) => {
     if ((minion.tags['HAS_ACTIVATE_POWER'] ?? 0) <= 0) return [];
     if (state.activatedEntityIds.includes(minion.entityId)) return [];
@@ -6676,6 +6872,14 @@ export function activationRules(
     const info = deps.cards.info(minion.cardId);
     const effectText = activateEffectText(minion, deps.cards);
     if (effectText === null) return [];
+
+    // «Gain the stats of the next minion you buy this turn» (part57): у этой
+    // активации своя ветка — шаг включает саму покупку.
+    if (rules.nextBuyStatsWords.some((w) => new RegExp(w, 'i').test(effectText))) {
+      buyList ??= buyRules(state, deps, rules);
+      const step = nextBuyStatsStep(minion, effectText, cost, state, deps, rules, buyList);
+      return step === null ? [] : [step];
+    }
 
     // Тот же разбор, что у заклинаний: литералы и плейсхолдеры-индексы
     // в теги NUM — только теги здесь живут на самом миньоне.
@@ -7818,7 +8022,7 @@ function branchValue(
   // the Pages (part23): при уже бесплатных обновлениях дарить нечего.
   const refresh = firstMatch(rules.freeRefreshWords, text);
   if (refresh !== null && refresh !== '') {
-    const price = rerollCostOf(state, rules);
+    const price = refreshWorth(state, rules);
     return {
       score: Number(refresh) * price * rules.goldPointValue,
       note: `${refresh} бесплатных обновлений по цене ${String(price)}`,
@@ -9124,7 +9328,7 @@ export function shopSpellRules(
       // Цена обновления читается с кнопки и бывает нулевой; неизвестной она
       // быть не может — в таверне кнопка есть всегда, а `null` тут значит
       // «мы её ещё не видели», и выдумывать цену вместо неё нельзя.
-      const perRefresh = state.rerollCost;
+      const perRefresh = state.rerollCost === null ? null : refreshWorth(state, rules);
       const count = Number(refresh);
       if (perRefresh === null || !Number.isFinite(count)) return [];
       const netGold = count * perRefresh - goldCost;
@@ -9845,6 +10049,68 @@ function wagerAdvice(
   return sorted;
 }
 
+/**
+ * Совет по угадыванию «какой миньон был у следующего соперника в прошлом
+ * бою» («Наемный детектив», part57) — только доказательством.
+ *
+ * Польза карты здесь ни при чём: награда — монета за верный ответ, какой
+ * бы из двух миньонов ни был назван (жалоба игрока: «я должен выбрать
+ * карту, которая у соперника, а не по полезности»). Доказательство одно
+ * и честное — борд этого соперника, виденный в нашем бою с ним. Совпал
+ * вариант с картой того борда — он и называется. Не совпал ни один или
+ * борда мы не видели — порядок не выдумывается.
+ *
+ * Племя виденного борда в доказательства НЕ взято: на part57 (ход 15) оно
+ * указало бы на неверный вариант, а верных примеров у него нет.
+ *
+ * ОТВЕТ ИГРЫ НЕ ЧИТАЕТСЯ, хотя лог его выдаёт: до выбора на правильном
+ * варианте стоит тег `3257=1` (девять угадываний из девяти, part26
+ * и part57). Экран игры его не показывает, и совет по нему — уже не
+ * помощь, а подсмотренный ответ: решение D243.
+ */
+function opponentGuessAdvice(
+  options: readonly ChoiceOption[],
+  state: GameState,
+  deps: TavernAdvisorDeps,
+): ChoiceAdvice[] {
+  const next = state.nextOpponentPlayerId;
+  const player = next === null ? undefined : state.lobby[next];
+  const who =
+    player === undefined ? 'соперника' : (deps.cards.info(player.heroCardId)?.name ?? 'соперника');
+  const board = next === null ? undefined : state.lastSeenBoards[next];
+  const seenTurn = next === null ? undefined : state.lastSeenBoardTurns[next];
+  const ago = seenTurn === undefined ? '' : `${String(state.turn - seenTurn)} ходов назад`;
+  // Сравнение по БАЗОВОЙ карте: на чужом борде поздних ходов золотые тела —
+  // норма, а варианты угадывания приходят простыми картами. Без нормализации
+  // советник отрицал бы ровно ту карту, которая у соперника была.
+  const seen = new Set((board ?? []).map((m) => baseMinionCardId(m.cardId)));
+  const hits = options.filter((o) => seen.has(baseMinionCardId(o.cardId)));
+
+  return options
+    .map((option) => {
+      const name = deps.cards.info(option.cardId)?.name ?? option.cardId;
+      const hit = hits.includes(option);
+      const reason =
+        board === undefined
+          ? `угадывание на монету: борда ${who} мы не видели, польза карты не важна`
+          : hit
+            ? hits.length === 1
+              ? `был на борде ${who} ${ago} — угадываем его`
+              : `был на борде ${who} ${ago}, но там были оба варианта`
+            : hits.length > 0
+              ? `на борде ${who} ${ago} его не было`
+              : `угадывание на монету: на борде ${who} ${ago} не было ни одного варианта`;
+      return {
+        option,
+        name,
+        value: null,
+        score: hit && hits.length === 1 ? 1 : null,
+        reason,
+      };
+    })
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+}
+
 /** Один вариант открытого выбора «возьмите одно из» с оценкой. */
 export interface ChoiceAdvice {
   readonly option: ChoiceOption;
@@ -9897,6 +10163,13 @@ export function choiceAdvice(
     choice.options.every((o) => deps.cards.info(o.cardId)?.type === 'HERO')
   ) {
     return wagerAdvice(choice.options, state, deps);
+  }
+
+  // Угадывание миньона следующего соперника (part57): ранжируется
+  // доказательством, а не ценностью карт.
+  const sourceText = deps.cards.info(choice.sourceCardId ?? '')?.text ?? '';
+  if (rules.opponentGuessWords.some((w) => new RegExp(w, 'i').test(sourceText))) {
+    return opponentGuessAdvice(choice.options, state, deps);
   }
 
   // Выбор из СИЛ ГЕРОЯ — отдельный случай: так меняет силу Мастер Нгуен,
@@ -10172,7 +10445,13 @@ export function adviseTavern(
     };
   }
 
-  const buys = buyRules(state, deps, rules);
+  // Активация «заберёт статы следующей покупки» уже нажата (part57): покупки
+  // судятся той же арифметикой, что внутри шага «нажать, затем купить».
+  const pending = pendingNextBuyStats(state, deps, rules);
+  const buys =
+    pending > 0
+      ? withPendingNextBuyStats(buyRules(state, deps, rules), pending, rules)
+      : buyRules(state, deps, rules);
   const plays = playRules(state, deps, rules);
   const recommendations: Recommendation[] = [
     ...buys,
@@ -10191,7 +10470,7 @@ export function adviseTavern(
     heroPowerGoldRule(state, deps, rules),
     heroPowerShotRule(state, deps, rules),
     heroPowerUpgradeRule(state, deps, rules),
-    ...activationRules(state, deps, rules),
+    ...activationRules(state, deps, rules, buys),
     darkGiftRule(state, deps, rules),
     spinRule(state, deps, rules, buys),
     sellRule(state, deps, rules),
@@ -10227,6 +10506,8 @@ export function adviseTavern(
     // на один реролл в ранней партии — нет (part18, ход 7).
     paidRerollIsUseful(state, rules) &&
     (!idleCannotBuy || idleGoal !== null) &&
+    // Запасное бесплатное обновление ждёт хода с золотом (part57, ход 15).
+    !(idleCannotBuy && spendsStoredRefresh(state, rules)) &&
     state.shop.some((m) => !m.frozen)
   ) {
     const idlePrice =

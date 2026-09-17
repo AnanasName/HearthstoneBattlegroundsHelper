@@ -39,6 +39,21 @@ function withHeroPowerBuyCounted(state: GameState, rec: Recommendation): GameSta
 }
 
 /**
+ * Журнал действий гипотетического состояния с ЭТОЙ покупкой.
+ *
+ * Нужен висящей прибавке активации (part57, D245): она читается журналом
+ * («активация этого хода, после которой покупки не было»), и без отметки
+ * покупки прибавку получала бы КАЖДАЯ покупка цепочки, хотя съедает её
+ * первая.
+ */
+function withBuyLogged(state: GameState, minion: Minion): GameState['actions'] {
+  return [
+    ...state.actions,
+    { turn: state.turn, type: 'buy', cardId: minion.cardId, entityId: minion.entityId, subOption: null },
+  ];
+}
+
+/**
  * Борд после шага, чья прибавка известна числом по сущностям
  * (`Recommendation.boardGains`, part56): сила Вольджина, приманка
  * Lurking Lionfish. Без прибавок — тот же борд.
@@ -291,6 +306,9 @@ export function applyRecommendation(
           shop,
           board: room ? [...board, rec.minion] : board,
           hand: room ? state.hand : [...state.hand, rec.minion],
+          // Покупка отмечается в журнале: висящая прибавка активации
+          // достаётся ПЕРВОЙ покупке, а не каждой в цепочке (part57).
+          actions: withBuyLogged(state, rec.minion),
           // Клич, дешевящий заклинание витрины (Зловещая пророчица, part49):
           // скидка достаётся плану ТОЛЬКО когда миньон встаёт на борд —
           // клич срабатывает розыгрышем, а на полном борде без продажи
@@ -487,13 +505,41 @@ export function applyRecommendation(
       // Приманка Lurking Lionfish (part56) известна числом: прибавки ложатся
       // на борд, а карта витрины, которую заменила приманка, из неё уходит.
       const baited = rec.boardGains !== undefined;
+      const activated =
+        rec.minion === null
+          ? state.activatedEntityIds
+          : [...state.activatedEntityIds, rec.minion.entityId];
+      // Активация, забирающая статы следующей покупки (part57), делает эту
+      // покупку тем же шагом: карта уходит из витрины на борд, а на полном
+      // борде — в руку, как у обычной покупки; продажа возвращает золото.
+      const bought = rec.thenBuys?.minion ?? null;
+      if (bought !== null) {
+        const sold = rec.sellFirst;
+        const board = withBoardGains(
+          sold === null ? state.board : withoutEntity(state.board, sold.entityId),
+          rec.boardGains,
+        );
+        const room = board.length < rules.boardSize;
+        return {
+          state: paid({
+            gold: state.gold - rec.cost + (sold === null ? 0 : rules.sellGold),
+            activatedEntityIds: activated,
+            shop: withoutEntity(state.shop, bought.entityId),
+            board: room ? [...board, bought] : board,
+            hand: room ? state.hand : [...state.hand, bought],
+            // Прибавка этим шагом уже снята — следующая покупка её не получит.
+            actions: withBuyLogged(state, bought),
+            // Поля счётчика и скидки силы шаг унёс из совета покупки.
+            hero: withHeroPowerBuyCounted(state, rec),
+          }),
+          opaque: false,
+          terminal: false,
+        };
+      }
       const replaced = baited ? (rec.targetMinion ?? null) : null;
       return {
         state: paid({
-          activatedEntityIds:
-            rec.minion === null
-              ? state.activatedEntityIds
-              : [...state.activatedEntityIds, rec.minion.entityId],
+          activatedEntityIds: activated,
           // Обещанное к следующему ходу золото — туда же, куда его пишет игра.
           extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
           board: withBoardGains(state.board, rec.boardGains),
@@ -964,6 +1010,29 @@ export function undoneValue(
     }
     if ((rec.action === 'buy' || rec.action === 'play') && rec.minion !== null && rec.magnetizeTo == null) {
       placed.set(rec.minion.entityId, [...(placed.get(rec.minion.entityId) ?? []), { rec, before }]);
+    }
+    // Покупка ВНУТРИ шага «активировать, затем купить» (part57) — такая же
+    // покупка: её отменяет та же продажа. Судится она отдельной записью
+    // с очками и ценой ТОЛЬКО покупки: прибавка статов активации постоянна
+    // и продажу купленного тела переживает, поэтому в штраф не входит.
+    // Без этой ветки цепочка «купил связкой → продал» шла в развилку
+    // как непотраченная (part17, ход 17: штраф 0.00 вместо 21.00).
+    const bought = rec.thenBuys;
+    if (bought !== undefined) {
+      placed.set(bought.minion.entityId, [
+        ...(placed.get(bought.minion.entityId) ?? []),
+        {
+          rec: {
+            ...rec,
+            action: 'buy',
+            minion: bought.minion,
+            cost: bought.cost,
+            standaloneScore: bought.score,
+            thenBuys: undefined,
+          },
+          before,
+        },
+      ]);
     }
   });
   return undone;
