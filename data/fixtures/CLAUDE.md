@@ -647,7 +647,7 @@ Mechagnome Interpreter, Cord Puller ×2, Prodigious Tusker.
 
 Тест — `test/state/part45.test.ts`.
 
-## part46 — Инге Стальной Гимн (06.09.2026, 23:04–23:37, 4-е место)
+## part46 — Инге Стальной Гимн (06.09.2026, 23:04–23:37, 2-е место)
 
 Снята с этой машины и НЕ резалась: в сессии клиента ровно одна партия
 (`GT_BATTLEGROUNDS` один, `GT_RANKED` ноль), доиграна до `FINAL_GAMEOVER`.
