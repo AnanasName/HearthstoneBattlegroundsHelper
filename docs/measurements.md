@@ -5,57 +5,57 @@
 (не в git). В записях о партиях числа не переписываются: там стоит
 вердикт и ссылка сюда.
 
-**Последний полный прогон:** 2026-09-17 08:33, коммит 2c9871f, зерно 1, партий 52 (part4–part55).
-**Сравнимого прошлого прогона нет** — с тем же зерном и тем же набором партий.
+**Последний полный прогон:** 2026-09-17 11:54, коммит d86507e, зерно 1, партий 52 (part4–part55).
+**Сравнивается с:** 2026-09-17 08:33, коммит 2c9871f, зерно 1, партий 52 (part4–part55).
 **Полосы шума нет:** `npm run battery -- --seeds=5` посчитает её один раз на коде.
 
-## validate:tavern · 34 мин
+## validate:tavern · 28 мин
 
 | метрика | было | стало | Δ | шум (SD) | |
 |---|---:|---:|---:|---:|---|
-| turns | — | 516 | — | — |  |
-| agreementPct | — | 75 | — | — |  |
-| costPp | — | 3.18 | — | — |  |
-| decisiveTurns | — | 182 | — | — |  |
-| decisiveAgreementPct | — | 51.1 | — | — |  |
-| decisiveCostPp | — | 8.85 | — | — |  |
-| inSampleTurns | — | 217 | — | — |  |
-| inSampleAgreementPct | — | 76 | — | — |  |
-| inSampleCostPp | — | 2.93 | — | — |  |
-| outOfSampleTurns | — | 299 | — | — |  |
-| outOfSampleAgreementPct | — | 74.2 | — | — |  |
-| outOfSampleCostPp | — | 3.36 | — | — |  |
-| skippedNoBattle | — | 9 | — | — |  |
-| skippedNoChoice | — | 137 | — | — |  |
+| turns | 516 | 516 | 0 | — | без изменений |
+| agreementPct | 75 | 75.2 | 0.2 | — | изменилось |
+| costPp | 3.18 | 3.21 | 0.03 | — | изменилось |
+| decisiveTurns | 182 | 180 | -2 | — | изменилось |
+| decisiveAgreementPct | 51.1 | 51.1 | 0 | — | без изменений |
+| decisiveCostPp | 8.85 | 9.03 | 0.18 | — | изменилось |
+| inSampleTurns | 217 | 217 | 0 | — | без изменений |
+| inSampleAgreementPct | 76 | 76 | 0 | — | без изменений |
+| inSampleCostPp | 2.93 | 3.02 | 0.09 | — | изменилось |
+| outOfSampleTurns | 299 | 299 | 0 | — | без изменений |
+| outOfSampleAgreementPct | 74.2 | 74.6 | 0.4 | — | изменилось |
+| outOfSampleCostPp | 3.36 | 3.34 | -0.02 | — | изменилось |
+| skippedNoBattle | 9 | 9 | 0 | — | без изменений |
+| skippedNoChoice | 137 | 137 | 0 | — | без изменений |
 
-## validate:spend · 39 мин
-
-| метрика | было | стало | Δ | шум (SD) | |
-|---|---:|---:|---:|---:|---|
-| turns | — | 122 | — | — |  |
-| agreementPct | — | 65.6 | — | — |  |
-| costPp | — | 16.2 | — | — |  |
-| decisiveTurns | — | 77 | — | — |  |
-| sameShapeTurns | — | 81 | — | — |  |
-| sameShapeAgreementPct | — | 74.1 | — | — |  |
-| sameShapeCostPp | — | 6.79 | — | — |  |
-| sameShapeDecisiveTurns | — | 42 | — | — |  |
-| goldLeftPlan | — | 0.02 | — | — |  |
-| goldLeftBest | — | 2.16 | — | — |  |
-| inSampleTurns | — | 36 | — | — |  |
-| inSampleAgreementPct | — | 72.2 | — | — |  |
-| outOfSampleTurns | — | 45 | — | — |  |
-| outOfSampleAgreementPct | — | 75.6 | — | — |  |
-| skippedNoBattle | — | 9 | — | — |  |
-| skippedNoChoice | — | 531 | — | — |  |
-
-## calibrate · 18 мин
+## validate:spend · 36 мин
 
 | метрика | было | стало | Δ | шум (SD) | |
 |---|---:|---:|---:|---:|---|
-| battles | — | 669 | — | — |  |
-| actualWinPct | — | 49.5 | — | — |  |
-| meanPredictedWinPct | — | 52.1 | — | — |  |
-| calibrationGapPp | — | 2.7 | — | — |  |
-| brier | — | 0.084 | — | — |  |
-| outliers | — | 28 | — | — |  |
+| turns | 122 | 122 | 0 | — | без изменений |
+| agreementPct | 65.6 | 65.6 | 0 | — | без изменений |
+| costPp | 16.2 | 16.2 | 0 | — | без изменений |
+| decisiveTurns | 77 | 77 | 0 | — | без изменений |
+| sameShapeTurns | 81 | 81 | 0 | — | без изменений |
+| sameShapeAgreementPct | 74.1 | 74.1 | 0 | — | без изменений |
+| sameShapeCostPp | 6.79 | 6.79 | 0 | — | без изменений |
+| sameShapeDecisiveTurns | 42 | 42 | 0 | — | без изменений |
+| goldLeftPlan | 0.02 | 0.02 | 0 | — | без изменений |
+| goldLeftBest | 2.16 | 2.16 | 0 | — | без изменений |
+| inSampleTurns | 36 | 36 | 0 | — | без изменений |
+| inSampleAgreementPct | 72.2 | 72.2 | 0 | — | без изменений |
+| outOfSampleTurns | 45 | 45 | 0 | — | без изменений |
+| outOfSampleAgreementPct | 75.6 | 75.6 | 0 | — | без изменений |
+| skippedNoBattle | 9 | 9 | 0 | — | без изменений |
+| skippedNoChoice | 531 | 531 | 0 | — | без изменений |
+
+## calibrate · 17 мин
+
+| метрика | было | стало | Δ | шум (SD) | |
+|---|---:|---:|---:|---:|---|
+| battles | 669 | 669 | 0 | — | без изменений |
+| actualWinPct | 49.5 | 49.5 | 0 | — | без изменений |
+| meanPredictedWinPct | 52.1 | 52.5 | 0.4 | — | изменилось |
+| calibrationGapPp | 2.7 | 3.1 | 0.4 | — | изменилось |
+| brier | 0.084 | 0.077 | -0.007 | — | изменилось |
+| outliers | 28 | 24 | -4 | — | изменилось |
