@@ -1182,3 +1182,24 @@ export function part54Game(): string {
 export function part55Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part55', 'game.log'), 'utf8');
 }
+
+/**
+ * part56 — Вольджин `BG20_HERO_201`, 17.09.2026, 17:30–17:45, **6-е место**,
+ * 9 ходов таверны, билд 251952.
+ *
+ * Своя сессия клиента (17:29:34), ровно одна партия (`GT_BATTLEGROUNDS`
+ * один, `GT_RANKED` ноль, `CREATE_GAME` канала-источника один), доиграна
+ * до `FINAL_GAMEOVER`; вырезана `fixture:passport --game=1 --write=part56`
+ * сразу после партии, пока игрок не начал следующую.
+ *
+ * Фактура: двухшаговая бесплатная сила «Choose 2 minions. They gain each
+ * other's Attack until next turn» (`BG20_HERO_201p` → `…p2` через
+ * `CHANGE_ENTITY`, первая цель — `TAG_SCRIPT_DATA_NUM_1`), нажатая на карту
+ * ВИТРИНЫ; активация Lurking Lionfish `BG36_201` — приманка Fishbait
+ * `BG36_205` в витрине и удар по ней своего зверя прямо в таверне
+ * (блок `ATTACK`, Rally Wolf Pup срабатывает); Search Through Time
+ * `BG34_330` с замком в руке; тройка Lionfish с золотой копией.
+ */
+export function part56Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part56', 'game.log'), 'utf8');
+}

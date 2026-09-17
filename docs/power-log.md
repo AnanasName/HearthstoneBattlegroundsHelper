@@ -1776,3 +1776,57 @@ per game, summon an exact copy of a friendly minion»), у которой
 по фикстурам самоцветы ложились на зверя (part28, Flittering Bat),
 пирата (part30, Blade Collector) и наг (part18, Abyssal Bruiser
 и Fleeing Fugitive), а не только на квилбоаров.
+
+## Двухшаговая сила: второй шаг — ДРУГАЯ карта (part56)
+
+«Духовный обмен» Вольджина `BG20_HERO_201p`: «Choose 2 minions. They gain
+each other's Attack until next turn». Нажатие одно по смыслу, но блоков
+PLAY два, и между ними сила меняет карту:
+
+```
+D 17:31:32.50… BLOCK_START BlockType=PLAY Entity=[… id=166 … cardId=BG20_HERO_201p …] … Target=[… id=455 … cardId=BG29_888 player=6]
+D 17:31:32.50…     CHANGE_ENTITY - Updating Entity=[… id=166 …] CardID=BG20_HERO_201p2
+D 17:31:32.50…     TAG_CHANGE Entity=[… id=166 …] tag=TAG_SCRIPT_DATA_NUM_1 value=455
+D 17:31:32.50… TAG_CHANGE Entity=[… id=166 …] tag=EXHAUSTED value=1
+D 17:31:32.50… TAG_CHANGE Entity=[… id=166 …] tag=EXHAUSTED value=0
+D 17:31:34.89… BLOCK_START BlockType=PLAY Entity=[… cardId=BG20_HERO_201p2 …] … Target=[… id=453 … cardId=BG36_921 player=14]
+D 17:31:34.89…     TAG_CHANGE Entity=[… id=453 … player=14] tag=ATK value=6
+D 17:31:34.89…     TAG_CHANGE Entity=[… id=455 … player=6] tag=ATK value=6
+D 17:31:34.89…     CHANGE_ENTITY - Updating Entity=[… id=166 …] CardID=BG20_HERO_201p
+D 17:31:34.89… TAG_CHANGE Entity=[… id=166 …] tag=EXHAUSTED value=1
+```
+
+- Между шагами сила — `BG20_HERO_201p2` («Choose a minion. Gain Attack
+  with {0}.»), `EXHAUSTED=0`, id первой цели — `TAG_SCRIPT_DATA_NUM_1`.
+  `TAG_SCRIPT_DATA_NUM_2` — НЕ атака цели: на ходу 17 там 1 при атаке 30.
+- Цель бывает ВИТРИННОЙ (`player=14`, Боб): игрок так жал семь ходов
+  из девяти. Прибавка своему — атака витринного на момент нажатия
+  (энчант `BG20_HERO_201p2e2`, число в `TAG_SCRIPT_DATA_NUM_1`).
+- После второго шага карта возвращается к `…p`, и `EXHAUSTED=1` гасит силу
+  до следующего хода. Всего блоков PLAY в партии — 18 на 9 ходов.
+
+## Удар по приманке — блок `ATTACK` прямо в таверне (part56)
+
+Активация Lurking Lionfish `BG36_201` («Choose a card in the Tavern.
+Replace it with a Fishbait for your left-most Beast to attack»):
+
+```
+D 17:41:37.63… BLOCK_START BlockType=PLAY Entity=[… id=5301 … cardId=BG36_201 player=6] …
+D 17:41:37.63…     TAG_CHANGE Entity=AngryMem#2886 tag=RESOURCES_USED value=7
+D 17:41:37.63…         CHANGE_ENTITY - Updating Entity=[… id=6078 … cardId=BG33_430 player=14] CardID=BG36_205
+D 17:41:37.63…             tag=TAG_SCRIPT_DATA_NUM_1 value=5
+D 17:41:37.63…             tag=TAG_SCRIPT_DATA_NUM_2 value=5
+D 17:41:37.63…         BLOCK_START BlockType=ATTACK Entity=[… id=6086 … cardId=BG36_207 player=6] …
+D 17:41:37.63…             BLOCK_START BlockType=TRIGGER Entity=[… id=6086 … cardId=BG36_207 player=6] …
+```
+
+- Карта витрины превращается `CHANGE_ENTITY` в Fishbait 0/1 `BG36_205`,
+  размер награды — на ней самой, 5/5 все три раза за партию (реализация
+  симулятора Firestone: `fishbaitBuff = 5`, у золотой ×2). До активации
+  сущности приманки нет, и прочитать число заранее негде.
+- Самый левый свой зверь (Wolf Pup) бьёт её блоком `ATTACK` в таверне,
+  и у него срабатывает Rally (энчанты `BG36_207e`, +4/+1 шести соседям).
+  Хрип приманки даёт убийце +5/+5: борд 3/6, 3/4, 3/4, 3/3, 1/3, 1/4, 5/5
+  стал 8/11, 7/5, 7/5, 7/4, 5/4, 5/5, 9/6 — ровно сорок статов.
+- Активация стоит 2 (`INTERACTABLE_OBJECT_COST`), у каждого Lionfish
+  своя: на ходу 15 игрок нажал обе.

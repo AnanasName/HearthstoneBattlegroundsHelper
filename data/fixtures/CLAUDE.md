@@ -948,3 +948,17 @@ Enterprising Escapee: Bounty и Сейфы), Hostile Bounty на четыре т
 Overconfidence, активация Private Investigator (`BACON_PLAYER_EXTRA_GOLD_NEXT_TURN`),
 тринкеты Sunken Anchor и Innkeeper's Hearth (30/30 тела тира 6).
 Тест — `test/state/part55.test.ts`.
+
+`part56` — 17.09, Вольджин `BG20_HERO_201`, **6-е место**, 9 ходов таверны
+(17:30–17:45). Своя сессия клиента 17:29:34, ровно одна партия, доиграна,
+билд 251952; вырезана сразу после партии, пока игрок начинал следующую.
+Кадр игрока — 17:34 (ход 7), в чат, сверен срезом, совпадает с точкой
+решения. Фактура: двухшаговая бесплатная сила «обмен атакой»
+(`BG20_HERO_201p` → `…p2` через `CHANGE_ENTITY`, первая цель
+в `TAG_SCRIPT_DATA_NUM_1`, вторая — часто миньон витрины), активация
+Lurking Lionfish — приманка Fishbait `BG36_205` 5/5 в витрине и удар
+по ней своего Wolf Pup блоком `ATTACK` прямо в таверне (его Rally
+срабатывает), Search Through Time с замком в руке, тройка Lionfish
+(золотой 47/14), тринкеты Ophidian Staff и Beetle Band. Четыре
+проигранных боя подряд с хода 12 (урон 10, 10, 12, 15).
+Тест — `test/state/part56.test.ts`.
