@@ -2676,6 +2676,44 @@ export function weakestOwn(
 }
 
 /**
+ * Почему остаток сгорает на ПОЛНОМ борде — словами, без новых весов
+ * (долг part51, ход 19: «остаётся 10 — сгорит» при покупках по карману).
+ *
+ * Покупок нет законно: `buyRules` требует, чтобы кандидат против борда
+ * без жертвы перевешивал её с запасом `sellMargin`. Строка называет лучшую
+ * такую покупку, жертву и запас — ровно те числа, которыми решено.
+ * Магниты и копии под тройку мест не требуют и сюда не идут: если сгорает
+ * золото при них, причина другая, и строка молчит.
+ */
+export function fullBoardBurnNote(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): string | null {
+  if (state.board.length < rules.boardSize) return null;
+  const victim = weakestOwn(state, deps, rules);
+  if (victim === null) return null;
+  const budget = state.gold + rules.sellGold;
+  const without = state.board.filter((m) => m.entityId !== victim.minion.entityId);
+  const best = state.shop
+    .filter((m) => buyCostOf(m, rules) <= budget && !isMagnetic(m, deps.cards))
+    .map((m) => ({ minion: m, value: minionValue(m, { ...state, board: without }, deps, rules) }))
+    .filter((c) => !c.value.completesTriple && !c.value.tripleBet)
+    .reduce<{ minion: Minion; value: ValueBreakdown } | null>(
+      (a, b) => (a === null || b.value.total > a.value.total ? b : a),
+      null,
+    );
+  if (best === null || best.value.total > victim.value + rules.sellMargin) return null;
+  const name = (m: Minion): string => deps.cards.info(m.cardId)?.name ?? m.cardId;
+  // Строка короткая намеренно: в оверлее она хвост блока плана, а переполнение
+  // панели обрезается молча (D164).
+  return (
+    `борд полон — ${name(best.minion)} (${best.value.total.toFixed(1)}) ` +
+    `не лучше ${name(victim.minion)} (${victim.value.toFixed(1)}) с запасом ${String(rules.sellMargin)}`
+  );
+}
+
+/**
  * Жертва продажи ПО ВЫБОРУ — на неполном борде, ради золотого (part51).
  *
  * На полном борде продажа вынуждена: место под покупку взять неоткуда,

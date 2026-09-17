@@ -7,6 +7,7 @@ import { readTavernTurns } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { reduceLog } from '../../src/state/reducer.js';
 import type { GameState } from '../../src/state/types.js';
+import { spendPlanLine } from '../../src/ui/format.js';
 import { part51Game, part6Game } from '../fixtures.js';
 
 const MINI_MYRMIDON = 'BG23_000';
@@ -78,6 +79,21 @@ describe('part51: продажа ради покупки на неполном �
     const plan = spendPlan(state, { cards });
     expect(plan.steps.map((s) => s.recommendation.action)).toContain('levelUp');
     expect(plan.goldLeft).toBeLessThan(state.gold - 4);
+  }, 240_000);
+
+  /**
+   * Ход 19: «остаётся 10 — сгорит» печаталось без причины, хотя покупок нет
+   * законно — на полном борде лучшая покупка не перевешивает слабейшего
+   * своего с запасом `sellMargin`. Строка теперь называет эти числа.
+   */
+  it('ход 19: сгорающее золото на полном борде называет причину', () => {
+    const plan = spendPlan(decisionPoint(19), { cards });
+    expect(plan.truncated).toBe(false);
+    expect(plan.goldLeft).toBe(10);
+    expect(spendPlanLine(plan, cards)).toContain(
+      'остаётся 10 — сгорит: борд полон — Felfire Conjurer (27.0) ' +
+        'не лучше Ashen Corruptor (30.5) с запасом 3',
+    );
   }, 240_000);
 
   it('партия целая: один матч Battlegrounds билда 250339, доигранный до конца', () => {

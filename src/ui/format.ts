@@ -271,9 +271,14 @@ export function spendPlanLine(plan: SpendPlan, cards: CardIndex): string {
   const tail = plan.truncated
     ? ' → дальше по новой витрине'
     : plan.goldLeft > 0
-      ? `; остаётся ${String(plan.goldLeft)} — сгорит`
+      ? `; остаётся ${String(plan.goldLeft)} — сгорит${burnReason(plan)}`
       : '';
   return `ПЛАН ХОДА: ${steps.join(' → ')}${tail}`;
+}
+
+/** «: причина» к слову «сгорит» — или пусто, если причина не названа (part51). */
+function burnReason(plan: SpendPlan): string {
+  return plan.burnNote == null ? '' : `: ${plan.burnNote}`;
 }
 
 /**
@@ -295,7 +300,7 @@ export function spendPlanOutcome(plan: SpendPlan): string | null {
       ? `дальше по новой витрине; остаётся ${String(plan.goldLeft)}`
       : 'дальше по новой витрине';
   }
-  return plan.goldLeft > 0 ? `остаётся ${String(plan.goldLeft)} — сгорит` : null;
+  return plan.goldLeft > 0 ? `остаётся ${String(plan.goldLeft)} — сгорит${burnReason(plan)}` : null;
 }
 
 /** План розыгрыша одной строкой: тела по порядку, магниты с целью. */

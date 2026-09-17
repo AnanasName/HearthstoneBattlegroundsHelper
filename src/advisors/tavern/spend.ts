@@ -4,6 +4,7 @@ import {
   afterTrinketPick,
   battlecryPayoffOf,
   battlecryPayoffPoints,
+  fullBoardBurnNote,
   withBattlecryPayoff,
   withKeyword,
   trinketAdvice,
@@ -117,6 +118,11 @@ export interface SpendPlan {
   readonly goldLeft: number;
   /** Оборвался ли план на непрозрачном действии. */
   readonly truncated: boolean;
+  /**
+   * Почему остаток сгорает, если причину можно назвать числами правил
+   * (`fullBoardBurnNote`, долг part51). `null` — причина не названа.
+   */
+  readonly burnNote?: string | null;
 }
 
 /** Действия, которые в план трат не входят вовсе. */
@@ -1023,5 +1029,7 @@ function buildChain(
     }
   }
 
-  return { steps, goldLeft: current.gold, truncated };
+  const burnNote =
+    !truncated && current.gold > 0 ? fullBoardBurnNote(current, deps, rules) : null;
+  return { steps, goldLeft: current.gold, truncated, burnNote };
 }
