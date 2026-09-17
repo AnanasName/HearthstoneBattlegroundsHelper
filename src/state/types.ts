@@ -494,6 +494,23 @@ export interface GlobalInfo {
    * хрипом прямо в бою.
    */
   readonly eternalKnightsDead: number | null;
+  /**
+   * Надбавка к атаке КАЖДОГО следующего призванного жука —
+   * `TAG_SCRIPT_DATA_NUM_1` на «Beetle Army Player Enchant» (`BG31_808pe`)
+   * → `BeetleAttackBuff`.
+   *
+   * Смысл назвал игрок (17.09): это общее усиление жуков, которое копят
+   * карты вроде Runed Progenitor («Your Beetles have +{2}/+{3} this game»)
+   * и Ravaging Scorpid, и следующий призванный жук сильнее на эти статы.
+   * Лог подтверждает: жук `BG28_603t` рождается 2/2 и сразу получает
+   * ровно числа счётчика своего контроллера — part46 25 жуков из 25
+   * (12/11 → 14/13 … 175/170), part53 9 из 9, part15 44 из 62 (остальным
+   * добавляют ещё ауры и удвоения, которые симулятор считает сам).
+   * Симулятор прибавляет поле к жуку при призыве (`beetle.js`, `onSpawned`).
+   */
+  readonly beetleAttackBuff: number | null;
+  /** Парная надбавка к здоровью жуков — `TAG_SCRIPT_DATA_NUM_2` того же энчанта → `BeetleHealthBuff`. */
+  readonly beetleHealthBuff: number | null;
 }
 
 export const EMPTY_GLOBAL_INFO: GlobalInfo = {
@@ -509,6 +526,8 @@ export const EMPTY_GLOBAL_INFO: GlobalInfo = {
   undeadAttackBuff: null,
   undeadHealthBuff: null,
   eternalKnightsDead: null,
+  beetleAttackBuff: null,
+  beetleHealthBuff: null,
 };
 
 /**

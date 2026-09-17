@@ -102,6 +102,11 @@ function toGlobalInfo(info: GlobalInfo): Record<string, number> {
   put('UndeadAttackBonus', info.undeadAttackBuff);
   put('UndeadHealthBonus', info.undeadHealthBuff);
   put('EternalKnightsDeadThisGame', info.eternalKnightsDead);
+  // Жуки (17.09): `beetle.js` прибавляет надбавку к каждому жуку, призванному
+  // в бою, и вычитает её при исчезновении. Без поля жук выходит 2/2 при
+  // счётчике в сотню, а вычитание даёт `NaN`.
+  put('BeetleAttackBuff', info.beetleAttackBuff);
+  put('BeetleHealthBuff', info.beetleHealthBuff);
 
   return out;
 }

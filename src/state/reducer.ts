@@ -1027,6 +1027,9 @@ export function createReducer(players: Players): Reducer {
     BG25_011pe: { num1: 'undeadAttackBuff', num2: 'undeadHealthBuff' },
     // «Eternal Knight Player Enchant»: сколько своих рыцарей умерло.
     BG25_008pe: { num1: 'eternalKnightsDead' },
+    // «Beetle Army Player Enchant»: надбавка к каждому следующему жуку
+    // (смысл — от игрока, сверено с рождением жуков: part46, part53).
+    BG31_808pe: { num1: 'beetleAttackBuff', num2: 'beetleHealthBuff' },
   };
 
   /**
