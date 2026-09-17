@@ -84,6 +84,10 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // без цели перекладывал выбор на игрока (part12).
   const target =
     r.targetMinion == null ? '' : ` → на ${minionLabel(r.targetMinion, cards)}`;
+  // Сила-обмен атакой жмётся на ДВУХ миньонов (Вольджин, part56), и второй
+  // бывает в витрине — назвать надо обоих.
+  const partner = r.sharesAttack?.partner ?? null;
+  const pair = partner === null ? '' : ` и ${minionLabel(partner, cards)}`;
   // Ветвь модального «Choose One» — там же и по той же причине: игра
   // спрашивает «Булава или Щит», и совет обязан отвечать (part19).
   // Две ветви в поле означают «равны» — тогда строка называет обе.
@@ -119,7 +123,7 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // и без этих слов план противоречил бы списку на глазах у игрока — тот
   // самый класс подачи, из-за которого пропадал скрытый шаг усиления.
   const burning = r.blockedByHp === true ? ' — иначе золото сгорает' : '';
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${goal}${pick}${discount}${burning}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${victim}${magnet}${target}${pair}${goal}${pick}${discount}${burning}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

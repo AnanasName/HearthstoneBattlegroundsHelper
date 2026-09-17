@@ -39,6 +39,27 @@ function withHeroPowerBuyCounted(state: GameState, rec: Recommendation): GameSta
 }
 
 /**
+ * Борд после шага, чья прибавка известна числом по сущностям
+ * (`Recommendation.boardGains`, part56): сила Вольджина, приманка
+ * Lurking Lionfish. Без прибавок — тот же борд.
+ */
+function withBoardGains(
+  board: readonly Minion[],
+  gains: Recommendation['boardGains'],
+): readonly Minion[] {
+  if (gains === undefined || gains.length === 0) return board;
+  return board.map((m) => {
+    const hit = gains.filter((g) => g.entityId === m.entityId);
+    if (hit.length === 0) return m;
+    return {
+      ...m,
+      attack: (m.attack ?? 0) + hit.reduce((sum, g) => sum + g.attack, 0),
+      health: (m.health ?? 0) + hit.reduce((sum, g) => sum + g.health, 0),
+    };
+  });
+}
+
+/**
  * Витрина после покупки миньона, чей клич дешевит заклинания (part49).
  *
  * Цена падает у ВСЕХ заклинаний витрины, хотя текст обещает её следующему
@@ -358,8 +379,11 @@ export function applyRecommendation(
       // и статы. Без этого следующий шаг плана считал бы цель по старым
       // статам и мог бы назвать её же жертвой продажи.
       const golden = rec.grantsGolden;
+      // Сила, ОБМЕНИВАЮЩАЯ атакой двух миньонов (Вольджин, part56): прибавка
+      // известна числом по каждой своей сущности, и шаг прозрачен так же.
       const grants =
-        gift != null && (keyword !== undefined || stats !== undefined || golden !== undefined);
+        rec.boardGains !== undefined ||
+        (gift != null && (keyword !== undefined || stats !== undefined || golden !== undefined));
       // Продажа, ОПЛАЧИВАЮЩАЯ нажатие на полном борде (part40, ход 13):
       // без неё шаг стоил бы золота, которого нет, а жертва осталась бы
       // на борде — ровно та дыра, из-за которой прибавку от продажи
@@ -400,8 +424,8 @@ export function applyRecommendation(
               ? state.shop
               : withoutEntity(state.shop, rec.minion.entityId),
           board: grants
-            ? sellBoard.map((m) => {
-                if (m.entityId !== gift.entityId) return m;
+            ? withBoardGains(sellBoard, rec.boardGains).map((m) => {
+                if (gift == null || m.entityId !== gift.entityId) return m;
                 const withWord = keyword === undefined ? m : withKeyword(m, keyword);
                 const withGold =
                   golden === undefined
@@ -452,13 +476,18 @@ export function applyRecommendation(
       };
     }
 
-    case 'activate':
+    case 'activate': {
       // Активация — свой эффект со своей ценой; носитель остаётся на борде.
       // И отмечается нажатым: `activationRules` второй раз за ход его
       // не советует, а без отметки активация оставалась верхним советом
       // на каждом шаге, и запасное обновление плана не наступало никогда
       // (part53, ходы 23 и 25; part54, ход 27 — «остаётся 10 — сгорит»
       // при шестнадцати золотых).
+      //
+      // Приманка Lurking Lionfish (part56) известна числом: прибавки ложатся
+      // на борд, а карта витрины, которую заменила приманка, из неё уходит.
+      const baited = rec.boardGains !== undefined;
+      const replaced = baited ? (rec.targetMinion ?? null) : null;
       return {
         state: paid({
           activatedEntityIds:
@@ -467,10 +496,13 @@ export function applyRecommendation(
               : [...state.activatedEntityIds, rec.minion.entityId],
           // Обещанное к следующему ходу золото — туда же, куда его пишет игра.
           extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
+          board: withBoardGains(state.board, rec.boardGains),
+          shop: replaced === null ? state.shop : withoutEntity(state.shop, replaced.entityId),
         }),
-        opaque: true,
+        opaque: !baited,
         terminal: false,
       };
+    }
 
     case 'reroll':
       // Витрина стала другой: всё, что мы про неё знали, больше не про неё.
@@ -588,12 +620,20 @@ function planSteps(
   // всё ещё оплачивается: переставить законно, потерять нельзя. Перед шагом,
   // который обрывает план (обновление, заморозка, заклинание-обновление),
   // оно не откладывается — за обрывом его в плане уже не будет.
+  //
+  // Так же ждёт сила, обменивающая атакой (Вольджин, part56): лучший партнёр
+  // приходит покупкой, а продажа уносит прибавку вместе с телом. Ждёт она
+  // и усиления всего борда — пару судят атакой, а усиление её растит;
+  // усиление же силу вперёд не пропускает. Второй шаг той же силы не ждёт —
+  // первая цель уже выбрана.
   const head = spending[0];
-  if (head?.buffsWholeBoard === true) {
+  const pressesLast = (rec: Recommendation): boolean => rec.sharesAttack?.last === true;
+  if (head?.buffsWholeBoard === true || (head !== undefined && pressesLast(head))) {
     const ends = (rec: Recommendation): boolean =>
       rec.action === 'reroll' || rec.action === 'freeze' || rec.refreshesShop === true;
     const before = spending.find((rec) => {
-      if (rec === head || rec.buffsWholeBoard === true || ends(rec)) return false;
+      if (rec === head || pressesLast(rec) || ends(rec)) return false;
+      if (head.buffsWholeBoard === true && rec.buffsWholeBoard === true) return false;
       const net = rec.cost - (rec.sellFirst === null ? 0 : rules.sellGold) - (rec.grantsGold ?? 0);
       return state.gold - net >= head.cost;
     });

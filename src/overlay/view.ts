@@ -724,6 +724,9 @@ function marksView(input: ViewInput): OverlayMark[] {
       // на кнопке оставляло бы вторую половину совета словами в панели.
       place(rec.sellFirst, 'sell', ACTION_LABEL.sell, null);
       place(rec.targetMinion ?? null, 'target', 'ЦЕЛЬ', null);
+      // Сила-обмен атакой (Вольджин, part56) жмётся на двоих, и второй
+      // бывает в витрине: без кольца на нём половина нажатия — словами.
+      place(rec.sharesAttack?.partner ?? null, 'target', 'ЦЕЛЬ', null);
       return;
     }
     place(rec.minion, toneOf(rec.action), priced(rec), step);

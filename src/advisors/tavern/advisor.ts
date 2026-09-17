@@ -209,6 +209,33 @@ export interface Recommendation {
    */
   readonly buffsWholeBoard?: boolean;
   /**
+   * Сила, ОБМЕНИВАЮЩАЯ атакой двух миньонов, — «Choose 2 minions. They gain
+   * each other's Attack until next turn» (Вольджин, part56). Первым жмётся
+   * `targetMinion`, вторым — `partner`; у второго шага силы (первый уже
+   * нажат) партнёра нет, и `targetMinion` — единственное, что осталось
+   * выбрать. Второй миньон бывает и В ВИТРИНЕ: игрок так и жал семь ходов
+   * из девяти.
+   *
+   * `last` — шаг конца хода: план откладывает его за покупки (`spend.ts`),
+   * как усиление всего борда, потому что лучший партнёр может прийти
+   * покупкой, а цель — уйти продажей.
+   */
+  readonly sharesAttack?: {
+    readonly partner: Minion | null;
+    readonly last: boolean;
+  };
+  /**
+   * Прибавка статов по сущностям СВОЕГО борда, известная числом, — у силы,
+   * обменивающей атакой (`sharesAttack`), и у активации Lurking Lionfish,
+   * чью приманку бьёт свой зверь (part56). Плану: шаг становится
+   * прозрачным, и следующий шаг видит борд уже усиленным.
+   */
+  readonly boardGains?: readonly {
+    readonly entityId: number;
+    readonly attack: number;
+    readonly health: number;
+  }[];
+  /**
    * Сколько действие стоит САМО ПО СЕБЕ — без чужой ценности внутри очков.
    *
    * Заполняется у подъёма таверны и у прокрутки — у обоих по одной причине:
@@ -5430,6 +5457,152 @@ export function heroPowerStatsRule(
 }
 
 /**
+ * Правило силы героя, ОБМЕНИВАЮЩЕЙ АТАКОЙ двух миньонов.
+ *
+ * Вольджин (part56), «Духовный обмен»: «Choose 2 minions. They gain each
+ * other's Attack until next turn». Сила бесплатна (тега `COST` нет),
+ * активна с первого хода — а советник не назвал её ни в одной из девяти
+ * точек решения партии, хотя игрок жал её каждый ход. Жалоба игрока
+ * дословно: «мне не предлагало применить силу героя».
+ *
+ * Как игрок жал — из лога, и это определило правило целиком:
+ *
+ *  - **Второй миньон бывает ИЗ ВИТРИНЫ.** Семь ходов из девяти игрок брал
+ *    своего и самого атакующего миньона таверны (`player=14` — Боб):
+ *    Glim Guardian 1/4 + Fleeing Fugitive 5/2 дали своему 6/4. Прибавка
+ *    миньону витрины бесполезна, зато своему достаётся чужая атака целиком.
+ *  - **Когда свои крупнее витрины, пара — двое своих**, и растут оба: ход 17,
+ *    золотой Lurking Lionfish 30/14 и Tasty Lobster 17/8 — +17 и +30.
+ *
+ * Отсюда выбор без новых весов: пара «двое самых атакующих своих» даёт
+ * сумму их атак, пара «свой + самый атакующий из витрины» — атаку
+ * витринного; берётся большее. Своего в паре с витриной выбирает общая
+ * `buffTarget` с признаком «только атака» (D225).
+ *
+ * **Прибавка временная, и считается она всё же `perStatPoint`.** Это
+ * решение (D240), и оговорка у него та же, что у заклинаний с «until next
+ * turn», которые советник давно считает полной ценой: сила жмётся КАЖДЫЙ
+ * ход, и её ценность хода — ровно ближайший бой. От очков зависит только
+ * место в списке: шаг бесплатен и в план входит всегда, а в плане он
+ * ПОСЛЕДНИЙ (`sharesAttack.last`) — лучший партнёр приходит покупкой.
+ *
+ * Второй шаг (первый уже нажат, сила стала `BG20_HERO_201p2`) решается
+ * тем же выбором при известной первой цели: её id лежит на силе
+ * в `TAG_SCRIPT_DATA_NUM_1`. Второй плейсхолдер — НЕ атака цели: на ходу 17
+ * там 1 при атаке 30.
+ */
+export function heroPowerShareAttackRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const hero = state.hero;
+  if (hero === null || hero.heroPowerCardId === null) return null;
+  if (!hero.heroPowerHasActivate) return null;
+  if (!heroPowerReady(hero)) return null;
+  const cost = hero.heroPowerCost ?? 0;
+  if (cost > state.gold) return null;
+  if (state.board.length === 0) return null;
+
+  const cards = deps.cards;
+  const info = cards.info(hero.heroPowerCardId);
+  const text = info?.text ?? '';
+  const says = (words: readonly string[]): boolean =>
+    words.some((w) => new RegExp(w, 'i').test(text));
+  const second = says(rules.heroPowerShareAttackSecondWords);
+  if (!second && !says(rules.heroPowerShareAttackWords)) return null;
+
+  const attackOf = (m: Minion): number => m.attack ?? 0;
+  const byAttack = (list: readonly Minion[]): Minion[] =>
+    [...list].sort((a, b) => attackOf(b) - attackOf(a));
+  // Кандидаты в продажу из пары НЕ исключаются: шаг в плане последний
+  // (`sharesAttack.last`), и проданное к нему уже ушло с борда. Исключение
+  // ломало пару на малом борде, где кандидат в продажу есть всегда (part56,
+  // ход 5: Glim Guardian 1/4 и Lava Lurker 2/5 — пара своих давала 3, а не 2).
+  const own = state.board;
+  const bestShop = byAttack(state.shop)[0] ?? null;
+  const label = (m: Minion): string =>
+    `${cards.info(m.cardId)?.name ?? m.cardId} ${String(m.attack ?? '?')}/${String(m.health ?? '?')}`;
+
+  let target: Minion;
+  let partner: Minion | null = null;
+  let gains: { entityId: number; attack: number }[];
+  let words: string;
+  if (second) {
+    const firstId = hero.heroPowerScriptData[0];
+    const firstOwn = state.board.find((m) => m.entityId === firstId);
+    const firstShop = state.shop.find((m) => m.entityId === firstId);
+    if (firstOwn !== undefined) {
+      const mate = byAttack(own.filter((m) => m.entityId !== firstOwn.entityId))[0] ?? null;
+      const viaOwn = mate === null ? 0 : attackOf(firstOwn) + attackOf(mate);
+      const viaShop = bestShop === null ? 0 : attackOf(bestShop);
+      if (mate !== null && viaOwn >= viaShop) {
+        target = mate;
+        gains = [
+          { entityId: firstOwn.entityId, attack: attackOf(mate) },
+          { entityId: mate.entityId, attack: attackOf(firstOwn) },
+        ];
+      } else if (bestShop !== null) {
+        target = bestShop;
+        gains = [{ entityId: firstOwn.entityId, attack: attackOf(bestShop) }];
+      } else {
+        return null;
+      }
+      words = `второе нажатие — ${label(target)} в пару к ${label(firstOwn)}`;
+    } else if (firstShop !== undefined) {
+      const recipient = buffTarget(state, deps, rules, false, true);
+      if (recipient === null) return null;
+      target = recipient;
+      gains = [{ entityId: recipient.entityId, attack: attackOf(firstShop) }];
+      words = `второе нажатие — ${label(recipient)} в пару к ${label(firstShop)} из витрины`;
+    } else {
+      return null;
+    }
+  } else {
+    const [top, next] = byAttack(own);
+    const recipient = buffTarget(state, deps, rules, false, true);
+    const viaOwn = top !== undefined && next !== undefined ? attackOf(top) + attackOf(next) : 0;
+    const viaShop = recipient !== null && bestShop !== null ? attackOf(bestShop) : 0;
+    if (top !== undefined && next !== undefined && viaOwn >= viaShop) {
+      target = top;
+      partner = next;
+      gains = [
+        { entityId: top.entityId, attack: attackOf(next) },
+        { entityId: next.entityId, attack: attackOf(top) },
+      ];
+      words = `${label(top)} и ${label(next)} обмениваются атакой`;
+    } else if (recipient !== null && bestShop !== null) {
+      target = recipient;
+      partner = bestShop;
+      gains = [{ entityId: recipient.entityId, attack: attackOf(bestShop) }];
+      words = `${label(recipient)} берёт атаку ${label(bestShop)} из витрины`;
+    } else {
+      return null;
+    }
+  }
+
+  const total = gains.reduce((sum, g) => sum + g.attack, 0);
+  const score = total * rules.value.perStatPoint - cost * rules.goldPointValue;
+  if (score <= 0) return null;
+
+  return {
+    action: 'heroPower',
+    minion: null,
+    score,
+    cost,
+    requiresSlot: false,
+    sellFirst: null,
+    targetMinion: target,
+    sharesAttack: { partner, last: !second },
+    boardGains: gains.map((g) => ({ ...g, health: 0 })),
+    reason:
+      `${info?.name ?? hero.heroPowerCardId} ${cost > 0 ? `за ${String(cost)}` : 'бесплатна'} — ` +
+      `${words}: +${gains.map((g) => String(g.attack)).join(' и +')} атаки до следующего хода` +
+      (second ? '' : '; жать в конце хода, после покупок'),
+  };
+}
+
+/**
  * Насколько вырастет миньон, став ЗОЛОТЫМ, — по снапшоту, а не удвоением.
  *
  * Игра превращает цель в золотую карту и прибавляет ровно разницу базовых
@@ -6377,6 +6550,117 @@ export function setStatsOf(
  * (`consumeGain`, part24). Про остальное — кражи, сложные симбиозы — совет
  * честно не берётся судить, как и с силами героя.
  */
+type StatGain = { readonly entityId: number; readonly attack: number; readonly health: number };
+
+/**
+ * Что даст своему борду RALLY миньона, если он атакует прямо сейчас.
+ *
+ * Читаются только формы с фактурой: «Give your other minions +{0}/+{1}»
+ * (Wolf Pup, part56 — в логе +4/+1 шести соседям), «Give your minions»
+ * и «Gain +{0} Attack» (Glim Guardian). Прочее — пустой список: ралли,
+ * которое мы не читаем, просто не добавляет очков.
+ */
+function rallyGains(attacker: Minion, board: readonly Minion[], cards: CardIndex): StatGain[] {
+  const text = cards.info(attacker.cardId)?.text ?? '';
+  const clause = /\brally:\s*(?:<\/b>)?\s*([\s\S]*)$/i.exec(text)?.[1];
+  if (clause === undefined) return [];
+  const read = (ph: string | undefined, lit: string | undefined): number =>
+    ph !== undefined ? (attacker.scriptData[Number(ph)] ?? 0) : Number(lit ?? 0);
+  const pair = /\+(?:\{(\d)\}|(\d+))\s*\/\s*\+(?:\{(\d)\}|(\d+))/.exec(clause);
+  const single = /\+(?:\{(\d)\}|(\d+))\s+(attack|health)\b/i.exec(clause);
+  let attack = 0;
+  let health = 0;
+  if (pair !== null) {
+    attack = read(pair[1], pair[2]);
+    health = read(pair[3], pair[4]);
+  } else if (single !== null) {
+    const value = read(single[1], single[2]);
+    if (single[3]?.toLowerCase() === 'attack') attack = value;
+    else health = value;
+  } else {
+    return [];
+  }
+  const whom = /^\s*give\s+your\s+other\s+minions\b/i.test(clause)
+    ? board.filter((m) => m.entityId !== attacker.entityId)
+    : /^\s*give\s+your\s+minions\b/i.test(clause)
+      ? board
+      : /^\s*gain\b/i.test(clause)
+        ? [attacker]
+        : [];
+  return whom.map((m) => ({ entityId: m.entityId, attack, health }));
+}
+
+/**
+ * Активация-приманка Lurking Lionfish (part56, `rules.fishbaitWords`).
+ *
+ * Бьёт САМЫЙ ЛЕВЫЙ свой зверь, и расстановку в таверне игрок меняет
+ * свободно — поэтому атакующим берётся тот зверь, чей удар даёт больше:
+ * хрип приманки (+5/+5 убийце) плюс его собственное Rally. Игрок так и сделал:
+ * купленного Wolf Pup поставил левее всех. Если лучший не стоит левым,
+ * совет говорит это словами.
+ *
+ * Карта витрины, которую заменит приманка, — самая мелкая: её и называет
+ * совет целью.
+ */
+function fishbaitOf(
+  effectText: string,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { gains: StatGain[]; total: number; wide: boolean; words: string; replaced: Minion | null } | null {
+  let found: RegExpExecArray | null = null;
+  for (const w of rules.fishbaitWords) {
+    found = new RegExp(w, 'i').exec(effectText);
+    if (found !== null) break;
+  }
+  if (found === null) return null;
+  const golden = found[1] !== undefined;
+  const bait = rules.fishbaitBuff * (golden ? 2 : 1);
+  const tribeWord = found[2] ?? '';
+  const race =
+    Object.entries(rules.tribeTextWords).find(([, w]) => new RegExp(`^(?:${w})$`, 'i').test(tribeWord))?.[0] ??
+    null;
+  if (race === null) return null;
+  const tribe = state.board.filter((m) => {
+    const races = racesOf(m, cards);
+    return races.includes(race) || races.includes('ALL');
+  });
+  if (tribe.length === 0) return null;
+
+  const sum = (list: readonly StatGain[]): number => list.reduce((s, g) => s + g.attack + g.health, 0);
+  const options = tribe.map((attacker) => {
+    // Приманка 0/1 (золотая 0/2): убить её нечем — хрипа нет, ралли всё равно есть.
+    const kills = (attacker.attack ?? 0) >= (golden ? 2 : 1);
+    const gains = [
+      ...(kills ? [{ entityId: attacker.entityId, attack: bait, health: bait }] : []),
+      ...rallyGains(attacker, state.board, cards),
+    ];
+    return { attacker, gains, total: sum(gains) };
+  });
+  const best = options.reduce((a, b) => (b.total > a.total ? b : a));
+  if (best.total <= 0) return null;
+
+  const name = cards.info(best.attacker.cardId)?.name ?? best.attacker.cardId;
+  const leftmost = tribe[0]?.entityId === best.attacker.entityId;
+  const rally = best.gains.filter((g) => g.entityId !== best.attacker.entityId).length;
+  const replaced =
+    state.shop.length === 0
+      ? null
+      : state.shop.reduce((a, b) =>
+          (b.attack ?? 0) + (b.health ?? 0) < (a.attack ?? 0) + (a.health ?? 0) ? b : a,
+        );
+  return {
+    gains: best.gains,
+    total: best.total,
+    wide: rally > 1,
+    replaced,
+    words:
+      `${name} бьёт приманку — +${String(best.total)} статов` +
+      (rally > 0 ? ` (с его ралли на ${String(rally)} соседей)` : '') +
+      (leftmost ? '' : `; ${name} поставить левее всех зверей`),
+  };
+}
+
 export function activationRules(
   state: GameState,
   deps: TavernAdvisorDeps,
@@ -6444,8 +6728,13 @@ export function activationRules(
     // Поглощение витрины: сколько своих едят и по сколько статов достаётся.
     // Оба числа читаемы — племя из текста, статы из витрины.
     const consumed = consumeGain(effectText, state, deps, rules);
+    // Приманка Lurking Lionfish: прибавка читается бортом и расстановкой (part56).
+    const bait = fishbaitOf(effectText, state, deps.cards, rules);
 
-    if (consumed !== null) {
+    if (bait !== null) {
+      score = bait.total * rules.value.perStatPoint - cost * rules.goldPointValue;
+      what = bait.words;
+    } else if (consumed !== null) {
       score = consumed.stats * rules.value.perStatPoint - cost * rules.goldPointValue;
       what =
         `${String(consumed.eaters)} своих съедят витрину — ` +
@@ -6507,7 +6796,10 @@ export function activationRules(
 
     const size = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
     const target =
-      setBest !== null && setBest.gain > 0
+      bait !== null
+        ? // У приманки цель — карта ВИТРИНЫ, которую она заменит.
+          bait.replaced
+        : setBest !== null && setBest.gain > 0
         ? setBest.minion
         : destroysTarget && pool.length > 0
           ? // Расходник — тот, кого не жаль обнулить до базовой копии.
@@ -6528,6 +6820,8 @@ export function activationRules(
         sellFirst: null,
         targetMinion: target,
         ...(goldNextTurn > 0 ? { grantsGoldNextTurn: goldNextTurn } : {}),
+        // Ралли атакующего бьёт соседей — покупки хода идут раньше (D210).
+        ...(bait !== null ? { boardGains: bait.gains, buffsWholeBoard: bait.wide } : {}),
         reason: `активация ${name} за ${String(cost)}: ${what}`,
       },
     ];
@@ -7141,6 +7435,40 @@ function chooseOneEffect(
  * по нашим 25 партиям, без поправки на здоровье. Число заведомо грубое,
  * и совет обязан называть его вслух, чтобы игрок мог возразить.
  */
+/**
+ * Цена ЗАМКА на добытом миньоне — «Lock it in your hand for N turn»
+ * (`rules.lockInHandWords`, D242; part56, ход 7, Search Through Time).
+ *
+ * Тело пропускает N ближайших боёв из тех, что ему осталось сыграть: боёв
+ * впереди — этот плюс `remainingTurns`, и доля пропущенных снимается с его
+ * ценности. Оценка НИЖНЯЯ: таблица мерит, сколько ходов живёт ИГРОК,
+ * а тело раннего тира уходит с борда раньше, и замок стоит ему большей
+ * доли жизни. Выдумывать срок жизни тела мы не стали — его нет в замерах.
+ *
+ * `null` — замка в тексте нет.
+ */
+function lockedHandLoss(
+  text: string,
+  scriptData: readonly (number | null)[],
+  average: number,
+  state: GameState,
+  rules: TavernRules,
+): { readonly loss: number; readonly note: string } | null {
+  for (const w of rules.lockInHandWords) {
+    const m = new RegExp(w, 'i').exec(text);
+    if (m === null) continue;
+    const turns = m[1] !== undefined ? (scriptData[Number(m[1])] ?? 0) : Number(m[2] ?? 0);
+    if (turns <= 0) return null;
+    const fights = 1 + remainingTurns(state, rules);
+    const loss = Math.max(0, average) * Math.min(1, turns / fights);
+    return {
+      loss,
+      note: `замок в руке на ${String(turns)} ход — ближайший бой без него (−${loss.toFixed(1)})`,
+    };
+  }
+  return null;
+}
+
 export function remainingTurns(
   state: GameState,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
@@ -8917,7 +9245,9 @@ export function shopSpellRules(
       // за Discover кормит своих (D232; part55, 17:15:58 — +56 статов).
       const discovers = discoverCountOf(info?.text ?? '', 'lead', rules);
       const discoverPay = discovers > 0 ? discoverPayoffOf(state.board, deps.cards, rules) : null;
-      const gained = score + (discoverPay?.points ?? 0) * discovers;
+      // Замок в руке (D242): тело пропустит ближайший бой.
+      const lock = lockedHandLoss(info?.text ?? '', spell.scriptData, average, state, rules);
+      const gained = score + (discoverPay?.points ?? 0) * discovers - (lock?.loss ?? 0);
       const victim = handMinionVictim(state, deps, rules);
       if (victim !== null && gained - victim.value <= rules.sellMargin) return [];
       const cheaper = rules.minionCost - goldCost;
@@ -8944,6 +9274,7 @@ export function shopSpellRules(
                 ? `, но на ${String(cheaper)} золота дешевле покупки`
                 : ', и это дешёвое тело, а не лучшее') +
             (discoverPay === null ? '' : `; ${discoverPayoffNote(discoverPay, discovers)}`) +
+            (lock === null ? '' : `; ${lock.note}`) +
             (victim === null ? '' : `; ${victim.note}`) +
             (branch.note === '' ? '' : `; ${branch.note}`),
         },
@@ -9853,6 +10184,7 @@ export function adviseTavern(
     freeHeroPowerRule(state, deps, rules),
     heroPowerKeywordRule(state, deps, rules),
     heroPowerStatsRule(state, deps, rules),
+    heroPowerShareAttackRule(state, deps, rules),
     heroPowerGoldenRule(state, deps, rules),
     heroPowerDigRule(state, deps, rules),
     heroPowerSpellRule(state, deps, rules),

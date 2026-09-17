@@ -482,6 +482,43 @@ export interface TavernRules {
   readonly immuneAttackerWords: readonly string[];
 
   /**
+   * Активация-ПРИМАНКА: «Activate ({0}): Choose a card in the Tavern.
+   * Replace it with a Fishbait for your left-most Beast to attack» (Lurking
+   * Lionfish `BG36_201`, part56). Группы: 1 — «Golden», 2 — племя атакующего.
+   *
+   * Что происходит на самом деле — по логу, 17:41:37: карта витрины
+   * становится Fishbait 0/1 (`CHANGE_ENTITY … CardID=BG36_205`), самый левый
+   * свой зверь (Wolf Pup, игрок поставил его туда покупкой) бьёт её блоком
+   * `ATTACK` прямо в таверне — и срабатывает ЕГО Rally (+4/+1 шести
+   * соседям), а хрип приманки даёт убийце +5/+5. Сорок статов за 2 золота,
+   * а советник молчал: в тексте активации нет ни «+N», ни «get/summon».
+   */
+  readonly fishbaitWords: readonly string[];
+  /**
+   * Прибавка убийце от хрипа Fishbait, на каждый стат; у золотой вдвое.
+   *
+   * Число не из текста карты: у приманки «+{0}/+{1}» заполняется при её
+   * СОЗДАНИИ, а до активации сущности нет. Взято из двух источников,
+   * и они совпадают: три приманки part56 (ходы 15 и 17) — 5/5 все три,
+   * и реализация симулятора Firestone (`fishbait.js`: `fishbaitBuff = 5`,
+   * множитель 2 у `BG36_205_G`).
+   */
+  readonly fishbaitBuff: number;
+
+  /**
+   * ЗАМОК на добытом миньоне: «Discover a minion of your Tier. Lock it
+   * in your hand for 1 turn» (Search Through Time `BG34_330`, part56,
+   * ход 7). Группы: 1 — плейсхолдер числа ходов, 2 — литерал.
+   *
+   * Тело приходит, но ближайший бой пропускает, а советник считал его
+   * так, будто оно встаёт на борд сразу. На кадре игрока план «Search
+   * Through Time → Humming Bird, остаётся 1 — сгорит» против поля давал
+   * 57.5 %, ход игрока (Humming Bird и Ominous Seer) — 67.3 %, а «Intrepid
+   * Botanist → Humming Bird» — 76 %.
+   */
+  readonly lockInHandWords: readonly string[];
+
+  /**
    * Признаки «даёт миньона» в тексте — силы героя ИЛИ заклинания витрины.
    *
    * Скаббс («I Spy», за 2: «Discover a plain copy of a minion from your next
@@ -957,6 +994,30 @@ export interface TavernRules {
    * сам — на 11-м ходу таверны, на своё лучшее тело.
    */
   readonly heroPowerGoldenWords: readonly string[];
+  /**
+   * Текст силы героя, ОБМЕНИВАЮЩЕЙ АТАКОЙ двух миньонов, — «Choose 2 minions.
+   * They gain each other's Attack until next turn» (Вольджин, «Духовный
+   * обмен» `BG20_HERO_201p`, part56).
+   *
+   * Сила двухшаговая, и второй шаг — ДРУГАЯ карта: первое нажатие меняет
+   * сущность силы на `BG20_HERO_201p2` («Choose a minion. Gain Attack
+   * with {0}.», `CHANGE_ENTITY` в 17:31:32) и кладёт id первой цели
+   * в `TAG_SCRIPT_DATA_NUM_1`; второе возвращает `…p` и гасит силу
+   * `EXHAUSTED=1`. Поэтому слов два набора: первого шага и второго.
+   *
+   * Прибавка берётся с атаки В МОМЕНТ нажатия и держится до следующего хода,
+   * то есть на весь ближайший бой: Glim Guardian 1/4 и Fleeing Fugitive 5/2
+   * из витрины стали 6/4 и 6/2 (энчанты `BG20_HERO_201p2e2` с числом
+   * в `TAG_SCRIPT_DATA_NUM_1`).
+   *
+   * Класс узкий и назван: «each other's Attack» в текстах набора стоит
+   * у одной силы. Молчание было полным — сила бесплатна, активна с первого
+   * хода, и за девять точек решения part56 советник не назвал её ни разу,
+   * а игрок жал её каждый ход.
+   */
+  readonly heroPowerShareAttackWords: readonly string[];
+  /** Второй шаг той же силы: первая цель уже выбрана. */
+  readonly heroPowerShareAttackSecondWords: readonly string[];
   /**
    * Текст силы героя, РАСКАПЫВАЮЩЕЙ золотого миньона за несколько нажатий, —
    * «Dig for a Golden minion! (4 Digs left.)» (Капитан Юдора, «Зарытое
@@ -1830,6 +1891,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // «Once per game, make a friendly minion Golden.» — Рено, part48.
   // Между словами `\s+`: перенос строки ходит посреди фразы (урок part16).
   heroPowerGoldenWords: ['\\bmake\\s+a\\s+(?:friendly\\s+)?minion\\s+(?:<b>)?golden\\b'],
+  // «Choose 2 minions. They gain each other's Attack until next turn.» и
+  // второй шаг «Choose a minion. Gain Attack with {0}.» — Вольджин, part56.
+  heroPowerShareAttackWords: ["\\bgain\\s+each\\s+other['’]s\\s+attack\\b"],
+  heroPowerShareAttackSecondWords: ['\\bgain\\s+attack\\s+with\\s+\\{0\\}'],
   // «[x] Dig for a Golden minion!\n<i>(4 Digs left.)</i>» — Юдора, part55.
   // Между фразой и скобкой стоят «!», перенос и тег курсива, поэтому
   // `[\s\S]*?`, а не `[^.]`.
@@ -2111,6 +2176,16 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   discoverCountWords: ['\\bdiscover(?:<\\/b>)?\\s+(two|three|\\d+)\\b'],
 
   immuneAttackerWords: ['\\bimmune(?:<\\/b>)?\\s+while\\s+attacking\\b'],
+
+  // «Replace it with a Fishbait for your left-most Beast to attack» и золотая
+  // «…a Golden Fishbait for your left- most Beast…» — пробел после дефиса
+  // остаётся от переноса строки (D198).
+  fishbaitWords: [
+    '\\breplace\\s+it\\s+with\\s+an?\\s+(golden\\s+)?fishbait\\s+for\\s+your\\s+left-\\s*most\\s+([a-z]+)\\s+to\\s+attack\\b',
+  ],
+  fishbaitBuff: 5,
+  // «Lock it in your hand for 1 turn», «…for {0} turn» (Timewarped Beanstalk).
+  lockInHandWords: ['\\block\\s+it\\s+in\\s+your\\s+hand\\s+for\\s+(?:\\{(\\d)\\}|(\\d+))\\s+turns?\\b'],
 
   combatKeywordGrantWords: [
     '\\bstart\\s+of\\s+combat:(?:\\s*<\\/b>)?\\s*give\\s+(your\\s+(?:two\\s+)?left-most|another\\s+friendly)\\s+{tribe}\\s+' +

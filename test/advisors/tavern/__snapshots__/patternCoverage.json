@@ -230,6 +230,10 @@
   ],
   "economyTextWords": 144,
   "engineTextWords": 1231,
+  "fishbaitWords": [
+   "BG36_201",
+   "BG36_201_G"
+  ],
   "freeRefreshWords": [
    "BG28_827",
    "BG32_MagicItem_901",
@@ -400,6 +404,12 @@
    "TB_BaconShop_HP_077"
   ],
   "heroPowerSellWords": 89,
+  "heroPowerShareAttackSecondWords": [
+   "BG20_HERO_201p2"
+  ],
+  "heroPowerShareAttackWords": [
+   "BG20_HERO_201p"
+  ],
   "heroPowerShotWords": [
    "BG22_HERO_000p_Alt"
   ],
@@ -423,6 +433,14 @@
    "TB_BaconShop_HERO_08_Buddy",
    "TB_BaconShop_HERO_08_Buddy_G",
    "TB_BaconShop_HERO_08_Buddy_e"
+  ],
+  "lockInHandWords": [
+   "BG34_330",
+   "BG34_Treasure_301",
+   "BG35_MagicItem_821",
+   "BG35_MagicItem_821t",
+   "BG35_MagicItem_838",
+   "BG35_MagicItem_838t"
   ],
   "magnetDoubleWords": [],
   "magnetExtraTimesWords": [
