@@ -2,7 +2,7 @@ import { tavernTurnOf } from '../advisors/tavern/rules.js';
 import { mean, percentile } from '../advisors/tavern/statAnalysis.js';
 import type { GameState } from '../state/types.js';
 import { extractFeatures, MISSING_PLACE } from './features.js';
-import { clampPlace, fitRidge, predictRidge } from './ridge.js';
+import { clampPlace, fitRidge, predictRidge, type RidgeModel } from './ridge.js';
 import type { DatasetGame } from './dataset.js';
 
 /**
@@ -29,6 +29,77 @@ export interface MlGame {
   readonly tavernTurns: readonly number[];
   /** Текущее место каждой точки — бейзлайн B1; null, если в записи его нет. */
   readonly currentPlaces: readonly (number | null)[];
+  /**
+   * Строки, которые идут ТОЛЬКО В ОБУЧЕНИЕ, со своей целевой — замер 6а:
+   * соперники из таблицы лобби (`lobbyRows.ts`). Предсказываются и судятся
+   * по-прежнему одни `rows`. Отложенная партия уходит из обучения ЦЕЛИКОМ,
+   * вместе с этими строками: их целевые выведены из нашего места.
+   */
+  readonly extraRows?: readonly (readonly number[])[];
+  readonly extraYs?: readonly number[];
+  readonly extraTavernTurns?: readonly number[];
+}
+
+/** Все обучающие строки партии: свои с её местом и дополнительные со своими. */
+export function trainingRowsOf(game: MlGame): {
+  readonly rows: readonly (readonly number[])[];
+  readonly ys: readonly number[];
+  readonly tavernTurns: readonly number[];
+} {
+  const extra = game.extraRows ?? [];
+  const ys = game.extraYs ?? [];
+  const turns = game.extraTavernTurns ?? [];
+  // Молчаливая подстановка нашего места вместо целевой соперника была бы
+  // утечкой нашей метки в его строку — длины обязаны совпадать.
+  if (ys.length !== extra.length || turns.length !== extra.length) {
+    throw new Error(`${game.name}: у дополнительных строк не совпадают длины целевых или ходов`);
+  }
+  return {
+    rows: [...game.rows, ...extra],
+    ys: [...game.rows.map(() => game.finalPlace), ...ys],
+    tavernTurns: [...game.tavernTurns, ...turns],
+  };
+}
+
+/**
+ * Вес дополнительных строк в обучении. `row` — каждая строка весит как
+ * своя (замеры 1–4 и путь без дополнительных строк). `balanced` — все
+ * дополнительные строки фолда вместе весят столько же, сколько все свои:
+ * соперников в лобби вшестеро больше, и при равном весе строки модель
+ * владельца была бы моделью стола (замер 6а).
+ */
+export type ExtraWeighting = 'row' | 'balanced';
+
+/** Веса строк фолда или `undefined`, если все строки равны. */
+function foldWeights(
+  sets: readonly ReturnType<typeof trainingRowsOf>[],
+  games: readonly MlGame[],
+  weighting: ExtraWeighting,
+): number[] | undefined {
+  if (weighting === 'row') return undefined;
+  const own = games.reduce((n, g) => n + g.rows.length, 0);
+  const extra = games.reduce((n, g) => n + (g.extraRows?.length ?? 0), 0);
+  if (extra === 0) return undefined;
+  const extraWeight = own / extra;
+  return sets.flatMap((s, gi) => {
+    const ownRows = games[gi]?.rows.length ?? 0;
+    return s.rows.map((_, i) => (i < ownRows ? 1 : extraWeight));
+  });
+}
+
+/** Модель на всех строках партий — та же подгонка, что внутри фолда. */
+export function fitOnGames(
+  games: readonly MlGame[],
+  lambda: number = RIDGE_LAMBDA,
+  weighting: ExtraWeighting = 'row',
+): RidgeModel {
+  const sets = games.map(trainingRowsOf);
+  return fitRidge(
+    sets.flatMap((s) => s.rows),
+    sets.flatMap((s) => s.ys),
+    lambda,
+    foldWeights(sets, games, weighting),
+  );
 }
 
 /**
@@ -166,26 +237,28 @@ export function evaluateLogo(
   games: readonly MlGame[],
   lambda: number = RIDGE_LAMBDA,
   normalization: Normalization = 'global',
+  weighting: ExtraWeighting = 'row',
 ): GameEval[] {
   return games.map((game) => {
     const train = games.filter((g) => g !== game);
+    const sets = train.map(trainingRowsOf);
     const transform: Transform =
       normalization === 'byBucket'
         ? buildBucketTransform(
-            train.flatMap((g) => g.rows),
-            train.flatMap((g) => g.tavernTurns),
+            sets.flatMap((s) => s.rows),
+            sets.flatMap((s) => s.tavernTurns),
           )
         : (row): readonly number[] => row;
 
     const trainRows: (readonly number[])[] = [];
     const trainYs: number[] = [];
-    for (const g of train) {
-      g.rows.forEach((row, i) => {
-        trainRows.push(transform(row, g.tavernTurns[i] ?? 0));
-        trainYs.push(g.finalPlace);
+    for (const s of sets) {
+      s.rows.forEach((row, i) => {
+        trainRows.push(transform(row, s.tavernTurns[i] ?? 0));
+        trainYs.push(s.ys[i] ?? 0);
       });
     }
-    const model = fitRidge(trainRows, trainYs, lambda);
+    const model = fitRidge(trainRows, trainYs, lambda, foldWeights(sets, train, weighting));
     // B0 — по партиям, не по точкам: у длинных партий точек больше,
     // а исход у партии один.
     const meanPlace = mean(train.map((g) => g.finalPlace));
@@ -274,6 +347,17 @@ export interface SignFlipBand {
   readonly p95: number;
 }
 
+/** Средние разностей со случайными знаками, по возрастанию. */
+function signFlipMeans(deltas: readonly number[], iterations: number, rng: () => number): number[] {
+  const means: number[] = [];
+  for (let it = 0; it < iterations; it += 1) {
+    let sum = 0;
+    for (const d of deltas) sum += rng() < 0.5 ? d : -d;
+    means.push(sum / Math.max(1, deltas.length));
+  }
+  return means.sort((a, b) => a - b);
+}
+
 /**
  * Полоса нуля для среднего парных разностей: знак каждой партии случаен.
  * Нулевая гипотеза — «модель и таблица неразличимы», и при ней D_g
@@ -285,14 +369,49 @@ export function signFlipBand(
   iterations: number,
   rng: () => number,
 ): SignFlipBand {
-  const means: number[] = [];
-  for (let it = 0; it < iterations; it += 1) {
-    let sum = 0;
-    for (const d of deltas) sum += rng() < 0.5 ? d : -d;
-    means.push(sum / Math.max(1, deltas.length));
-  }
-  means.sort((a, b) => a - b);
+  const means = signFlipMeans(deltas, iterations, rng);
   return { p05: percentile(means, 0.05), p95: percentile(means, 0.95) };
+}
+
+export interface QuantileBand {
+  readonly low: number;
+  readonly high: number;
+}
+
+/**
+ * Та же полоса, но с явной долей хвоста — замер 6 держит ДВЕ основные
+ * гипотезы и платит за это хвостом 2.5 % вместо 5 % (поправка Бонферрони
+ * на две одинаковые проверки).
+ */
+export function signFlipQuantiles(
+  deltas: readonly number[],
+  iterations: number,
+  rng: () => number,
+  tail: number,
+): QuantileBand {
+  const means = signFlipMeans(deltas, iterations, rng);
+  return { low: percentile(means, tail), high: percentile(means, 1 - tail) };
+}
+
+/**
+ * Вердикт замера 6 — «добавка к модели»: новые данные (6а) или новый
+ * признак (6б) против той же модели без них, по парным разностям
+ * `MAE_g(без) − MAE_g(с)`. ПРИНЯТЬ — выше верхней границы полосы и выше
+ * МРЭ, и только если выполнено предварительное условие ветки
+ * (`prerequisite`: у 6б — модель с добавкой сама берёт критерий замера 4).
+ * ОТВЕРГНУТЬ — ниже нижней границы: модель С добавкой хуже модели без неё
+ * в этой схеме. «Сама добавка вредна» это не значит: у вложенных моделей
+ * нулевая точка разности ниже нуля (урок cardstats №1).
+ */
+export function verdictOfAddition(
+  dMean: number,
+  band: QuantileBand,
+  mde: number,
+  prerequisite: boolean,
+): Verdict {
+  if (prerequisite && dMean > band.high && dMean > mde) return 'ПРИНЯТЬ';
+  if (dMean < band.low) return 'ОТВЕРГНУТЬ';
+  return 'НЕ ДОКАЗАНО';
 }
 
 /** Порог приёмки в местах — предрегистрирован (docs/ml.md). */

@@ -55,6 +55,32 @@ describe('гребневая регрессия', () => {
     expect(norm(tight.weights)).toBeLessThan(norm(loose.weights));
   });
 
+  it('единичные веса дают ровно невзвешенную модель', () => {
+    const plain = fitRidge(ROWS, YS, 1);
+    const weighted = fitRidge(
+      ROWS,
+      YS,
+      1,
+      ROWS.map(() => 1),
+    );
+    expect(weighted).toEqual(plain);
+  });
+
+  it('вес 2 при λ=0 равен повтору строки', () => {
+    // Шум, чтобы подгонка не была точной и вес строки что-то решал.
+    const noisy = YS.map((y, i) => y + (i % 2 === 0 ? 0.7 : -0.4));
+    const doubled = fitRidge([...ROWS, ROWS[0] ?? []], [...noisy, noisy[0] ?? 0], 0);
+    const weighted = fitRidge(
+      ROWS,
+      noisy,
+      0,
+      ROWS.map((_, i) => (i === 0 ? 2 : 1)),
+    );
+    for (const probe of [[1, 2], [4, 4], [9, 0]]) {
+      expect(predictRidge(weighted, probe)).toBeCloseTo(predictRidge(doubled, probe), 9);
+    }
+  });
+
   it('зажим места держит [1, 8]', () => {
     expect(clampPlace(0.2)).toBe(1);
     expect(clampPlace(9.7)).toBe(8);

@@ -4,13 +4,17 @@ import { createRng } from '../../src/advisors/tavern/statAnalysis.js';
 import {
   bucketIndexOf,
   evaluateLogo,
+  fitOnGames,
   lateDeltas,
   pairedDeltas,
   signFlipBand,
+  signFlipQuantiles,
   summarizeBuckets,
   summarizeEvals,
   toMlGame,
+  trainingRowsOf,
   verdictOf,
+  verdictOfAddition,
   verdictOfRelative,
   type CheckpointEval,
   type GameEval,
@@ -215,6 +219,116 @@ describe('оценка LOGO', () => {
     expect(verdictOf(0.3, band, 0.35, 1.0, 1.5)).toBe('НЕ ДОКАЗАНО');
     // Порог и полоса взяты, но модель не лучше константы — не доказано.
     expect(verdictOf(0.4, band, 0.1, 1.6, 1.5)).toBe('НЕ ДОКАЗАНО');
+  });
+
+  it('дополнительные строки входят в обучение со своей целевой', () => {
+    // Признак константен — модель выучивает только интерсепт, то есть
+    // среднее целевой по ВСЕМ обучающим строкам: своим с местом партии
+    // и дополнительным со своими целевыми.
+    const flat = (name: string, place: number, extraY: number): MlGame => ({
+      name,
+      finalPlace: place,
+      rows: [[1]],
+      tavernTurns: [1],
+      currentPlaces: [null],
+      extraRows: [[1]],
+      extraYs: [extraY],
+      extraTavernTurns: [1],
+    });
+    const evals = evaluateLogo([flat('held', 3, 100), flat('a', 2, 8), flat('b', 4, 8)], 1);
+    // (2 + 8 + 4 + 8) / 4; строка отложенной партии с целевой 100 не вошла.
+    expect(evals[0]?.checkpoints[0]?.predicted).toBeCloseTo(5.5, 9);
+  });
+
+  it('вес «поровну»: все дополнительные строки фолда весят столько же, сколько все свои', () => {
+    const flat = (name: string, place: number): MlGame => ({
+      name,
+      finalPlace: place,
+      rows: [[1]],
+      tavernTurns: [1],
+      currentPlaces: [null],
+      extraRows: [[1], [1], [1]],
+      extraYs: [8, 8, 8],
+      extraTavernTurns: [1, 1, 1],
+    });
+    const games = [flat('held', 3), flat('a', 2), flat('b', 4)];
+    // Своих строк в фолде две (места 2 и 4), дополнительных шесть с целевой 8.
+    expect(evaluateLogo(games, 1, 'global', 'row')[0]?.checkpoints[0]?.predicted).toBeCloseTo((6 + 48) / 8, 9);
+    expect(evaluateLogo(games, 1, 'global', 'balanced')[0]?.checkpoints[0]?.predicted).toBeCloseTo(
+      (6 + 48 / 3) / 4,
+      9,
+    );
+    expect(fitOnGames(games.slice(1), 1, 'balanced').intercept).toBeCloseTo((6 + 48 / 3) / 4, 9);
+  });
+
+  it('несовпадение длин целевых и строк — ошибка, а не наше место в чужой строке', () => {
+    const broken: MlGame = {
+      name: 'broken',
+      finalPlace: 2,
+      rows: [[1]],
+      tavernTurns: [1],
+      currentPlaces: [null],
+      extraRows: [[1], [2]],
+      extraYs: [5],
+      extraTavernTurns: [1, 1],
+    };
+    expect(() => trainingRowsOf(broken)).toThrow(/длины/);
+  });
+
+  it('строки отложенной партии, и свои, и дополнительные, в обучение не попадают', () => {
+    // Утечка через дополнительные строки — ровно та, что опасна в замере 6а:
+    // целевые соперников выведены из нашего места. Меняем их у отложенной
+    // партии на мусор — её предсказание обязано остаться прежним.
+    const game = (name: string, place: number, extraY: number): MlGame => ({
+      name,
+      finalPlace: place,
+      rows: [[place % 3, 1]],
+      tavernTurns: [1],
+      currentPlaces: [null],
+      extraRows: [[extraY % 5, 0]],
+      extraYs: [extraY],
+      extraTavernTurns: [1],
+    });
+    const others = [game('b', 2, 6), game('c', 5, 3), game('d', 7, 1)];
+    const clean = evaluateLogo([game('held', 4, 4), ...others], 1)[0];
+    const poisoned = evaluateLogo([{ ...game('held', 4, 4), extraRows: [[99, 99]], extraYs: [-50] }, ...others], 1)[0];
+    expect(poisoned?.checkpoints[0]?.predicted).toBe(clean?.checkpoints[0]?.predicted);
+  });
+
+  it('trainingRowsOf и fitOnGames берут свои строки с местом партии и дополнительные со своими', () => {
+    const g: MlGame = {
+      name: 'x',
+      finalPlace: 3,
+      rows: [[1], [2]],
+      tavernTurns: [1, 2],
+      currentPlaces: [null, null],
+      extraRows: [[5]],
+      extraYs: [8],
+      extraTavernTurns: [4],
+    };
+    expect(trainingRowsOf(g)).toEqual({ rows: [[1], [2], [5]], ys: [3, 3, 8], tavernTurns: [1, 2, 4] });
+    expect(fitOnGames([g], 0).intercept).toBeCloseTo((3 + 3 + 8) / 3, 9);
+  });
+
+  it('полоса с явным хвостом шире полосы 5 % на тех же случайных числах', () => {
+    const deltas = [0.3, -0.2, 0.5, -0.1, 0.2, 0.15, -0.4, 0.05];
+    const narrow = signFlipBand(deltas, 4000, createRng(11));
+    const wide = signFlipQuantiles(deltas, 4000, createRng(11), 0.025);
+    expect(wide.high).toBeGreaterThanOrEqual(narrow.p95);
+    expect(wide.low).toBeLessThanOrEqual(narrow.p05);
+    expect(signFlipQuantiles(deltas, 4000, createRng(11), 0.05)).toEqual({ low: narrow.p05, high: narrow.p95 });
+  });
+
+  it('вердикт добавки: выше полосы и МРЭ при выполненном условии, ниже полосы — вредит', () => {
+    const band = { low: -0.06, high: 0.07 };
+    expect(verdictOfAddition(0.09, band, 0.08, true)).toBe('ПРИНЯТЬ');
+    // Условие ветки не выполнено — не доказано, как бы ни была велика добавка.
+    expect(verdictOfAddition(0.09, band, 0.08, false)).toBe('НЕ ДОКАЗАНО');
+    // Выше полосы, но не выше МРЭ.
+    expect(verdictOfAddition(0.075, band, 0.08, true)).toBe('НЕ ДОКАЗАНО');
+    expect(verdictOfAddition(-0.07, band, 0.08, true)).toBe('ОТВЕРГНУТЬ');
+    // Минус внутри полосы — «польза не показана».
+    expect(verdictOfAddition(-0.05, band, 0.08, true)).toBe('НЕ ДОКАЗАНО');
   });
 
   it('D̄_late считает только поздние точки и называет выпавшие партии', () => {

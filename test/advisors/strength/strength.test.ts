@@ -123,6 +123,17 @@ describe('сила стола: когда считать', () => {
     expect(fieldStrengthQuestion(stateOf(), snapshot, options)).toBeNull();
   });
 
+  it('замер по фикстуре исключает борды своей партии и молчит, если поле от этого сузилось', () => {
+    // Четыре борда хода 6 из партий 1–4 при пороге в три: без партии 2
+    // остаётся три — считать можно, но уже без неё.
+    const snapshot = snapshotOf(field(6, 4));
+    const question = fieldStrengthQuestion(stateOf(), snapshot, options, 2);
+    expect(question?.setups).toHaveLength(3);
+    expect(question?.setups.map((s) => s.opponentBoard[0]?.entityId)).not.toContain(902);
+    // Три борда без одного — уже меньше порога.
+    expect(fieldStrengthQuestion(stateOf(), snapshotOf(field(6, 3)), options, 1)).toBeNull();
+  });
+
   it('берёт поле СВОЕГО хода таверны, а не всё подряд', () => {
     const snapshot = snapshotOf([...field(6, 4), ...field(9, 40)]);
     const question = fieldStrengthQuestion(stateOf(), snapshot, options);

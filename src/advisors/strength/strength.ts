@@ -94,11 +94,15 @@ export interface FieldStrength {
  * Отдельно от счёта по той же причине, что `battleQuestion` у расстановки:
  * живой режим отправляет эти же `setups` в воркер, а пакетный путь считает
  * тут же. Условия молчания живут ЗДЕСЬ, в одном месте на обе подачи.
+ *
+ * `excludePart` — для замеров по фикстурам (см. `boardsOfTurn`): партия
+ * не мерится об борды собственных соперников. В живой игре не передаётся.
  */
 export function fieldStrengthQuestion(
   state: GameState,
   snapshot: FieldSnapshot | null,
   options: FieldStrengthOptions = DEFAULT_FIELD_STRENGTH_OPTIONS,
+  excludePart: number | null = null,
 ): FieldStrengthQuestion | null {
   if (snapshot === null || state.hero === null) return null;
   // Пустой борд — не «сила ноль», а «стола ещё нет»: на первом ходу до
@@ -108,7 +112,7 @@ export function fieldStrengthQuestion(
 
   const hero = state.hero;
   const tavernTurn = tavernTurnOf(state.turn);
-  const field = boardsOfTurn(snapshot, tavernTurn);
+  const field = boardsOfTurn(snapshot, tavernTurn, excludePart);
   if (field.length < options.minBoards) return null;
 
   const setups = field.map(

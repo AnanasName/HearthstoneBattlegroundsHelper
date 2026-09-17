@@ -95,27 +95,77 @@ function solveLinear(a: readonly (readonly number[])[], b: readonly number[]): n
   return x;
 }
 
+/**
+ * Взвешенные средние и отклонения — замер 6а (вес строк соперников).
+ * Отклонение нормировано так, что при единичных весах совпадает
+ * с невзвешенным (делитель n − 1).
+ */
+function weightedStats(
+  rows: readonly (readonly number[])[],
+  weights: readonly number[],
+  width: number,
+): { means: number[]; sds: number[] } {
+  const total = weights.reduce((a, b) => a + b, 0);
+  const n = rows.length;
+  const means = new Array<number>(width).fill(0);
+  rows.forEach((row, i) => {
+    const w = weights[i] ?? 0;
+    for (let j = 0; j < width; j += 1) means[j] = (means[j] ?? 0) + w * (row[j] ?? 0);
+  });
+  for (let j = 0; j < width; j += 1) means[j] = total > 0 ? (means[j] ?? 0) / total : 0;
+  const sums = new Array<number>(width).fill(0);
+  rows.forEach((row, i) => {
+    const w = weights[i] ?? 0;
+    for (let j = 0; j < width; j += 1) {
+      const d = (row[j] ?? 0) - (means[j] ?? 0);
+      sums[j] = (sums[j] ?? 0) + w * d * d;
+    }
+  });
+  // При единичных весах делитель ровно n − 1 — и в плавающей точке тоже.
+  const divisor = n > 1 ? (total * (n - 1)) / n : 0;
+  const sds = sums.map((s) => {
+    const sd = divisor > 0 ? Math.sqrt(s / divisor) : 0;
+    return sd > 0 ? sd : 1;
+  });
+  return { means, sds };
+}
+
+/**
+ * `weights` — вес каждой строки; без него все строки равны и путь
+ * побайтно прежний (замеры 1–4 и снапшот прогноза на нём).
+ */
 export function fitRidge(
   rows: readonly (readonly number[])[],
   ys: readonly number[],
   lambda: number,
+  weights?: readonly number[],
 ): RidgeModel {
   const width = rows[0]?.length ?? 0;
-  const means = columnMeans(rows, width);
-  const sds = columnSds(rows, means, width);
-  const yMean = ys.length === 0 ? 0 : ys.reduce((a, b) => a + b, 0) / ys.length;
+  let means: number[];
+  let sds: number[];
+  let yMean: number;
+  if (weights === undefined) {
+    means = columnMeans(rows, width);
+    sds = columnSds(rows, means, width);
+    yMean = ys.length === 0 ? 0 : ys.reduce((a, b) => a + b, 0) / ys.length;
+  } else {
+    ({ means, sds } = weightedStats(rows, weights, width));
+    const total = weights.reduce((a, b) => a + b, 0);
+    yMean = total > 0 ? ys.reduce((a, y, i) => a + (weights[i] ?? 0) * y, 0) / total : 0;
+  }
 
-  // ZᵀZ и Zᵀy на стандартизованных признаках и центрированной целевой.
+  // ZᵀWZ и ZᵀWy на стандартизованных признаках и центрированной целевой.
   const gram: number[][] = Array.from({ length: width }, () => new Array<number>(width).fill(0));
   const moment = new Array<number>(width).fill(0);
   rows.forEach((row, i) => {
+    const w = weights?.[i] ?? 1;
     const z = row.map((v, j) => (v - (means[j] ?? 0)) / (sds[j] ?? 1));
     const dy = (ys[i] ?? 0) - yMean;
     for (let j = 0; j < width; j += 1) {
-      moment[j] = (moment[j] ?? 0) + (z[j] ?? 0) * dy;
+      moment[j] = (moment[j] ?? 0) + w * (z[j] ?? 0) * dy;
       const gj = gram[j];
       if (gj === undefined) continue;
-      for (let k = j; k < width; k += 1) gj[k] = (gj[k] ?? 0) + (z[j] ?? 0) * (z[k] ?? 0);
+      for (let k = j; k < width; k += 1) gj[k] = (gj[k] ?? 0) + w * (z[j] ?? 0) * (z[k] ?? 0);
     }
   });
   for (let j = 0; j < width; j += 1) {
