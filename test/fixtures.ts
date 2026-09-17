@@ -1203,3 +1203,35 @@ export function part55Game(): string {
 export function part56Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part56', 'game.log'), 'utf8');
 }
+
+/**
+ * part57 — Мурлок Холмс `BG23_HERO_303`, 17.09.2026, 18:01–18:16,
+ * **7-е место**, 9 ходов таверны, билд 251952. Элементали через Living
+ * Prison, Flaming Enforcer и наклейку Номи.
+ *
+ * Следующая партия игрока после part56, своя сессия клиента (18:00:44),
+ * ровно одна партия (`GT_BATTLEGROUNDS` один, `GT_RANKED` ноль,
+ * `CREATE_GAME` канала-источника один), доиграна до `FINAL_GAMEOVER`;
+ * вырезана `fixture:passport --game=1 --write=part57` сразу после партии,
+ * пока игрок не начал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **Сила-УГАДЫВАНИЕ** «Наемный детектив» `BG23_HERO_303p2` («Look at
+ *     2 minions. Guess which one your next opponent had last combat for
+ *     a Tavern Coin») — восемь нажатий, каналом выборов, по два миньона.
+ *     Правильный вариант лог называет ДВАЖДЫ: заранее тегом `3257=1`
+ *     на его сущности (9 из 9 вместе с part26) и после ответа —
+ *     `META_DATA Meta=TARGET`. Первое не читается (D243).
+ *  2. **Запас бесплатных обновлений** — `BACON_FREE_REFRESH_COUNT`
+ *     на своей сущности-энчанте `Bacon_Free_Refresh_Player_Ench`: две
+ *     штуки от Leaf Through the Pages на ходу 15, одна пережила бой
+ *     и потрачена на ходу 17 с золотом (`GameState.freeRefreshes`, D244).
+ *  3. **Активация, забирающая статы следующей покупки** — Living Prison
+ *     `BG36_180` («Activate ({0}): Gain the stats of the next minion you
+ *     buy this turn», цена 1): ходы 13, 15 и 17, прибавки +37/+27,
+ *     +28/+19 и +33/+23 (D245).
+ */
+export function part57Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part57', 'game.log'), 'utf8');
+}

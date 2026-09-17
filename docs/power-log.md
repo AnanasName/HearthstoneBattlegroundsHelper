@@ -1830,3 +1830,73 @@ D 17:41:37.63…             BLOCK_START BlockType=TRIGGER Entity=[… id=6086 �
   стал 8/11, 7/5, 7/5, 7/4, 5/4, 5/5, 9/6 — ровно сорок статов.
 - Активация стоит 2 (`INTERACTABLE_OBJECT_COST`), у каждого Lionfish
   своя: на ходу 15 игрок нажал обе.
+
+## Запас бесплатных обновлений — на СВОЁМ энчанте, и он не сгорает (part57)
+
+Счётчик `BACON_FREE_REFRESH_COUNT` приходит на ДВЕ сущности сразу:
+на кнопку обновления и на энчант игрока `Bacon_Free_Refresh_Player_Ench`.
+
+```
+D 18:11:46.25… BLOCK_START BlockType=PLAY Entity=[… cardId=BG28_827 player=1] …   (Leaf Through the Pages)
+D 18:11:46.25…     TAG_CHANGE Entity=[… cardId=Bacon_Free_Refresh_Player_Ench …] tag=BACON_FREE_REFRESH_COUNT value=2
+D 18:11:46.25…     TAG_CHANGE Entity=[… id=5422 … cardId=TB_BaconShop_8p_Reroll_Button …] tag=COST value=0
+D 18:11:47.07…     TAG_CHANGE Entity=[… cardId=Bacon_Free_Refresh_Player_Ench …] tag=BACON_FREE_REFRESH_COUNT value=1
+D 18:13:29.50…     TAG_CHANGE Entity=[… id=5422 … Reroll_Button …] tag=BACON_FREE_REFRESH_COUNT value=0   (бой)
+D 18:13:31.58…     TAG_CHANGE Entity=[… id=7244 … Reroll_Button …] tag=BACON_FREE_REFRESH_COUNT value=1   (новый ход)
+D 18:15:01.30…     TAG_CHANGE Entity=[… cardId=Bacon_Free_Refresh_Player_Ench …] tag=BACON_FREE_REFRESH_COUNT value=0
+```
+
+- **Кнопка врёт через бой**: на бою её счётчик уходит в ноль, а в новом
+  ходу приходит НОВАЯ сущность кнопки уже с остатком. Энчант игрока
+  живёт всю партию — читать надо его (`GameState.freeRefreshes`).
+- **Остаток не сгорает.** Скан всех фикстур: счётчик энчанта ни разу
+  не уменьшился иначе как нажатием обновления (0 случаев), и 35 ходов
+  таверны в 21 логе начались с ненулевым остатком.
+- **Подарки ПРИБАВЛЯЮТСЯ к остатку, а не выставляют счётчик заново.**
+  part12, ход 19: «Обновляющая аномалия» `TB_BaconUps_167` (золотая,
+  «Gain 4 free Refreshes») подняла 2 → 6, следом два Leaf Through
+  the Pages — 6 → 8 → 10.
+
+## Угадывание «Наемного детектива»: ответ в логе ДО выбора (part57)
+
+Сила `BG23_HERO_303p2` («Look at 2 minions. Guess which one your next
+opponent had last combat for a Tavern Coin») открывает обычный выбор
+каналом `DebugPrintEntityChoices`, а варианты создаются блоком POWER
+прямо перед ним:
+
+```
+D 18:03:18.72… BLOCK_START BlockType=PLAY Entity=[… id=121 … cardId=BG23_HERO_303p2 player=1] …
+D 18:03:18.72…     FULL_ENTITY - Creating ID=808 CardID=BG26_146      (Баюбот)
+D 18:03:18.72…     TAG_CHANGE Entity=808 tag=3257 value=1             ← ответ
+D 18:03:18.72…     FULL_ENTITY - Creating ID=809 CardID=BG29_611      (Протягиватель кабелей)
+D 18:03:18.73… DebugPrintEntityChoices() -   Entities[0]=[… id=809 …] / Entities[1]=[… id=808 …]
+D 18:03:24.99… SendChoices() -   m_chosenEntities[0]=[… id=809 …]     (игрок выбрал не тот)
+D 18:03:25.50…     META_DATA - Meta=TARGET Data=0 InfoCount=1
+D 18:03:25.50…             Info[0] = [… id=808 …]                     ← публичный ответ
+```
+
+- Безымянный тег **3257 стоит на правильном варианте ДО выбора**:
+  9 угадываний из 9 (part57 — восемь, part26 — одно), сверено
+  с `Meta=TARGET` после ответа.
+- **Читать его запрещено решением D243**: экран игры ответа не
+  показывает, и подсказка по нему — подсмотренный у клиента ответ.
+  В коде тег не упоминается нигде, кроме теста, который держит сам факт.
+- Верный ответ приносит монету `BG28_810` тем же блоком; неверный —
+  ничего (part57: пять из восьми верных).
+
+## Активация, забирающая статы следующей покупки (part57)
+
+Living Prison `BG36_180` («Activate ({0}): Gain the stats of the next
+minion you buy this turn», `INTERACTABLE_OBJECT_COST=1`):
+
+```
+D 18:11:49.03… BLOCK_START BlockType=PLAY Entity=[… id=4563 … cardId=BG36_180 player=1] …   (нажатие)
+D 18:11:56.91… BLOCK_START BlockType=PLAY Entity=[… cardId=TB_BaconShop_DragBuy …] Target=[… cardId=BG31_816 …]
+D 18:11:56.91…     TAG_CHANGE Entity=[… id=4563 … BG36_180 …] tag=ATK value=69      (было 41, Fire Baller 28/19)
+D 18:11:56.91…     TAG_CHANGE Entity=[… id=4563 … BG36_180 …] tag=HEALTH value=62   (было 43)
+```
+
+Прибавка равна статам купленной карты ВИТРИНЫ на момент покупки
+(со всеми её баффами), приходит в блоке покупки и не зависит от того,
+встал миньон на борд или ушёл в руку. Три нажатия партии: +37/+27,
++28/+19, +33/+23.
