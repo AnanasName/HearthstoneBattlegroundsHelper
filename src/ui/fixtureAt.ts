@@ -64,6 +64,11 @@ function heroPowerLine(state: GameState, cards: CardIndex): string | null {
   const hero = state.hero;
   if (hero === null || hero.heroPowerCardId === null) return null;
   const name = cards.info(hero.heroPowerCardId)?.name ?? hero.heroPowerCardId;
+  // Пассивная сила (нет ни цены, ни `HAS_ACTIVATE_POWER`) не нажимается
+  // вовсе: «Double Time» part58 строка звала «бесплатна, можно нажать».
+  if (hero.heroPowerCost === null && !hero.heroPowerHasActivate) {
+    return `сила героя: ${name} — пассивная`;
+  }
   const price = hero.heroPowerCost === null ? 'бесплатна' : `за ${String(hero.heroPowerCost)}`;
   const status = hero.heroPowerLocked
     ? 'под замком'

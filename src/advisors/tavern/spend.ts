@@ -284,6 +284,28 @@ export function applyRecommendation(
       const refund = sold === null ? 0 : rules.sellGold;
       const shop = withoutEntity(state.shop, rec.minion.entityId);
 
+      // Покупка собирает золотого: копии уходят с борда и из руки, золотая
+      // карта — в руку, откуда её разыграет следующий шаг (part58). Слот,
+      // который занимала копия на борде, освобождается сам, и продавать
+      // ради розыгрыша никого не нужно. Клич и носитель магнита — дело
+      // розыгрыша золотого, а не покупки: в руке ни то ни другое не срабатывает.
+      const merge = rec.tripleMerge;
+      if (merge != null) {
+        const consumed = new Set(merge.consumed);
+        return {
+          state: paid({
+            gold: state.gold - rec.cost + refund,
+            shop,
+            board: board.filter((m) => !consumed.has(m.entityId)),
+            hand: [...state.hand.filter((m) => !consumed.has(m.entityId)), merge.golden],
+            actions: withBuyLogged(state, rec.minion),
+            hero: withHeroPowerBuyCounted(state, rec),
+          }),
+          opaque: false,
+          terminal: false,
+        };
+      }
+
       // Магнитный мех уходит на носителя: слота не занимает. Статы носителя
       // правила пересчитают сами — здесь важно лишь то, что миньон покинул
       // витрину и золото потрачено.

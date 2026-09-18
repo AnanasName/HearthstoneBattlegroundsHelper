@@ -172,6 +172,18 @@ export interface Recommendation {
    */
   readonly grantsGolden?: { readonly attack: number; readonly health: number };
   /**
+   * Покупка СОБИРАЕТ золотого: копии сливаются, и золотая карта уходит
+   * в руку (part58). `consumed` — сущности своих копий, которые игра
+   * забирает с борда и из руки, `golden` — золотой, каким он придёт.
+   *
+   * Без поля план слияния не видел вовсе: купленная копия ложилась телом
+   * рядом со своей парой, а на полном борде её «розыгрыш» требовал
+   * продажи, хотя слияние само освобождает слот (part58, ход 15:
+   * «РАЗЫГРАТЬ Blade Collector 3/2, продав Thorned Trailblazer» при
+   * настоящем золотом 12/10 и свободном месте).
+   */
+  readonly tripleMerge?: { readonly consumed: readonly number[]; readonly golden: Minion };
+  /**
    * Остаток счётчика силы «после N покупок с механикой — награда» ПОСЛЕ
    * этой покупки (part34, «Бранное дело»). Заполняется у покупки, которую
    * сила засчитывает; план кладёт число в `heroPowerScriptData[0]`
@@ -798,29 +810,150 @@ export function copiesOwned(candidate: Minion, state: GameState): number {
  *
  * Ниже двух не опускается: одна копия — это сам купленный миньон, и тройка
  * «из одного» сломала бы весь счёт копий, а не улучшила его.
+ *
+ * Тот же текст слово в слово носит АНОМАЛИЯ «False Idols»
+ * (`BG27_Anomaly_301`), и действует она на всё лобби: part2 — ни одной
+ * награды за тройку за партию, а собранные золотые дают монетки, как
+ * у героя part58. Поэтому читаются оба источника (`tripleRuleSources`).
  */
 export function copiesForTriple(
   state: GameState,
   cards: CardIndex,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): number {
-  const powerId = state.hero?.heroPowerCardId ?? null;
-  if (powerId === null) return rules.tripleCopies;
-  return memoByCard(TRIPLE_COPIES_CACHE, powerId, cards, rules, () => {
-    const text = cards.info(powerId)?.text ?? '';
-    for (const word of rules.tripleCopiesWords) {
-      const hit = new RegExp(word, 'i').exec(text);
-      const n = hit?.[1] === undefined ? NaN : Number.parseInt(hit[1], 10);
-      if (Number.isFinite(n) && n >= 2) return n;
-    }
-    return rules.tripleCopies;
-  });
+  const found = tripleRuleSources(state).map((id) =>
+    memoByCard(TRIPLE_COPIES_CACHE, id, cards, rules, () => {
+      const text = cards.info(id)?.text ?? '';
+      for (const word of rules.tripleCopiesWords) {
+        const hit = new RegExp(word, 'i').exec(text);
+        const n = hit?.[1] === undefined ? NaN : Number.parseInt(hit[1], 10);
+        if (Number.isFinite(n) && n >= 2) return n;
+      }
+      return 0;
+    }),
+  );
+  const named = found.filter((n) => n >= 2);
+  return named.length === 0 ? rules.tripleCopies : Math.min(...named);
+}
+
+/**
+ * Где написаны правила тройки этой партии: сила героя и аномалия.
+ *
+ * Тринкет «Designer Eyepatch» («only need 2 copies of a Pirate») сюда
+ * не входит намеренно: его порог действует на одно племя, а число копий
+ * у нас одно на всю партию.
+ */
+function tripleRuleSources(state: GameState): string[] {
+  return [state.hero?.heroPowerCardId ?? null, state.anomalyCardId].filter(
+    (id): id is string => id !== null,
+  );
 }
 
 const TRIPLE_COPIES_CACHE = new WeakMap<
   TavernRules,
   WeakMap<CardIndex, Map<string, number>>
 >();
+
+/**
+ * Тег, которым игра метит золотого, СОБРАННОГО слиянием копий.
+ *
+ * Награду за тройку при розыгрыше дают ровно такие золотые: part55 —
+ * 18 наград из 18 от сущностей с этим тегом, part58 — 10 монеток
+ * из 10 (там их даёт сила героя вместо награды). Значение — dbfId
+ * базовой карты; для нас важно лишь, что тег есть.
+ */
+const TRIPLED_TAG = 'BACON_TRIPLED_BASE_MINION_ID';
+
+/** Золотой, собранный слиянием, — тот, чей розыгрыш приносит награду. */
+export function isTripledGolden(minion: Minion): boolean {
+  return minion.golden && (minion.tags[TRIPLED_TAG] ?? 0) > 0;
+}
+
+/**
+ * Что сделает с копиями покупка, собирающая золотого, — или `null`.
+ *
+ * Игра забирает свои незолотые копии с борда и из руки и кладёт в РУКУ
+ * одну золотую карту. Статы золотого — статы золотой карты снапшота плюс
+ * все накопленные усиления копий: part58, Blade Collector 9/8 на борде
+ * и купленный 3/2 при базе 3/2 и золотой базе 6/4 дали 12/10, Roadboar
+ * 4/6 и 2/4 при базе 2/4 и 4/8 — 6/10. Золотая база берётся из снапшота,
+ * а не удвоением: у двух карт пула из 379 она не вдвое (`goldenGain`).
+ *
+ * Копии с борда забираются первыми — ровно на это опирается ветка «место
+ * освободится само» у покупки на полном борде.
+ */
+export function tripleMergeOf(
+  minion: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): { readonly consumed: readonly number[]; readonly golden: Minion } | null {
+  if (minion.golden) return null;
+  const needed = copiesForTriple(state, cards, rules);
+  const same = (m: Minion): boolean =>
+    m.cardId === minion.cardId && !m.golden && m.entityId !== minion.entityId;
+  const copies = [...state.board.filter(same), ...state.hand.filter(same)].slice(0, needed - 1);
+  if (copies.length < needed - 1) return null;
+
+  const base = cards.info(minion.cardId);
+  const goldenCard = cards.info(`${minion.cardId}_G`);
+  const real = base !== null && goldenCard !== null && goldenCard.id !== base.id;
+  const baseAttack = base?.attack ?? minion.attack ?? 0;
+  const baseHealth = base?.health ?? minion.health ?? 0;
+  const all = [...copies, minion];
+  const bonus = (pick: (m: Minion) => number | null, of: number): number =>
+    all.reduce((sum, m) => sum + (pick(m) ?? of) - of, 0);
+  const attack = (real ? (goldenCard.attack ?? 0) : 2 * baseAttack) + bonus((m) => m.attack, baseAttack);
+  const health = (real ? (goldenCard.health ?? 0) : 2 * baseHealth) + bonus((m) => m.health, baseHealth);
+  const any = (field: 'taunt' | 'divineShield' | 'poisonous' | 'venomous' | 'reborn' | 'windfury' | 'stealth'): boolean =>
+    all.some((m) => m[field]);
+
+  return {
+    consumed: copies.map((m) => m.entityId),
+    golden: {
+      ...minion,
+      cardId: real ? goldenCard.id : `${minion.cardId}_G`,
+      zonePos: state.hand.length - copies.filter((m) => state.hand.includes(m)).length + 1,
+      attack,
+      health,
+      maxHealth: health,
+      taunt: any('taunt'),
+      divineShield: any('divineShield'),
+      poisonous: any('poisonous'),
+      venomous: any('venomous'),
+      reborn: any('reborn'),
+      windfury: any('windfury'),
+      stealth: any('stealth'),
+      golden: true,
+      frozen: false,
+      enchantments: all.flatMap((m) => m.enchantments),
+      // Накопленные счётчики живут на копии борда, а не на купленной.
+      scriptData: copies[0]?.scriptData ?? minion.scriptData,
+      tags: { ...minion.tags, PREMIUM: 1, [TRIPLED_TAG]: base?.dbfId ?? 1 },
+      buyCost: null,
+    },
+  };
+}
+
+/**
+ * Сколько золота приносит розыгрыш собранного золотого на этом герое.
+ *
+ * Обычно — ноль: награда за тройку — Discover, и что он даст, решит игра.
+ * У «Double Time» и аномалии «False Idols» награду заменяет монетка
+ * (part58, part2, `tripleRewardCoinWords`): одна Tavern Coin «Gain 1 Gold»
+ * с ценой 0 на каждый такой розыгрыш.
+ */
+export function tripleRewardGold(
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
+  const coins = tripleRuleSources(state).some((id) => {
+    const text = cards.info(id)?.text ?? '';
+    return rules.tripleRewardCoinWords.some((w) => new RegExp(w, 'i').test(text));
+  });
+  return coins ? 1 : 0;
+}
 
 /**
  * Статы, которые сила героя даёт КАЖДОМУ разыгранному миньону.
@@ -3108,6 +3241,7 @@ export function buyRules(
       // витрины тега `TECH_LEVEL` может ещё не быть, и подпись «тир ?» рядом
       // с посчитанной по тиру ценностью выглядела бы противоречием.
       const tier = minion.techLevel ?? deps.cards.info(minion.cardId)?.techLevel ?? null;
+      const merge = value.completesTriple ? tripleMergeOf(minion, state, deps.cards, rules) : null;
 
       return [
         {
@@ -3118,6 +3252,7 @@ export function buyRules(
           requiresSlot,
           sellFirst,
           magnetizeTo: host,
+          ...(merge === null ? {} : { tripleMerge: merge }),
           ...(value.heroPowerBuyLeft === null ? {} : { heroPowerBuyLeft: value.heroPowerBuyLeft }),
           // Пол был ЕДИНИЦЕЙ по краю наблюдений: в логе part40 цена силы
           // принимает ровно три значения — 3 (десять раз), 2 (десять)
@@ -3323,8 +3458,14 @@ export function playRules(
     }
 
     const name = deps.cards.info(minion.cardId)?.name ?? minion.cardId;
+    // Монетка вместо награды за тройку (part58): золото приходит розыгрышем
+    // и тратится в этот же ход — план обязан его видеть. Очков за него
+    // не прибавляется, как и за обычную награду: розыгрыш золотого и так
+    // стоит верхней строкой, а золото довезёт `grantsGold`.
+    const coinGold = isTripledGolden(minion) ? tripleRewardGold(state, deps.cards, rules) : 0;
     const notes: string[] = [];
     if (doomed) notes.push('умрёт при розыгрыше в этот ход — но хрип/перерождение сработают');
+    if (coinGold > 0) notes.push(`сила героя: даст монетку (+${String(coinGold)} золота)`);
     if (value.completesTriple) notes.push('собирает тройку');
     else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
     if (minion.golden) notes.push('золотой');
@@ -3385,6 +3526,7 @@ export function playRules(
         sellFirst: full && host === null ? (victim?.minion ?? null) : null,
         magnetizeTo: host,
         spellBranches: modal?.branches,
+        ...(coinGold > 0 ? { grantsGold: coinGold } : {}),
         // Цель ветви — в самой строке действия: «Choose One» у миньона игра
         // спрашивает сразу после розыгрыша, и «на кого» — половина вопроса
         // (part43). Цель считается на борде ПОСЛЕ розыгрыша: сам миньон уже

@@ -24,7 +24,7 @@
    "BG_LOE_077",
    "TB_BaconShop_HP_022e"
   ],
-  "battleTextWords": 383,
+  "battleTextWords": 385,
   "bloodGemGetWords": 51,
   "bloodGemUpgradeWords": [
    "BG20_205",
@@ -638,6 +638,10 @@
    "BG24_Reward_350",
    "BG27_Anomaly_301",
    "BG30_MagicItem_439",
+   "BG34_HERO_002p"
+  ],
+  "tripleRewardCoinWords": [
+   "BG27_Anomaly_301",
    "BG34_HERO_002p"
   ],
   "untargetedSpellWords": 893

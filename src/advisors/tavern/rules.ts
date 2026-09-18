@@ -280,6 +280,20 @@ export interface TavernRules {
   readonly tripleCopiesWords: readonly string[];
 
   /**
+   * Чем сила героя меняет награду за тройку на МОНЕТКУ.
+   *
+   * Та же «Double Time», вторая половина текста: «They give Tavern Coins
+   * instead of Triple Rewards». Тот же текст у аномалии «False Idols»
+   * (part2). Лог part58: каждый золотой с тегом
+   * `BACON_TRIPLED_BASE_MINION_ID` (девять слитых и один из Lockbox) при
+   * РОЗЫГРЫШЕ кладёт в руку ровно одну Tavern Coin `BG28_810` — 10 из 10,
+   * монетка с ценой 0 и текстом «Gain 1 Gold». Значит розыгрыш такого золотого
+   * приносит один золотой в этот же ход, и план обязан донести его
+   * до следующего шага (`grantsGold`), как золото любой другой карты.
+   */
+  readonly tripleRewardCoinWords: readonly string[];
+
+  /**
    * Чем сила героя называет статы, которые даёт РОЗЫГРЫШ миньона.
    * Группы 1 и 2 — атака и здоровье.
    *
@@ -1738,7 +1752,18 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // Summon⏎two 1/1 Skeletons» (Harmless Bonehead, part32) с пробелом
   // в шаблоне молча не совпадал, и хрип-призыв стоил ноль — пробел
   // пишется как `\s` (урок part16). В пуле так читаются ещё пять карт.
-  battleTextWords: ['rally:', '(?<!you\\s|your\\s)summons?\\s'],
+  // Триггер на атаку СОЮЗНИКА — тоже боевой эффект: «Whenever another
+  // friendly minion attacks, this plays a Blood Gem on it» (Prodigious
+  // Tusker, part58 ход 5: игрок взял его вместо Aureate Laureate, и по полю
+  // хода борд с ним брал 68.0 % против 50.6 %). Корпус part4–part58:
+  // 13 точек 9 партий, +8.90 ± 5.72 п.п., лучше 5, хуже 2 (не ниже −1.6).
+  // Только нейтральная форма: «another friendly Dragon/Beast» у Roaring
+  // Recruiter и Cage Gnawer требует проверки своих того племени, а тут её нет.
+  battleTextWords: [
+    'rally:',
+    '(?<!you\\s|your\\s)summons?\\s',
+    '\\bwhenever\\s+another\\s+friendly\\s+minion\\s+attacks\\b',
+  ],
 
   // «Battlecry: Get two Slimy Shields…» (Oozeling, part16). Строго после
   // «Battlecry:» в том же предложении: триггеры и хрипы сюда не попадают.
@@ -1756,6 +1781,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // «You only need 2 copies to make minions Golden.» (Double Time). Слово
   // «copies» в силах пула больше нигде в этом смысле не встречается.
   tripleCopiesWords: ['\\bonly\\s+need\\s+(\\d+)\\s+copies\\b'],
+
+  // «They give Tavern Coins instead of Triple Rewards.» (Double Time).
+  // Перенос строки в снапшоте ходит посреди предложения — пробелы как `\s`.
+  tripleRewardCoinWords: ['\\btavern\\s+coins?\\s+instead\\s+of\\s+triple\\s+rewards?\\b'],
 
   // «When you play a minion, give it a +1/+1 hat…» (Hat Trick). Между
   // «minion,» и «give» стоит перенос строки, поэтому `\s+`, а числа

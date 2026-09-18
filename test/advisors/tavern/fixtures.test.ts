@@ -88,16 +88,23 @@ describe('советник таверны на фикстурах', () => {
 
   it('на полном борде покупка либо в руку под тройку, либо через явную продажу', () => {
     // part2, ход 17: семь миньонов на борде, в витрине вторая копия
-    // Fire Baller. Копии слот не нужен — она ждёт тройку в руке; обмен
-    // с бордом остаётся отдельной рекомендацией продажи с именем жертвы.
+    // Fire Baller. Слот ей не нужен. Прежде тест ждал «в руку, под тройку»,
+    // но партия идёт под аномалией «False Idols» (две копии собирают
+    // золотого, D246), и лог это подтверждает: игрок купил копию в 00:06:16,
+    // и на борде тут же золотая Fire Baller 14/12. Слияние забирает копию
+    // с борда и освобождает место само; обмен с бордом остаётся отдельной
+    // рекомендацией продажи с именем жертвы.
     const { state } = turnOf(part2, 17);
     expect(state.board).toHaveLength(DEFAULT_TAVERN_RULES.boardSize);
+    expect(state.anomalyCardId).toBe('BG27_Anomaly_301');
 
     const advice = adviseTavern(state, { cards });
     const buy = advice?.recommendations.find((r) => r.action === 'buy');
     expect(buy?.requiresSlot).toBe(false);
     expect(buy?.sellFirst).toBeNull();
-    expect(buy?.reason).toContain('в руку, под тройку');
+    expect(buy?.reason).toContain('место освободится само');
+    expect(buy?.tripleMerge?.golden.attack).toBe(14);
+    expect(buy?.tripleMerge?.golden.health).toBe(12);
 
     // Рекомендация продажи называет и жертву, и кандидата из витрины.
     const sell = advice?.recommendations.find((r) => r.action === 'sell');
