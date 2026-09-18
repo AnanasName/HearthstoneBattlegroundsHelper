@@ -1264,3 +1264,27 @@ export function part57Game(): string {
 export function part58Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part58', 'game.log'), 'utf8');
 }
+
+/**
+ * part59 — Крысиный король `TB_BaconShop_HERO_12`, 18.09.2026, 13:31–13:53,
+ * **4-е место**, 12 ходов таверны, билд 251952. Нежить через Drustfallen
+ * Butcher и Butchering, Dead Bellringer, мехи на Lullabot.
+ *
+ * Следующая партия игрока после part58, своя сессия клиента (13:30:13),
+ * ровно одна партия, доиграна до `FINAL_GAMEOVER`; вырезана
+ * `fixture:passport --game=1 --write=part59` сразу после партии, пока
+ * игрок начинал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **Сила «A Tale of Kings»** — вариант нового племени каждый ход
+ *     (`TB_BaconShop_HP_041b/f/g/i/k`, «Discover a <Tribe>. Swaps type
+ *     each turn»), четыре нажатия за партию. На ходу 1 — ровно цепочка
+ *     part30: сила за 2 (King of Undead) → найденный Harmless Bonehead
+ *     из руки → Tavern Dish Banana за 1 (+2/+2) на него, борд 3/3.
+ *  2. Тринкеты Deathly Phylactery и Sinstone Sticker, золотой Gearfin
+ *     из Lockbox, тёмный дар трижды, семь заклинаний Butchering за ход.
+ */
+export function part59Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part59', 'game.log'), 'utf8');
+}
