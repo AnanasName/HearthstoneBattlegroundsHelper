@@ -1288,3 +1288,29 @@ export function part58Game(): string {
 export function part59Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part59', 'game.log'), 'utf8');
 }
+
+/**
+ * part60 — Val'kyr Varden `BG22_HERO_004_SKIN_C` (облик Varden Dawngrasp),
+ * 18.09.2026, 14:34–15:09, **1-е место**, 18 ходов таверны, билд 251952.
+ * Элементали: Nomi, Kitchen Nightmare (золотая с хода 19), два Unbound
+ * Tempest, Kelp Keeper, Air Revenant.
+ *
+ * Своя сессия клиента (14:33:29), ровно одна партия, доиграна до
+ * `FINAL_GAMEOVER`; вырезана `fixture:passport --game=1 --write=part60`
+ * сразу после партии, пока игрок начинал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **Пассивная сила «Twice as Nice»** `BG22_HERO_004p`: «After the Tavern
+ *     is Refreshed, copy its highest-Tier minion and Freeze them both».
+ *     Блок `TRIGGER` на сущности силы (id=166) и `FULL_ENTITY` копии
+ *     с `CREATOR=166` — 65 раз за партию: в начале каждого хода таверны
+ *     и после каждого обновления.
+ *  2. Кадр игрока 14:51 (ход 21) совпадает со срезом `fixture:at part60
+ *     14:51:30`: витрина Razorfen Flapper ×2, Intrepid Botanist, Meteorite
+ *     Crasher 118/128, Felboar 2/6 ×2 (пара силы героя), план «продать Nomi
+ *     → купить Meteorite Crasher → Time Management → обновить».
+ */
+export function part60Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part60', 'game.log'), 'utf8');
+}
