@@ -46,6 +46,14 @@ export function minionLabel(m: Minion, cards: CardIndex): string {
     m.windfury ? 'вихрь' : '',
   ].filter((x) => x !== '');
 
+  // Заготовка найденного миньона в плане (`isStandIn`, part59): её карта —
+  // типичный выбор пула, а не то, что игрок найдёт, и имя с числами
+  // читалось бы обещанием. Называется племенем — ровно тем, что известно.
+  if (m.entityId < 0) {
+    const races = cards.info(m.cardId)?.races ?? [];
+    return races.length === 0 ? 'найденного миньона' : `найденного ${races.join('/')}`;
+  }
+
   return (
     `${cards.info(m.cardId)?.name ?? m.cardId} ${String(m.attack ?? '?')}/${String(m.health ?? '?')}` +
     (marks.length > 0 ? ` (${marks.join(',')})` : '')

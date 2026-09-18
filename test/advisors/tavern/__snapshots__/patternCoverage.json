@@ -85,6 +85,10 @@
    "BG36_503",
    "BG36_503_G"
   ],
+  "deathCounterStatsWords": [
+   "BG25_008",
+   "BG25_008_G"
+  ],
   "delayedRewardWords": [
    "BG22_HERO_000p_Alt",
    "BG27_Anomaly_805",
@@ -554,6 +558,38 @@
    "BG23_HERO_303p2",
    "BG27_Anomaly_555"
   ],
+  "playPayoffWords": [
+   "BG31_177",
+   "BG31_177_G",
+   "BG33_334",
+   "BG33_334_G"
+  ],
+  "rebornGainStatsWords": [
+   "BG36_514",
+   "BG36_514_G"
+  ],
+  "rebornGiveAttackWords": [
+   "BG36_515",
+   "BG36_515_G"
+  ],
+  "rebornPayoffWords": [
+   "BG25_005",
+   "BG25_005_G",
+   "BG25_020",
+   "BG25_020_G",
+   "BG33_116",
+   "BG33_116_G",
+   "BG34_Giant_024",
+   "BG34_Giant_024_G",
+   "BG36_514",
+   "BG36_514_G",
+   "BG36_515",
+   "BG36_515_G",
+   "BG36_MagicItem_205",
+   "BG36_MagicItem_217",
+   "TB_BaconShop_HERO_22_Buddy",
+   "TB_BaconShop_HERO_22_Buddy_G"
+  ],
   "selfAuraWords": 51,
   "selfTriggerWords": 65,
   "sellValueWords": 61,
@@ -620,6 +656,28 @@
   "targetsFriendlyWords": 116,
   "tavernTriggerWords": 704,
   "temporaryBuffWords": 134,
+  "tribeAttackThisGameWords": [
+   "BG25_007",
+   "BG25_007_G",
+   "BG25_011",
+   "BG25_011_G",
+   "BG27_029",
+   "BG27_029_G",
+   "BG28_604",
+   "BG30_MagicItem_547",
+   "BG30_MagicItem_547t",
+   "BG32_MagicItem_276",
+   "BG33_116",
+   "BG33_116_G",
+   "BG33_323",
+   "BG33_323_G",
+   "BG34_690",
+   "BG34_690_G",
+   "BG34_692",
+   "BG34_692_G",
+   "BG34_Giant_081",
+   "BG34_Giant_081_G"
+  ],
   "tribePremiumKeepWords": 1849,
   "tribeRecipientWords": 364,
   "tribeTextWords.MURLOC": 88,

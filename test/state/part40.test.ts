@@ -6,6 +6,7 @@ import {
   buffTarget,
   heroPowerBuyDiscount,
   heroPowerRule,
+  isStandIn,
   setStatsOf,
 } from '../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../src/advisors/tavern/rules.js';
@@ -129,11 +130,18 @@ describe('part40: пираты Патчеса — активации, прода
 
     // План применяет шаг по-настоящему: жертва уходит с борда, а её золото
     // доезжает до остатка — иначе шаг стоил бы золота, которого нет.
+    // С part59 (D248) на освободившееся место встаёт заготовка найденного
+    // миньона — ради него игрок и продавал (нашёл золотого Aureate Laureate).
     const plan = spendPlan(state, { cards });
     const step = plan.steps[0];
     expect(step?.recommendation.action).toBe('heroPower');
     expect(step?.goldAfter).toBe(0);
-    expect(step?.stateAfter.board).toHaveLength(6);
+    const victim = step?.recommendation.sellFirst ?? null;
+    expect(victim).not.toBeNull();
+    const after = step?.stateAfter.board ?? [];
+    expect(after).toHaveLength(7);
+    expect(after.some((m) => m.entityId === victim?.entityId)).toBe(false);
+    expect(after.filter(isStandIn)).toHaveLength(1);
   });
 
   it('без полного борда продажа силу не оплачивает — граница правки (пункт 2)', () => {

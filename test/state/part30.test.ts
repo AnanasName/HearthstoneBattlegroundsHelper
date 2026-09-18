@@ -126,9 +126,12 @@ describe('part30: сила-Discover, заклинание по витрине, �
     // Discover — ВЫБОР из предложенного, а не случайная карта: ожидание
     // лучшего из трёх. Мехов первого тира в пуле два (Lullabot 5.0,
     // Cord Puller 7.5) — предложение почти наверняка содержит обоих,
-    // и ожидание равно лучшему.
-    expect(rec?.score).toBeCloseTo(7.5, 1);
+    // и ожидание равно лучшему. Плюс сэкономленный золотой: сила за 2
+    // оставляет 1 ровно на банан витрины, и с part59 это не «сгорит»,
+    // а скидка по курсу — 7.5 + 3.0.
+    expect(rec?.score).toBeCloseTo(10.5, 1);
     expect(rec?.reason).toContain('MECH');
+    expect(rec?.reason).toContain('остаток на Tavern Dish Banana');
 
     // Верхняя строка совета — сила, а не «просто купить существо»:
     // лучшая покупка (Tusked Camper) стоит 7.0. В логе игрок сделал ровно
@@ -136,6 +139,21 @@ describe('part30: сила-Discover, заклинание по витрине, �
     // (19:56:55) и купил на него банан за 1 (19:56:58).
     const advice = adviseTavern(s, { cards });
     expect(advice?.recommendations[0]?.action).toBe('heroPower');
+  });
+
+  /**
+   * Открытый с 27.08 вопрос «список и план на ходу 1 расходятся» закрыт
+   * в part59, где игрок сыграл ту же цепочку и повторил ту же жалобу.
+   * Шаг силы кладёт на борд плана заготовку найденного меха (`bringsMinion`),
+   * и банану есть на кого лечь — план совпадает с тем, что сыграно в логе.
+   */
+  it('пункт 1: план — сила и банан на найденного, как сыграно', () => {
+    const plan = spendPlan(shot1 as GameState, { cards });
+    const steps = plan.steps.map((st) => st.recommendation);
+    expect(steps.map((r) => r.action)).toEqual(['heroPower', 'buy']);
+    expect(steps[1]?.spellCardId).toBe('BG28_897');
+    expect(steps[1]?.targetMinion?.entityId).toBeLessThan(0);
+    expect(plan.goldLeft).toBe(0);
   });
 
   /**

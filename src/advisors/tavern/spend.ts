@@ -5,6 +5,10 @@ import {
   battlecryPayoffOf,
   battlecryPayoffPoints,
   fullBoardBurnNote,
+  isStandIn,
+  isTripledGolden,
+  paysForPlayOf,
+  tripleRewardGold,
   withBattlecryPayoff,
   withKeyword,
   trinketAdvice,
@@ -72,6 +76,46 @@ function withBoardGains(
       health: (m.health ?? 0) + hit.reduce((sum, g) => sum + g.health, 0),
     };
   });
+}
+
+/**
+ * Борд после шага, который ПРИНОСИТ миньона (`Recommendation.bringsMinion`,
+ * part59): заготовка встаёт на борд, если есть место, — как купленный
+ * миньон. На полном борде тело уходит в руку, а продажу под него правило
+ * уже вычло из очков (D008), — там шаг остаётся прежним, без тела: какую
+ * жертву выберет игрок, когда увидит карту, план не знает.
+ *
+ * Место под заготовку — только если его хватает и миньонам РУКИ: они уже
+ * наши и известны, а заготовка — догадка. part40 (ход 21): сила Патчеса
+ * первым шагом заняла бы последний слот, и золотой Cadaver Caretaker 6/6
+ * из руки выпал бы из плана.
+ *
+ * Id у каждой заготовки свой (−1, −2, …): заготовок за цепочку бывает
+ * больше одной, а продажа и цель различают тела по id.
+ */
+function withStandIn(
+  board: readonly Minion[],
+  hand: readonly Minion[],
+  rec: Recommendation,
+  rules: TavernRules,
+): readonly Minion[] {
+  const body = rec.bringsMinion;
+  if (body === undefined || board.length + hand.length >= rules.boardSize) return board;
+  const taken = [...board, ...hand].filter(isStandIn).length;
+  return [...board, { ...body, entityId: -1 - taken, zonePos: board.length + 1 }];
+}
+
+/**
+ * Борд после шага, чья цель ПОГИБАЕТ (`Recommendation.destroysTarget`,
+ * part59): цель уходит, а у перерождающейся на её месте остаётся копия.
+ */
+function withTargetDestroyed(board: readonly Minion[], rec: Recommendation): readonly Minion[] {
+  const target = rec.targetMinion ?? null;
+  if (rec.destroysTarget === undefined || target === null) return board;
+  const copy = rec.destroysTarget.rebornCopy;
+  return copy === null
+    ? withoutEntity(board, target.entityId)
+    : board.map((m) => (m.entityId === target.entityId ? copy : m));
 }
 
 /**
@@ -270,10 +314,16 @@ export function applyRecommendation(
     }
 
     case 'buy': {
-      // Заклинание витрины: цена известна, эффект — нет.
+      // Заклинание витрины: цена известна, эффект — нет. Кроме тела, которое
+      // оно приносит из пула тира (`bringsMinion`, part59).
       if (rec.minion === null) {
         return {
-          state: paid({ shopSpells: withoutSpell(state.shopSpells, rec.spellCardId) }),
+          state: paid({
+            shopSpells: withoutSpell(state.shopSpells, rec.spellCardId),
+            board: withStandIn(withTargetDestroyed(state.board, rec), state.hand, rec, rules),
+            // Золото следующего хода — туда же, куда его пишет игра (D238).
+            extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
+          }),
           opaque: true,
           terminal: false,
         };
@@ -361,10 +411,16 @@ export function applyRecommendation(
         return {
           state: paid({
             handSpells: withoutSpell(state.handSpells, rec.spellCardId),
+            // Золото следующего хода — туда же, куда его пишет игра (D238).
+            extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
+            // Запас бесплатных обновлений (part59): кнопка стоит ноль, пока он есть.
+            ...((rec.grantsFreeRefreshes ?? 0) > 0
+              ? { freeRefreshes: state.freeRefreshes + (rec.grantsFreeRefreshes ?? 0), rerollCost: 0 }
+              : {}),
             // Дневной заряд магнита-хранителя потрачен: следующее чародейское
             // заклинание той же цепочки постоянным на нём уже не станет
             // (part21). Счётчик живёт в `scriptData[0]` — «({0} left!)».
-            board: withoutMagnetCharge(state.board, rec),
+            board: withTargetDestroyed(withoutMagnetCharge(state.board, rec), rec),
             shop: refreshes ? [] : state.shop,
             // Покупки после обновления обещаны самим советом («на 4 золота
             // покупок 4 по 1»), и их золото уходит здесь же: шаг обрывает
@@ -438,6 +494,25 @@ export function applyRecommendation(
       // нажатия УЖЕ посчитаны покупками хода, и без списания план потратил
       // бы те же три золота второй раз.
       const refreshes = rec.refreshesShop === true;
+      const granted = grants
+        ? withBoardGains(sellBoard, rec.boardGains).map((m) => {
+            if (gift == null || m.entityId !== gift.entityId) return m;
+            const withWord = keyword === undefined ? m : withKeyword(m, keyword);
+            const withGold =
+              golden === undefined
+                ? withWord
+                : {
+                    ...withWord,
+                    golden: true,
+                    attack: (withWord.attack ?? 0) + golden.attack,
+                    health: (withWord.health ?? 0) + golden.health,
+                  };
+            if (stats === undefined) return withGold;
+            return stats.stat === 'attack'
+              ? { ...withGold, attack: (withGold.attack ?? 0) + stats.amount }
+              : { ...withGold, health: (withGold.health ?? 0) + stats.amount };
+          })
+        : sellBoard;
       return {
         state: paid({
           gold: state.gold - rec.cost + refund - (refreshes ? (rec.refreshSpend ?? 0) : 0),
@@ -463,25 +538,9 @@ export function applyRecommendation(
             : rec.minion === null
               ? state.shop
               : withoutEntity(state.shop, rec.minion.entityId),
-          board: grants
-            ? withBoardGains(sellBoard, rec.boardGains).map((m) => {
-                if (gift == null || m.entityId !== gift.entityId) return m;
-                const withWord = keyword === undefined ? m : withKeyword(m, keyword);
-                const withGold =
-                  golden === undefined
-                    ? withWord
-                    : {
-                        ...withWord,
-                        golden: true,
-                        attack: (withWord.attack ?? 0) + golden.attack,
-                        health: (withWord.health ?? 0) + golden.health,
-                      };
-                if (stats === undefined) return withGold;
-                return stats.stat === 'attack'
-                  ? { ...withGold, attack: (withGold.attack ?? 0) + stats.amount }
-                  : { ...withGold, health: (withGold.health ?? 0) + stats.amount };
-              })
-            : sellBoard,
+          // Найденный миньон (part59) — на борд, если есть место: план
+          // обязан видеть и слот, и цель для следующего шага.
+          board: withStandIn(granted, state.hand, rec, rules),
         }),
         opaque: !grants,
         terminal: refreshes,
@@ -564,7 +623,8 @@ export function applyRecommendation(
           activatedEntityIds: activated,
           // Обещанное к следующему ходу золото — туда же, куда его пишет игра.
           extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
-          board: withBoardGains(state.board, rec.boardGains),
+          // «Then destroy it» (D207, part59): цель — её копия.
+          board: withBoardGains(withTargetDestroyed(state.board, rec), rec.boardGains),
           shop: replaced === null ? state.shop : withoutEntity(state.shop, replaced.entityId),
         }),
         opaque: !baited,
@@ -695,6 +755,50 @@ function planSteps(
   // усиление же силу вперёд не пропускает. Второй шаг той же силы не ждёт —
   // первая цель уже выбрана.
   const head = spending[0];
+  // Подъём — ПЕРЕД розыгрышем золотого, который принесёт награду за тройку
+  // (part59, ход 13). Тир награды фиксируется в блоке розыгрыша золотого
+  // («тир + 1» на сущности `TB_BaconShop_Triples_01`: 302 из 305 наград
+  // корпуса, три расхождения — ошибка сканера на склеенных логах, и ни
+  // одна не менялась в руке — part16 поднялась с наградой в руке и получила
+  // прежний тир). Игрок поднялся до 5 и только потом сыграл Gearfin —
+  // выбор тира 6, Eternal Summoner. Здесь только ПОРЯДОК: подъём,
+  // который цепочка и так делает, не должен идти после золотого. У героев
+  // с монеткой вместо награды (D246) золотому спешить некуда — он сам
+  // приносит золото, и там порядок не трогается.
+  if (
+    head?.action === 'play' &&
+    head.minion !== null &&
+    isTripledGolden(head.minion) &&
+    tripleRewardGold(state, deps.cards, rules) === 0
+  ) {
+    const level = spending.find((rec) => rec.action === 'levelUp');
+    if (level !== undefined) return [level, ...spending.filter((rec) => rec !== level)];
+  }
+  // Плательщик за розыгрыш своего племени — РАНЬШЕ получателя (part59,
+  // ход 11). Mechagnome Interpreter «Whenever you play or Magnetize a Mech,
+  // give it +3/+1» стоил в списке 8.5 — ниже покупок, и план ставил его
+  // последним, после магнита Enchanted Sentinel на Lullabot. Игрок сыграл
+  // его первым: Lullabot 10/15 против 7/14 у плана, +6.3 п.п. по полю при
+  // том же составе. Переставляется только бесплатный розыгрыш из руки
+  // и только когда место под него есть, не отнимая слота у самого шага.
+  const playsMinion = (rec: Recommendation): boolean =>
+    rec.action === 'buy' || rec.action === 'play' || rec.action === 'spin';
+  if (head !== undefined && head.minion !== null && playsMinion(head)) {
+    const receiver = head.minion;
+    const slots = rules.boardSize - state.board.length;
+    const needs = head.magnetizeTo != null ? 0 : 1;
+    const payer = spending.find(
+      (rec) =>
+        rec.action === 'play' &&
+        rec.minion !== null &&
+        rec.cost === 0 &&
+        rec.sellFirst === null &&
+        rec.magnetizeTo == null &&
+        slots >= 1 + needs &&
+        paysForPlayOf(rec.minion, receiver, deps.cards, rules),
+    );
+    if (payer !== undefined) return [payer, ...spending.filter((rec) => rec !== payer)];
+  }
   const pressesLast = (rec: Recommendation): boolean => rec.sharesAttack?.last === true;
   if (head?.buffsWholeBoard === true || (head !== undefined && pressesLast(head))) {
     const ends = (rec: Recommendation): boolean =>
@@ -738,7 +842,11 @@ function stepKey(rec: Recommendation): string | null {
 }
 
 export interface SpendPlanOptions {
-  /** Предел длины плана — страховка от зацикливания на бесплатных шагах. */
+  /**
+   * Предел шагов плана, ДВИГАЮЩИХ ЗОЛОТО. Бесплатные шаги (розыгрыш из руки,
+   * бесплатная активация) в него не идут — у них свой потолок по числу карт
+   * руки и миньонов борда (`buildChain`, part59).
+   */
   readonly maxSteps?: number;
 }
 
@@ -1023,7 +1131,7 @@ export function undoneValue(
               ? 0
               : battlecryPayoffPoints(payoff, origin.before.board, null, deps.cards, rules);
           undone += Math.max(0, (origin.rec.standaloneScore ?? origin.rec.score) - fed);
-          if (origin.rec.action === 'buy') {
+          if (origin.rec.action === 'buy' || origin.rec.bringsMinion !== undefined) {
             undone += Math.max(0, origin.rec.cost - rules.sellGold) * rules.goldPointValue;
           }
         }
@@ -1032,6 +1140,15 @@ export function undoneValue(
     }
     if ((rec.action === 'buy' || rec.action === 'play') && rec.minion !== null && rec.magnetizeTo == null) {
       placed.set(rec.minion.entityId, [...(placed.get(rec.minion.entityId) ?? []), { rec, before }]);
+    }
+    // Найденный миньон (part59) — такое же поставленное тело: продажа его
+    // той же цепочкой отменяет шаг силы или заклинания, который его принёс.
+    if (rec.bringsMinion !== undefined) {
+      const after = plan.steps[k]?.stateAfter;
+      const body = after?.board.find(
+        (m) => isStandIn(m) && !before.board.some((b) => b.entityId === m.entityId),
+      );
+      if (body !== undefined) placed.set(body.entityId, [{ rec, before }]);
     }
     // Покупка ВНУТРИ шага «активировать, затем купить» (part57) — такая же
     // покупка: её отменяет та же продажа. Судится она отдельной записью
@@ -1124,7 +1241,17 @@ function buildChain(
   let current = state;
   let truncated = false;
 
-  for (let i = 0; i < maxSteps; i += 1) {
+  // В предел идут только шаги, которые двигают золото. Бесплатный розыгрыш
+  // из руки или бесплатная активация места в нём не занимают (part59):
+  // на ходах 19–23 пять-восемь бесплатных заклинаний руки съедали все восемь
+  // шагов, и план печатал «остаётся 10 — сгорит» при подъёме-хвосте D214
+  // в списке, а активации Dead Bellringer и обновления, которые игрок
+  // сделал, до плана не доходили. Потолок у бесплатных свой и конечный:
+  // каждый такой шаг снимает карту с руки или гасит активацию своего
+  // миньона, а ключ шага (`stepKey`) второго раза не даёт.
+  const freeCap = state.hand.length + state.handSpells.length + state.board.length;
+  let paidSteps = 0;
+  for (let i = 0; i < maxSteps + freeCap && paidSteps < maxSteps; i += 1) {
     const rec =
       i === 0 && forcedFirst !== null
         ? forcedFirst
@@ -1148,6 +1275,10 @@ function buildChain(
       opaque: applied.opaque,
       stateAfter: after,
     });
+    const free =
+      after.gold === current.gold &&
+      (rec.action === 'play' || rec.action === 'activate' || rec.action === 'heroPower');
+    if (!free) paidSteps += 1;
     current = after;
 
     if (applied.terminal) {

@@ -184,6 +184,33 @@ export interface Recommendation {
    */
   readonly tripleMerge?: { readonly consumed: readonly number[]; readonly golden: Minion };
   /**
+   * Миньон, которого шаг ПРИНОСИТ сейчас, — ЗАГОТОВКА на его место
+   * (`isStandIn`): у силы «Discover a <Tribe>» карта станет известна только
+   * на экране выбора, а план обязан знать, что тело будет (part59, part30).
+   *
+   * Без поля шаг силы был непрозрачным, и найденного миньона план не видел:
+   * на пустом борде ходу 1 банану за 1 было не на кого лечь, остаток
+   * числился сгоревшим, и план советовал «просто купить» против цепочки
+   * «сила → банан на найденного», которую игрок сыграл в обеих партиях.
+   * Карта заготовки — типичный выбор пула (`poolStandIn`), а не обещание.
+   */
+  readonly bringsMinion?: Minion;
+  /**
+   * Цель шага ПОГИБАЕТ — «Destroy a friendly Undead» (Butchering, part59).
+   * План убирает её с борда, а у цели с перерождением ставит на её место
+   * копию (`rebornCopy`): без этого следующий такой же шаг целил в неё
+   * снова, и план хода 21 назначал семь Butchering подряд одному и тому же
+   * Snazzy Phantom.
+   */
+  readonly destroysTarget?: { readonly rebornCopy: Minion | null };
+  /**
+   * Сколько бесплатных обновлений шаг кладёт в запас — Leaf Through the
+   * Pages из руки (part59, ход 15). План пишет их в `freeRefreshes` и роняет
+   * цену кнопки в ноль, как игра (part57, 18:11:46), — иначе следующий шаг
+   * «ОБНОВИТЬ» платил бы золотом при полном запасе.
+   */
+  readonly grantsFreeRefreshes?: number;
+  /**
    * Остаток счётчика силы «после N покупок с механикой — награда» ПОСЛЕ
    * этой покупки (part34, «Бранное дело»). Заполняется у покупки, которую
    * сила засчитывает; план кладёт число в `heroPowerScriptData[0]`
@@ -796,8 +823,52 @@ export function tribeMates(candidate: Minion, board: readonly Minion[], cards: C
 export function copiesOwned(candidate: Minion, state: GameState): number {
   if (candidate.golden) return 0;
   const same = (m: Minion): boolean =>
-    m.cardId === candidate.cardId && !m.golden && m.entityId !== candidate.entityId;
+    m.cardId === candidate.cardId &&
+    !m.golden &&
+    m.entityId !== candidate.entityId &&
+    !isStandIn(m);
   return state.board.filter(same).length + state.hand.filter(same).length;
+}
+
+/**
+ * Заготовка найденного миньона в гипотетическом состоянии плана
+ * (`Recommendation.bringsMinion`, part59).
+ *
+ * Признак — отрицательный `entityId`: живые сущности партии положительны,
+ * а заготовки ПУЛА (`poolMinion`) тоже отрицательны, но стоят только
+ * кандидатами и на борд не попадают. Копией заготовка не считается нигде:
+ * её карта — типичный выбор пула, а не то, что игрок найдёт, и пара «под
+ * тройку» с ней была бы парой с картой, которой у нас нет.
+ */
+export function isStandIn(m: Minion): boolean {
+  return m.entityId < 0;
+}
+
+/**
+ * Разыгрывается ли `payer` раньше, чем шаг с `receiver`: плательщик
+ * «Whenever you play or Magnetize a <Tribe>, give it +X/+Y» (`playPayoffWords`,
+ * part59, ход 11) и получатель его племени (амальгама — любого).
+ */
+export function paysForPlayOf(
+  payer: Minion,
+  receiver: Minion,
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): boolean {
+  if (payer.entityId === receiver.entityId) return false;
+  const text = (cards.info(payer.cardId)?.text ?? '').replace(/<[^>]*>/g, '');
+  const tribes = Object.values(rules.tribeTextWords).join('|');
+  for (const word of rules.playPayoffWords) {
+    const m = new RegExp(word.replace('{tribe}', `(?:${tribes})`), 'i').exec(text);
+    if (m === null) continue;
+    const race = Object.entries(rules.tribeTextWords).find(([, p]) =>
+      new RegExp(`^(?:${p})$`, 'i').test(m[1] ?? ''),
+    )?.[0];
+    if (race === undefined) continue;
+    const theirs = racesOf(receiver, cards);
+    if (theirs.includes(race) || theirs.includes(RACE_ALL)) return true;
+  }
+  return false;
 }
 
 /**
@@ -891,7 +962,7 @@ export function tripleMergeOf(
   if (minion.golden) return null;
   const needed = copiesForTriple(state, cards, rules);
   const same = (m: Minion): boolean =>
-    m.cardId === minion.cardId && !m.golden && m.entityId !== minion.entityId;
+    m.cardId === minion.cardId && !m.golden && m.entityId !== minion.entityId && !isStandIn(m);
   const copies = [...state.board.filter(same), ...state.hand.filter(same)].slice(0, needed - 1);
   if (copies.length < needed - 1) return null;
 
@@ -3074,7 +3145,20 @@ export function buyRules(
       const cost = buyCostOf(m, rules);
       return cost > state.gold && cost <= state.gold + rules.sellGold;
     });
-  const elective = saleOpensBuy ? electiveVictim(state, deps, rules) : null;
+  // И молчит, когда тело по карману БЕЗ продажи — силой героя, дающей
+  // миньона (part59, ход 5; part8, ход 5). Довод D212 — «без продажи
+  // покупки нет вовсе», а сила за 2 и есть покупка тела без продажи: после
+  // подъёма при двух золотых план продавал Razorfen Geomancer ради второй
+  // копии Harmless Bonehead вместо силы King of Pirates, и оба раза игрок
+  // нажал силу. По полю линия игрока выше на 5.6 п.п. (part59) и 13.5 п.п.
+  // (part8); на корпусе рисунок встречается ровно в этих двух точках
+  // и part9, ход 17. Сила считается только здесь — это дорогое усреднение
+  // пула, и в остальных точках оно не нужно.
+  const bodyWithoutSale = (): boolean => {
+    const power = heroPowerRule(state, deps, rules);
+    return power !== null && power.sellFirst === null && power.cost <= state.gold;
+  };
+  const elective = saleOpensBuy && !bodyWithoutSale() ? electiveVictim(state, deps, rules) : null;
   const victim = full ? weakestOwn(state, deps, rules) : elective;
   const budget = state.gold + (victim === null ? 0 : rules.sellGold);
   // Скидка на силу от покупки своего племени (Патчес, part40): считается
@@ -3121,7 +3205,7 @@ export function buyRules(
       // и место освобождается само.
       const copiesOnBoard = minion.golden
         ? 0
-        : state.board.filter((b) => b.cardId === minion.cardId && !b.golden).length;
+        : state.board.filter((b) => b.cardId === minion.cardId && !b.golden && !isStandIn(b)).length;
 
       const notes: string[] = [];
       let sellFirst: Minion | null = null;
@@ -3312,7 +3396,8 @@ export function playRules(
     // продав Shipwrecked Rascal 7/4» (всплыло, когда клич при Kalecgos стал
     // стоить очков, D224). Пару это не трогает: слабую копию ради сильной
     // из руки продавать можно (part10, ход 11).
-    const copy = (b: Minion): boolean => !minion.golden && !b.golden && b.cardId === minion.cardId;
+    const copy = (b: Minion): boolean =>
+      !minion.golden && !b.golden && b.cardId === minion.cardId && !isStandIn(b);
     const tripled =
       copiesOwned(minion, state) + 1 >= copiesForTriple(state, deps.cards, rules);
     const victim =
@@ -3926,6 +4011,13 @@ export function sellRule(
     action: 'sell',
     minion: worst.minion,
     score: gain - rules.sellMargin,
+    // Очки размена — это ПОКУПКА, которую он открывает (D151): в цепочке
+    // она делается отдельным шагом, и считать её ещё и внутри продажи —
+    // дважды. part57 (ход 15): как только бесплатный Leaf из руки (D256)
+    // оставил золотой и развилка запустилась, цепочка «ПРОДАТЬ Waveling
+    // (16.0) → активация с покупкой» обошла ту же активацию «продав
+    // Waveling» ровно на эти 16 очков.
+    standaloneScore: 0,
     cost: 0,
     requiresSlot: false,
     sellFirst: null,
@@ -4916,7 +5008,15 @@ function givesMinionValue(
   // тиры от первого до своего, фильтр по расе, а `discover` меняет само
   // ожидание — Discover это ВЫБОР, и берётся лучший из трёх, а не средний.
   pool: readonly Minion[] | TierPoolSource | { readonly tier: number } = state.shop,
-): { readonly score: number; readonly average: number; readonly discounted: boolean } {
+  // Заклинание витрины, которое СЕЙЧАС и покупается: остатку его уже
+  // не купить, и делом остатка оно не считается (`leftoverUse`).
+  buying: HandSpell | null = null,
+): {
+  readonly score: number;
+  readonly average: number;
+  readonly discounted: boolean;
+  readonly leftoverSpell: HandSpell | null;
+} {
   const fallback = rules.value.perTechLevel * state.techLevel;
   const average =
     'tier' in pool
@@ -4932,8 +5032,53 @@ function givesMinionValue(
   // Скидка засчитывается не всегда (см. выше), наценка — всегда: лишнее
   // золото уходит независимо от того, на что хватило бы остатка.
   const delta = (rules.minionCost - cost) * rules.goldPointValue;
-  const discounted = delta <= 0 || !spendNow || state.gold - cost >= rules.minionCost;
-  return { score: average + (discounted ? delta : 0), average, discounted };
+  const use = delta > 0 && spendNow ? leftoverUse(state, cost, deps, rules, buying) : null;
+  const discounted = delta <= 0 || !spendNow || use !== null;
+  return {
+    score: average + (discounted ? delta : 0),
+    average,
+    discounted,
+    leftoverSpell: use?.spell ?? null,
+  };
+}
+
+/**
+ * Найдётся ли остатку после действия, дающего миньона, дело в этом же ходу.
+ *
+ * Прежде ответом была только ещё одна покупка («остатка хватает на миньона»).
+ * Но остаток тратится и на ЗАКЛИНАНИЕ ВИТРИНЫ по его цене — part59 и part30,
+ * ход 1: три золота, сила «Discover a <Tribe>» за 2 и Tavern Dish Banana
+ * за 1 («Give a minion +2/+2»). Банан на пустом борде не играется, но
+ * найденный миньон и есть его цель, — и игрок оба раза сыграл ровно
+ * «сила → банан на найденного» (3/3 нежить против Tusked Camper 2/3 у плана;
+ * по полю хода 91.3 % против 50.8 %). Без этой ветки золотой считался
+ * сгоревшим, скидка силы не засчитывалась, и совет стоял за покупкой.
+ *
+ * В счёт идёт только заклинание, которое целится в СВОЕГО миньона
+ * («Give a minion…», `targetsFriendly`), — ему найденное тело и нужно,
+ * и ровно это сыграл игрок. Шире нельзя, и это показали два прогона:
+ * «остаток на Tavern Coin» давал силе Рафаама скидку за золото, которое
+ * монетка тут же возвращает (part52 ход 1: Ominous Seer 2/1 вместо
+ * Suspicious Prisonguard 3/3, −39 п.п. по полю), а «остаток на Enchanted
+ * Lasso» поднимал прокрутку River Skipper над подъёмом, который игрок
+ * сыграл и просил вернуть (part19, ход 3). Заклинание за здоровье золотом
+ * не оплачивается (D016), за ноль — остатка не тратит.
+ */
+function leftoverUse(
+  state: GameState,
+  cost: number,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+  buying: HandSpell | null,
+): { readonly spell: HandSpell | null } | null {
+  const left = state.gold - cost;
+  if (left >= rules.minionCost) return { spell: null };
+  const aimsAtOwn = (s: HandSpell): boolean =>
+    spellEffect(s.cardId, s.scriptData, deps.cards, rules)?.targetsFriendly === true;
+  const spell = state.shopSpells
+    .filter((s) => s !== buying && !s.costsHealth && s.cost >= 1 && s.cost <= left && aimsAtOwn(s))
+    .sort((a, b) => b.cost - a.cost)[0];
+  return spell === undefined ? null : { spell };
 }
 
 /**
@@ -5253,6 +5398,79 @@ function discoverPoolValue(
   return value;
 }
 
+/**
+ * Заготовка миньона, которого приносит «Discover a <Tribe>» или «Get
+ * a random Tier N minion», — карта пула, чья ценность БЛИЖЕ ВСЕГО
+ * к ожиданию источника (`expected`: лучший из трёх или средний).
+ *
+ * Нужна плану (`Recommendation.bringsMinion`, part59): найденное тело
+ * занимает слот, считается своим по племени и служит целью следующих
+ * шагов. Числа ожидания она не заменяет — очки шага по-прежнему считает
+ * `givesMinionValue`; заготовка лишь «типичный выбор», а не обещание,
+ * поэтому копией она нигде не считается (`isStandIn`). Витрина источником
+ * заготовки не бывает: «Steal a random minion from the Tavern» забирает
+ * живую карту витрины, и второе тело рядом с ней было бы выдумкой.
+ */
+function poolStandIn(
+  source: TierPoolSource | { readonly tier: number },
+  expected: number,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): Minion | null {
+  const tiers = 'tiers' in source ? source.tiers : [source.tier];
+  const race = 'tiers' in source ? source.race : null;
+  const key =
+    `${tiers.join(',')}|${race ?? ''}|${expected.toFixed(3)}` +
+    `|${state.hand.map((m) => `${m.cardId}${m.golden ? '_G' : ''}`).join(',')}` +
+    `|${state.handSpells.map((s) => `${s.cardId}:${s.scriptData.join('.')}`).join(',')}` +
+    `|${state.hero?.heroPowerCardId ?? ''}` +
+    `|${(state.hero?.heroPowerScriptData ?? []).join('.')}`;
+
+  let byCards = STAND_IN_CACHE.get(rules);
+  if (byCards === undefined) {
+    byCards = new WeakMap();
+    STAND_IN_CACHE.set(rules, byCards);
+  }
+  let byBoard = byCards.get(deps.cards);
+  if (byBoard === undefined) {
+    byBoard = new WeakMap();
+    byCards.set(deps.cards, byBoard);
+  }
+  let byKey = byBoard.get(state.board);
+  if (byKey === undefined) {
+    byKey = new Map();
+    byBoard.set(state.board, byKey);
+  }
+  const cached = byKey.get(key);
+  if (cached !== undefined) return cached;
+
+  const whole = tiers.flatMap((t) => tierPool(t, deps));
+  const pool =
+    race === null
+      ? whole
+      : whole.filter((m) => deps.cards.info(m.cardId)?.races.includes(race) ?? false);
+  let best: Minion | null = null;
+  let gap = Infinity;
+  for (const m of pool) {
+    const d = Math.abs(minionValue(m, state, deps, rules).total - expected);
+    if (d < gap) {
+      gap = d;
+      best = m;
+    }
+  }
+  // Id настоящий получит шаг плана (`applyRecommendation`): заготовок
+  // за цепочку бывает больше одной, и у каждой он свой.
+  const standIn = best === null ? null : { ...best, entityId: -1 };
+  byKey.set(key, standIn);
+  return standIn;
+}
+
+const STAND_IN_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, WeakMap<object, Map<string, Minion | null>>>
+>();
+
 /** Тиры, из которых витрина набирает карты: от первого до своего. */
 function shopTiers(techLevel: number): number[] {
   return Array.from({ length: Math.max(1, techLevel) }, (_, i) => i + 1);
@@ -5321,7 +5539,18 @@ export function heroPowerRule(
           discover: /\bdiscover\b/i.test(text),
         }
       : (namedTierPool(text, state, deps, rules) ?? undefined);
-  const { score, average, discounted } = givesMinionValue(state, deps, rules, cost, true, source);
+  const { score, average, discounted, leftoverSpell } = givesMinionValue(
+    state,
+    deps,
+    rules,
+    cost,
+    true,
+    source,
+  );
+  // Тело, которое план положит на борд (part59): только у силы, чья карта
+  // приходит СЕЙЧАС, — отложенная награда слота в этом ходу не занимает (D217).
+  const brings =
+    delayed || source === undefined ? null : poolStandIn(source, average, state, deps, rules);
 
   // Цена СПЕШКИ у силы с ЛЕСТНИЧНОЙ ценой — см. `heroPowerHurryCost`.
   const hurry = heroPowerHurryCost(text, source ?? null, average, state, deps, rules);
@@ -5345,11 +5574,15 @@ export function heroPowerRule(
     // иначе совет читался бы как «продай, потом жми», хотя золота хватает
     // и так, а место игрок освободит сам, когда карта придёт в руку.
     sellFirst: victim !== null && cost > state.gold ? victim.minion : null,
+    ...(brings === null ? {} : { bringsMinion: brings }),
     reason:
       `${info?.name ?? hero.heroPowerCardId} за ${String(cost)} даёт миньона — ` +
       `${minionSourceNote(source ?? null, average)}` +
       (discounted && cost < rules.minionCost
-        ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки`
+        ? `, но на ${String(rules.minionCost - cost)} золота дешевле покупки` +
+          (leftoverSpell === null
+            ? ''
+            : ` — остаток на ${deps.cards.info(leftoverSpell.cardId)?.name ?? leftoverSpell.cardId}`)
         : '') +
       // Слово про слот обязательно: без него совет «жать на полном борде»
       // читается как ошибка — игрок видит семь тел и не видит, куда придёт
@@ -7058,6 +7291,50 @@ export function activationRules(
             );
 
     const name = info?.name ?? minion.cardId;
+
+    // Цель баффа — крупнейший свой, кроме самого активирующего:
+    // «Give another minion…». У «задать статы» цель уже выбрана прибавкой,
+    // и она ОБРАТНАЯ (наименьший свой получает больше всех) — своим полем,
+    // а не общим правилом «крупнейший».
+    const others = state.board.filter((m) => m.entityId !== minion.entityId);
+
+    // Племя цели, если текст его называет: указать на миньона чужого племени
+    // игра не даст вовсе («a different friendly Undead»). Пустой отбор
+    // возвращает прежний пул — правило сужает выбор, а не отменяет совет.
+    const namedRace =
+      Object.entries(rules.tribeTextWords).find(([, word]) =>
+        new RegExp(`\\b(?:${word})\\b`, 'i').test(effectText),
+      )?.[0] ?? null;
+    const sameRace =
+      namedRace === null
+        ? others
+        : others.filter((m) => racesOf(m, deps.cards).includes(namedRace));
+    const pool = sameRace.length > 0 ? sameRace : others;
+    const size = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+
+    // «Give … Reborn. Then destroy it» при плательщике за перерождение
+    // на борде (part59, ход 23): нажатие платит ещё и через него. Игрок дважды
+    // жал Dead Bellringer в Eternal Knight — Snazzy Phantom отдал Deathly
+    // Striker +77/+77 и +81/+81 (атака копии рыцаря, до единицы), — а совет
+    // стоил 1.0 очка и целил в самого Snazzy, чьё перерождение ничего
+    // не запускает. Цель — наибольшая выплата за вычетом накопленного сверх
+    // копии; без плательщика цель и число прежние (D207). На part50 такой
+    // выбор совпал с игроком в 5 нажатиях из 7, «наименьший» — в 2.
+    const rebornPick =
+      stats > 0 && destroysTarget
+        ? pool
+            .map((m) => {
+              const payoff = rebornPayoffOf(m, state, deps.cards, rules);
+              const copy = rebornCopyOf(m, state, deps.cards, rules);
+              return { minion: m, payoff, net: payoff - Math.max(0, size(m) - size(copy)) };
+            })
+            .filter((c) => c.payoff > 0)
+            .reduce<{ minion: Minion; payoff: number; net: number } | null>(
+              (a, b) => (a === null || b.net > a.net ? b : a),
+              null,
+            )
+        : null;
+
     let score = 0;
     let what = '';
     // «Activate ({0}): Gain {1} Gold next turn» — Private Investigator
@@ -7095,11 +7372,17 @@ export function activationRules(
       // «Then destroy it» — прибавка достаётся САМОМУ активирующему, а цель
       // получает перерождение и уничтожается (part50, «Мертвый звонарь»
       // `BG36_511`). Наш борд от нажатия всё равно растёт на те же статы,
-      // поэтому очки прежние; врала не цифра, а ЦЕЛЬ и СЛОВА.
-      score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
+      // поэтому очки прежние; врала не цифра, а ЦЕЛЬ и СЛОВА. Выплата
+      // плательщиков за перерождение цели — сверху (part59).
+      score =
+        (stats + (rebornPick?.payoff ?? 0)) * rules.value.perStatPoint -
+        cost * rules.goldPointValue;
       what =
         `+${String(stats)} статов САМОМУ ${name}; ` +
-        `цель получит перерождение и будет уничтожена — вернётся базовой копией`;
+        `цель получит перерождение и будет уничтожена — вернётся базовой копией` +
+        (rebornPick === null
+          ? ''
+          : `; её перерождение даст плательщикам +${String(rebornPick.payoff)} статов`);
     } else if (stats > 0) {
       score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
       what = `+${String(stats)} статов`;
@@ -7121,26 +7404,6 @@ export function activationRules(
     }
     if (score <= 0) return [];
 
-    // Цель баффа — крупнейший свой, кроме самого активирующего:
-    // «Give another minion…». У «задать статы» цель уже выбрана прибавкой,
-    // и она ОБРАТНАЯ (наименьший свой получает больше всех) — своим полем,
-    // а не общим правилом «крупнейший».
-    const others = state.board.filter((m) => m.entityId !== minion.entityId);
-
-    // Племя цели, если текст его называет: указать на миньона чужого племени
-    // игра не даст вовсе («a different friendly Undead»). Пустой отбор
-    // возвращает прежний пул — правило сужает выбор, а не отменяет совет.
-    const namedRace =
-      Object.entries(rules.tribeTextWords).find(([, word]) =>
-        new RegExp(`\\b(?:${word})\\b`, 'i').test(effectText),
-      )?.[0] ?? null;
-    const sameRace =
-      namedRace === null
-        ? others
-        : others.filter((m) => racesOf(m, deps.cards).includes(namedRace));
-    const pool = sameRace.length > 0 ? sameRace : others;
-
-    const size = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
     const target =
       bait !== null
         ? // У приманки цель — карта ВИТРИНЫ, которую она заменит.
@@ -7150,8 +7413,9 @@ export function activationRules(
         : destroysTarget && pool.length > 0
           ? // Расходник — тот, кого не жаль обнулить до базовой копии.
             // В part50 игрок одиннадцать раз указывал на мелкого Мумификатора
-            // и ни разу на крупное тело.
-            pool.reduce((a, b) => (size(b) < size(a) ? b : a))
+            // и ни разу на крупное тело. При плательщике за перерождение —
+            // цель наибольшей выплаты (part59).
+            (rebornPick?.minion ?? pool.reduce((a, b) => (size(b) < size(a) ? b : a)))
           : stats > 0 && pool.length > 0
             ? pool.reduce((a, b) => (size(b) > size(a) ? b : a))
             : null;
@@ -7165,6 +7429,11 @@ export function activationRules(
         requiresSlot: false,
         sellFirst: null,
         targetMinion: target,
+        // «Then destroy it»: цель возвращается копией — план ставит её
+        // на место цели, иначе следующее нажатие считало бы прежнее тело.
+        ...(stats > 0 && destroysTarget && target !== null
+          ? { destroysTarget: { rebornCopy: rebornCopyOf(target, state, deps.cards, rules) } }
+          : {}),
         ...(goldNextTurn > 0 ? { grantsGoldNextTurn: goldNextTurn } : {}),
         // Ралли атакующего бьёт соседей — покупки хода идут раньше (D210).
         ...(bait !== null ? { boardGains: bait.gains, buffsWholeBoard: bait.wide } : {}),
@@ -8808,6 +9077,133 @@ function sellCandidateIds(
   return ids;
 }
 
+/**
+ * Каким вернётся перерождающийся миньон, погибший В ТАВЕРНЕ.
+ *
+ * Лог part59 (13:49:14, Butchering в Handless Forsaken): та же сущность
+ * остаётся на своём месте с `REBORN=0`, `HEALTH=1` и атакой карты — все
+ * наложенные усиления пропадают (то же в part50, D207: Мумификатор вернулся
+ * с ATK=5). Надбавка всей нежити к атаке висит на игроке, а не на миньоне,
+ * и копии достаётся тоже.
+ */
+function rebornCopyOf(
+  m: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): Minion {
+  const golden = m.golden && !m.cardId.endsWith('_G') ? cards.info(`${m.cardId}_G`) : null;
+  const card = golden ?? cards.info(m.cardId);
+  const undead = racesOf(m, cards).some((r) => r === 'UNDEAD' || r === RACE_ALL);
+  // Своя аура «за каждого павшего рыцаря» живёт и на копии, а павших стало
+  // на одного больше — на саму цель (part59: 4 + 4 × 8 + 41 = 77).
+  const text = card?.text ?? '';
+  const counted = rules.deathCounterStatsWords.some((w) => new RegExp(w, 'i').test(text))
+    ? (m.scriptData[0] ?? 0) * ((state.globalInfo.eternalKnightsDead ?? 0) + 1)
+    : 0;
+  const attack =
+    (card?.attack ?? 0) + counted + (undead ? (state.globalInfo.undeadAttackBuff ?? 0) : 0);
+  return { ...m, attack, health: 1, maxHealth: 1, reborn: false, enchantments: [] };
+}
+
+/**
+ * Сколько статов борду приносит ПЕРЕРОЖДЕНИЕ цели через своих плательщиков
+ * («After a friendly minion is Reborn, …», `rebornPayoffWords`), кроме
+ * самой цели: её собственное перерождение её триггер не запускает (part59,
+ * три активации Dead Bellringer в самого Snazzy Phantom — ноль триггеров).
+ *
+ * Snazzy Phantom отдаёт правому нежити статы по атаке КОПИИ: part59,
+ * 13:51:23, Bellringer в Eternal Knight — энчант Snazzy NUM_1=77 на Deathly
+ * Striker, ровно атака копии рыцаря. Barrier Banshee получает свои +{0}/+{1}.
+ */
+function rebornPayoffOf(
+  target: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const copyAttack = rebornCopyOf(target, state, cards, rules).attack ?? 0;
+  let total = 0;
+  for (const p of state.board) {
+    if (p.entityId === target.entityId) continue;
+    const text = cards.info(p.cardId)?.text ?? '';
+    if (!rules.rebornPayoffWords.some((w) => new RegExp(w, 'i').test(text))) continue;
+    const given = firstMatchAll(rules.rebornGiveAttackWords, text);
+    if (given !== null) {
+      total += 2 * copyAttack * (given[1] !== undefined ? 2 : 1);
+      continue;
+    }
+    const gained = firstMatchAll(rules.rebornGainStatsWords, text);
+    if (gained !== null) {
+      total += (p.scriptData[Number(gained[1])] ?? 0) + (p.scriptData[Number(gained[2])] ?? 0);
+    }
+  }
+  return total;
+}
+
+/**
+ * Размен «Destroy a friendly X» ЦЕЛИКОМ, в статах: немедленная прибавка
+ * минус потеря жертвы (part59). `null` — заклинание не про гибель своего.
+ *
+ * Butchering: «Destroy a friendly Undead. Your Undead have +{0} Attack this
+ * game». Прежде карта числилась «+5 статов одной цели», а жертва не стоила
+ * ничего — пока план не убирал её с борда, это было не видно: семь раз
+ * подряд «погибал» один и тот же Snazzy Phantom. Стоило жертве начать
+ * погибать по-настоящему, и план пошёл резать Drustfallen Butcher 86/85.
+ *
+ * Немедленная часть читается точно — +N каждому своему телу племени,
+ * которое останется на борде (перерождённая копия тоже в счёт). Будущая
+ * — каждое тело, призванное в бою или купленное позже, — горизонт, которого
+ * у нас нет (docs/next-steps.md), и оценка остаётся НИЖНЕЙ. Без шаблона
+ * прибавки по племени работает прежнее число эффекта.
+ */
+function destroyTrade(
+  effect: SpellEffect,
+  aimed: {
+    readonly target: Minion | null;
+    readonly destroyed?: { readonly rebornCopy: Minion | null; readonly loss: number };
+  },
+  text: string,
+  scriptData: readonly (number | null)[],
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { readonly stats: number; readonly note: string } | null {
+  const destroyed = aimed.destroyed;
+  const target = aimed.target;
+  if (!effect.destroysFriendly || effect.transforms || destroyed === undefined || target === null) {
+    return null;
+  }
+  const tribes = Object.values(rules.tribeTextWords).join('|');
+  const clean = text.replace(/<[^>]*>/g, '');
+  for (const word of rules.tribeAttackThisGameWords) {
+    const m = new RegExp(word.replace('{tribe}', `(?:${tribes})`), 'i').exec(clean);
+    if (m === null) continue;
+    const race = Object.entries(rules.tribeTextWords).find(([, p]) =>
+      new RegExp(`^(?:${p})$`, 'i').test(m[1] ?? ''),
+    )?.[0];
+    if (race === undefined) continue;
+    const amount = m[2] !== undefined ? (scriptData[Number(m[2])] ?? 0) : Number(m[3] ?? 0);
+    const survivors = state.board.filter(
+      (b) => b.entityId !== target.entityId || destroyed.rebornCopy !== null,
+    );
+    const bodies = survivors.filter((b) => {
+      const races = racesOf(b, cards);
+      return races.includes(race) || races.includes(RACE_ALL);
+    }).length;
+    return {
+      stats: amount * bodies - destroyed.loss,
+      note:
+        `+${String(amount)} к атаке ${String(bodies)} своим ${race} до конца партии` +
+        (destroyed.loss > 0 ? `, жертва теряет ${String(destroyed.loss)} статов` : ''),
+    };
+  }
+  return {
+    stats: effect.stats - destroyed.loss,
+    note: destroyed.loss > 0 ? `жертва теряет ${String(destroyed.loss)} статов` : '',
+  };
+}
+
 function spellTargetOn(
   effect: SpellEffect,
   state: GameState,
@@ -8820,6 +9216,11 @@ function spellTargetOn(
   readonly target: Minion | null;
   readonly note: string;
   readonly spendsCharge?: boolean;
+  /**
+   * Цель погибает (не замена): план убирает её, у перерождения — копия.
+   * `loss` — сколько статов борд теряет: всё тело или накопленное сверх копии.
+   */
+  readonly destroyed?: { readonly rebornCopy: Minion | null; readonly loss: number };
 } | null {
   const cards = deps.cards;
   if (state.board.length === 0) return null;
@@ -8831,15 +9232,57 @@ function spellTargetOn(
       return races.includes(RACE_ALL) || races.includes(effect.destroyRace);
     });
     if (eligible.length === 0) return null;
-    const victim = eligible.reduce((a, b) =>
-      (b.attack ?? 0) + (b.health ?? 0) < (a.attack ?? 0) + (a.health ?? 0) ? b : a,
-    );
+    const stats = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+    if (effect.transforms) {
+      const victim = eligible.reduce((a, b) => (stats(b) < stats(a) ? b : a));
+      const name = cards.info(victim.cardId)?.name ?? victim.cardId;
+      return {
+        target: victim,
+        note: `заменит ${name} — наименьшего своего подходящего — на случайного нового`,
+      };
+    }
+    // Жертва — наименьший свой (D078), но не тот, кто ПЛАТИТ за перерождение
+    // других, пока у него самого перерождения нет (part59, ход 21): Snazzy
+    // Phantom «After a friendly minion is Reborn…» — единственный, кто
+    // превращает остальные размены в статы, и игрок бил его только дав ему
+    // Reborn. Шире признак не берётся НАМЕРЕННО: вариант «сначала
+    // перерождающиеся, движки не трогать» на корпусе совпал с целями игрока
+    // в 3 точках из 15 против 6 у прежнего — игрок бьёт то, чья смерть
+    // в таверне что-то приносит (хрипы, счётчик Eternal Knight, комбо
+    // с Misplaced Tea Set), а этого наша шкала не читает.
+    const pays = (m: Minion): boolean => {
+      const text = cards.info(m.cardId)?.text ?? '';
+      return !m.reborn && rules.rebornPayoffWords.some((w) => new RegExp(w, 'i').test(text));
+    };
+    const spareable = eligible.filter((m) => !pays(m));
+    const pool = spareable.length > 0 ? spareable : eligible;
+    const victim = pool.reduce((a, b) => (stats(b) < stats(a) ? b : a));
+    // Потеря — то, что борд отдаёт насовсем: у перерождения — статы сверх
+    // копии, без него — всё тело, кроме надбавки всей нежити к атаке: она
+    // висит на игроке и достанется любому следующему телу (part50, ход 21:
+    // Helping Hand 42/1 — это жетон 2/1 и +40 надбавки). У жертвы с ХРИПОМ
+    // вычета нет: хрип в таверне приносит своё, наша шкала хрипов
+    // не считает, и выдуманный вычет заглушил бы ход, который игрок делает
+    // (тот же довод, что D207).
+    const undeadBuff = state.globalInfo.undeadAttackBuff ?? 0;
+    const copyOf = (m: Minion): Minion | null =>
+      m.reborn ? rebornCopyOf(m, state, cards, rules) : null;
+    const loss = (m: Minion): number => {
+      if (cards.info(m.cardId)?.mechanics.includes('DEATHRATTLE') ?? false) return 0;
+      const copy = copyOf(m);
+      if (copy !== null) return Math.max(0, stats(m) - stats(copy));
+      const undead = racesOf(m, cards).some((r) => r === 'UNDEAD' || r === RACE_ALL);
+      return Math.max(0, stats(m) - (undead ? undeadBuff : 0));
+    };
     const name = cards.info(victim.cardId)?.name ?? victim.cardId;
+    const copy = copyOf(victim);
     return {
       target: victim,
-      note: effect.transforms
-        ? `заменит ${name} — наименьшего своего подходящего — на случайного нового`
-        : `в жертву ${name} — наименьший свой подходящий`,
+      destroyed: { rebornCopy: copy, loss: loss(victim) },
+      note:
+        copy === null
+          ? `в жертву ${name} — наименьший свой подходящий`
+          : `в жертву ${name} — перерождение вернёт его ${String(copy.attack)}/${String(copy.health)}`,
     };
   }
 
@@ -9059,6 +9502,20 @@ function branchAdvice(effect: SpellEffect): {
  *   цель — самый крупный свой миньон, очки — те же веса статов и щита,
  *   что у миньонов. Точечный выбор цели правила не судят — сказано в docs.
  */
+/**
+ * Пишет ли карта золото следующего хода БЕЗУСЛОВНО — «Gain N Gold next
+ * turn» (Careful Investment). Только такое обещание план кладёт
+ * в `extraGoldNextTurn` (D238): игра пишет этот тег сразу при розыгрыше.
+ * Награда «If you win your next combat, gain 3 Gold» (Overconfidence, D231)
+ * тоже завтрашняя, но тег появляется только после выигранного боя
+ * (part19: розыгрыш в 00:05:24, тег — впервые в 00:11:03), и писать её
+ * заранее значило бы обещать то, чего игра не обещала.
+ */
+function promisesGoldNextTurn(text: string, rules: TavernRules): boolean {
+  if (rules.delayedRewardWords.some((w) => new RegExp(w, 'i').test(text))) return false;
+  return /\bgain\s+\d+\s+gold\s+next\s+turn\b/i.test(text);
+}
+
 export function spellRules(
   state: GameState,
   deps: TavernAdvisorDeps,
@@ -9071,6 +9528,38 @@ export function spellRules(
     // ни золота, ни миньона в тексте, и разбор эффекта вернул бы `null`.
     const discount = discountRefreshRule(spell, state, deps, rules);
     if (discount !== null) return [discount];
+
+    // Бесплатные обновления из РУКИ — «Gain 2 free Refreshes» (Leaf Through
+    // the Pages, part59, ход 15). У витрины ветка есть с part23 (D033),
+    // а в руке карта была невидима: разбор эффекта возвращал `null`, и план
+    // платил «ОБНОВИТЬ за 1», держая в руке два бесплатных. Счёт тот же,
+    // что у витрины; запас переживает ход (D244), поэтому розыгрыш
+    // ничего не теряет, а план тратит его вместо золота.
+    const refresh = firstMatch(rules.freeRefreshWords, deps.cards.info(spell.cardId)?.text ?? '');
+    if (refresh !== null) {
+      if (spell.cost > state.gold || state.rerollCost === null) return [];
+      const count = Number(refresh);
+      const perRefresh = refreshWorth(state, rules);
+      if (!Number.isFinite(count)) return [];
+      const netGold = count * perRefresh - spell.cost;
+      if (netGold <= 0) return [];
+      const leafName = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
+      return [
+        {
+          action: 'play' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score: netGold * rules.goldPointValue,
+          cost: spell.cost,
+          grantsFreeRefreshes: count,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${leafName} — ${String(count)} бесплатных обновлений по ${String(perRefresh)}, ` +
+            'запас не сгорает',
+        },
+      ];
+    }
 
     const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
     if (effect === null) return [];
@@ -9175,6 +9664,38 @@ export function spellRules(
       return [];
     }
 
+    // Золото СЛЕДУЮЩЕГО хода из РУКИ — Careful Investment «Gain 2 Gold next
+    // turn» (part59, ходы 15 и 17). Покупка такой карты с витрины советуется
+    // с part30 (D012), а в руке она была невидима: разбор проваливался
+    // в ветку усиления с нулём статов. Копить её незачем — в отличие от
+    // монетки, которая копится ради покупки, золото этой карты приходит
+    // только ходом ПОСЛЕ розыгрыша, и держать её значит лишь сдвинуть его
+    // на ход позже. Игрок разыграл четыре штуки сразу: золото 12/10 на ходу 17
+    // и 16/10 на ходу 19. В кошелёк этого хода золото не идёт (D012) —
+    // план пишет обещание туда же, куда игра (`extraGoldNextTurn`, D238).
+    if (effect.goldNextTurn > 0) {
+      if (spell.cost > state.gold) return [];
+      const net = effect.goldNextTurn - spell.cost;
+      if (net <= 0) return [];
+      return [
+        {
+          action: 'play' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          score: net * rules.goldPointValue,
+          cost: spell.cost,
+          ...(promisesGoldNextTurn(deps.cards.info(spell.cardId)?.text ?? '', rules)
+            ? { grantsGoldNextTurn: effect.goldNextTurn }
+            : {}),
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} даёт ${String(effect.goldNextTurn)} золота СЛЕДУЮЩИМ ходом — ` +
+            'копить её незачем: золото придёт на ход позже розыгрыша',
+        },
+      ];
+    }
+
     // Бафф ПО ВИТРИНЕ (Them Apples, part30): статы ложатся на миньонов
     // магазина, и до нас доезжают только те, кого мы купим. Цели нет
     // по построению: игра раздаёт сама (в логе блок PLAY с Target=0).
@@ -9246,15 +9767,25 @@ export function spellRules(
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
     const onBoard = effectOnBoard(effect, state.board, rules, deps.cards);
     const boosted = onBoard.effect;
+    const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
+    if (aimed === null) return [];
+    // Гибель своего судится разменом целиком (part59, Butchering).
+    const trade = destroyTrade(
+      boosted,
+      aimed,
+      deps.cards.info(spell.cardId)?.text ?? '',
+      spell.scriptData,
+      state,
+      deps.cards,
+      rules,
+    );
     const score =
       (boosted.transforms
         ? rules.value.transform
-        : boosted.stats * rules.value.perStatPoint + grantedKeywordScore(boosted, rules)) -
+        : (trade?.stats ?? boosted.stats) * rules.value.perStatPoint +
+          grantedKeywordScore(boosted, rules)) -
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
-
-    const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
-    if (aimed === null) return [];
     const branch = branchAdvice(boosted);
 
     return [
@@ -9264,6 +9795,7 @@ export function spellRules(
         spellCardId: spell.cardId,
         spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
+        ...(aimed.destroyed === undefined ? {} : { destroysTarget: aimed.destroyed }),
         spellBranches: branch.branches,
         buffsWholeBoard: onBoard.wide,
         score,
@@ -9271,10 +9803,12 @@ export function spellRules(
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} — ${boosted.transforms ? 'замена' : 'усиление перед боем'}` +
-          (boosted.stats > 0
-            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})${castsNote(onBoard.casts)}`
-            : '') +
+          `${name} — ${boosted.transforms ? 'замена' : trade !== null ? 'размен' : 'усиление перед боем'}` +
+          (trade !== null
+            ? ` (${trade.note})`
+            : boosted.stats > 0
+              ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})${castsNote(onBoard.casts)}`
+              : '') +
           (boosted.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
           `, ${aimed.note}`,
@@ -9427,7 +9961,7 @@ export function shopSpellRules(
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): Recommendation[] {
-  return state.shopSpells.flatMap((spell) => {
+  return state.shopSpells.flatMap((spell): Recommendation[] => {
     if (spell.unplayable) return [];
 
     // Цена бывает НЕ в золоте: тег `BACON_COSTS_HEALTH_TO_BUY` на карте
@@ -9531,6 +10065,10 @@ export function shopSpellRules(
           spellCardId: spell.cardId,
           score: net * rules.goldPointValue,
           cost: goldCost,
+          // Обещание — в `extraGoldNextTurn` плана (D238), не в кошелёк.
+          ...(promisesGoldNextTurn(info?.text ?? '', rules)
+            ? { grantsGoldNextTurn: effect.goldNextTurn }
+            : {}),
           requiresSlot: false,
           sellFirst: null,
           reason:
@@ -9575,13 +10113,14 @@ export function shopSpellRules(
     // борд ему не помеха — миньон и есть его наполнение.
     if (effect.givesMinion) {
       const tiered = namedTierPool(info?.text ?? '', state, deps, rules);
-      const { score, average, discounted } = givesMinionValue(
+      const { score, average, discounted, leftoverSpell } = givesMinionValue(
         state,
         deps,
         rules,
         goldCost,
         true,
         tiered ?? undefined,
+        spell,
       );
       // Миньон приходит В РУКУ: на полном борде место ему освободит только
       // продажа, и жертва вычитается, как у покупки и у ветви part28
@@ -9601,12 +10140,20 @@ export function shopSpellRules(
       // Potential) спросит игрока сразу после покупки — ветви называются
       // и здесь, а не только у усилений.
       const branch = branchAdvice(effect);
+      // Тело для плана (part59) — только из ПУЛА тира и только играемое
+      // сейчас: запертое в руке (D242) в этот ход на борд не встанет, а у
+      // модального «даёт миньона» тело зависит от выбранной ветви.
+      const brings =
+        tiered === null || lock !== null || (branch.branches?.length ?? 0) > 0
+          ? null
+          : poolStandIn(tiered, average, state, deps, rules);
       return [
         {
           action: 'buy' as const,
           minion: null,
           spellCardId: spell.cardId,
           spellBranches: branch.branches,
+          ...(brings === null ? {} : { bringsMinion: brings }),
           score: gained - (victim?.value ?? 0),
           cost: goldCost,
           requiresSlot: false,
@@ -9617,7 +10164,10 @@ export function shopSpellRules(
             (cheaper < 0
               ? `, и это на ${String(-cheaper)} золота ДОРОЖЕ покупки`
               : discounted && cheaper > 0
-                ? `, но на ${String(cheaper)} золота дешевле покупки`
+                ? `, но на ${String(cheaper)} золота дешевле покупки` +
+                  (leftoverSpell === null
+                    ? ''
+                    : ` — остаток на ${deps.cards.info(leftoverSpell.cardId)?.name ?? leftoverSpell.cardId}`)
                 : ', и это дешёвое тело, а не лучшее') +
             (discoverPay === null ? '' : `; ${discoverPayoffNote(discoverPay, discovers)}`) +
             (lock === null ? '' : `; ${lock.note}`) +
@@ -9672,12 +10222,23 @@ export function shopSpellRules(
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
     const onBoard = effectOnBoard(effect, state.board, rules, deps.cards);
     const boosted = onBoard.effect;
-    const score = boosted.transforms
-      ? rules.value.transform
-      : boosted.stats * rules.value.perStatPoint + grantedKeywordScore(boosted, rules);
-    if (score <= 0) return [];
     const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
     if (aimed === null) return [];
+    // Гибель своего судится разменом целиком (part59, Butchering).
+    const trade = destroyTrade(
+      boosted,
+      aimed,
+      info?.text ?? '',
+      spell.scriptData,
+      state,
+      deps.cards,
+      rules,
+    );
+    const score = boosted.transforms
+      ? rules.value.transform
+      : (trade?.stats ?? boosted.stats) * rules.value.perStatPoint +
+        grantedKeywordScore(boosted, rules);
+    if (score <= 0) return [];
     const branch = branchAdvice(boosted);
     return [
       {
@@ -9686,6 +10247,7 @@ export function shopSpellRules(
         spellCardId: spell.cardId,
         spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
+        ...(aimed.destroyed === undefined ? {} : { destroysTarget: aimed.destroyed }),
         spellBranches: branch.branches,
         buffsWholeBoard: onBoard.wide,
         score,
@@ -9693,10 +10255,12 @@ export function shopSpellRules(
         requiresSlot: false,
         sellFirst: null,
         reason:
-          `${name} за ${price} — ${boosted.transforms ? 'замена' : 'усиление'}` +
-          (boosted.stats > 0
-            ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})${castsNote(onBoard.casts)}`
-            : '') +
+          `${name} за ${price} — ${boosted.transforms ? 'замена' : trade !== null ? 'размен' : 'усиление'}` +
+          (trade !== null
+            ? ` (${trade.note})`
+            : boosted.stats > 0
+              ? ` (+${String(boosted.stats)} статов${bodiesNote(onBoard.bodies)})${castsNote(onBoard.casts)}`
+              : '') +
           (boosted.divineShield ? ' и щит' : '') +
           (branch.note === '' ? '' : `, ${branch.note}`) +
           `, ${aimed.note}`,

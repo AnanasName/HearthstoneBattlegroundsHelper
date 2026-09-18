@@ -609,6 +609,54 @@ export interface TavernRules {
   readonly targetsFriendlyWords: readonly string[];
 
   /**
+   * Прибавка к атаке ВСЕГО ПЛЕМЕНИ до конца партии — «Your Undead have
+   * +{0} Attack this game» (Butchering `BG28_604`, part59). Группа 1 —
+   * слово племени (`{tribe}` из `tribeTextWords`), 2 — плейсхолдер,
+   * 3 — литерал. Немедленная часть — N на каждое своё тело племени;
+   * будущие тела — горизонт, и оценка остаётся нижней.
+   */
+  readonly tribeAttackThisGameWords: readonly string[];
+
+  /**
+   * Свой миньон, который ПЛАТИТ за перерождение других, — «After a friendly
+   * minion is Reborn, …» (Snazzy Phantom `BG36_515`, Barrier Banshee). Жертвой
+   * «Destroy a friendly X» он не назначается, пока у него самого нет
+   * перерождения: игрок в part59 бил Snazzy только после того, как дал ему
+   * Reborn, а без него — ни разу (две партии, part50 и part59).
+   */
+  readonly rebornPayoffWords: readonly string[];
+
+  /**
+   * Сколько платит плательщик за одно перерождение — «give stats equal to
+   * (double) its Attack to your right-most Undead» (Snazzy Phantom; группа 1 —
+   * «double» у золотого): статы +A/+A по атаке копии.
+   */
+  readonly rebornGiveAttackWords: readonly string[];
+
+  /**
+   * То же для плательщика, который растит СЕБЯ, — «gain Divine Shield and
+   * +{0}/+{1}» (Barrier Banshee): группы 1 и 2 — плейсхолдеры прибавки.
+   */
+  readonly rebornGainStatsWords: readonly string[];
+
+  /**
+   * Своя аура «Has +{0}/+{1} for each friendly Eternal Knight that died this
+   * game» — у перерождённой копии рыцаря счётчик павших растёт на неё саму
+   * (part59, 13:51:23: копия 4 + 4 × 8 + 41 = 77, энчант Snazzy NUM_1=77).
+   */
+  readonly deathCounterStatsWords: readonly string[];
+
+  /**
+   * Свой миньон, который ПЛАТИТ за розыгрыш миньона своего племени, —
+   * «Whenever you play or Magnetize a Mech, give it +{0}/+{1}» (Mechagnome
+   * Interpreter `BG31_177`, part59, ход 11). Группа 1 — слово племени
+   * (`{tribe}` из `tribeTextWords`). Плану: такой розыгрыш из руки идёт
+   * РАНЬШЕ покупки или магнита своего племени — сыгранный после, он им
+   * ничего не даст.
+   */
+  readonly playPayoffWords: readonly string[];
+
+  /**
    * Свой миньон, который ПОВТОРЯЕТ заклинания по своим миньонам, — и во сколько
    * раз. Группа 1 — слово множителя.
    *
@@ -1817,6 +1865,18 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // a minion…» — цель по выбору игрока, названная в первом предложении.
   targetsFriendlyWords: [
     '^\\s*(?:\\[x\\])?\\s*(?:choose\\s+one\\s*[-—]\\s*)?(?:give|choose)\\s+an?\\s+(?:friendly\\s+)?(?:minion|{tribe})\\b',
+  ],
+  tribeAttackThisGameWords: [
+    '\\byour\\s+({tribe})\\s+have\\s+\\+(?:\\{(\\d)\\}|(\\d+))\\s+attack\\s+this\\s+game\\b',
+  ],
+  rebornPayoffWords: ['\\bafter\\s+a\\s+friendly\\s+minion\\s+is\\s+(?:<b>)?reborn\\b'],
+  rebornGiveAttackWords: ['\\bgive\\s+stats\\s+equal\\s+to\\s+(double\\s+)?its\\s+attack\\b'],
+  rebornGainStatsWords: [
+    '\\bgain\\s+(?:<b>)?divine\\s+shield(?:</b>)?\\s+and\\s+\\+\\{(\\d)\\}\\s*/\\s*\\+\\{(\\d)\\}',
+  ],
+  deathCounterStatsWords: ['\\bfor\\s+each\\s+friendly\\s+eternal\\s+knight\\s+that\\s+died\\b'],
+  playPayoffWords: [
+    '\\bwhenever\\s+you\\s+play\\s+(?:or\\s+(?:<b>)?magnetize(?:</b>)?\\s+)?an?\\s+({tribe})\\b[^.]*\\bgive\\s+it\\s+\\+',
   ],
   friendlyTargetCastWords: [
     '\\byour\\s+spells\\s+that\\s+target\\s+friendly\\s+minions\\s+cast\\s+(twice|three\\s+times)\\b',
