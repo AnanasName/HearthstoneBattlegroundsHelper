@@ -475,6 +475,52 @@ export interface TavernRules {
   readonly discoverPayoffWords: readonly string[];
 
   /**
+   * Свой миньон, который ПЛАТИТ за каждый розыгрыш карты племени (part60,
+   * D259). Четыре вида по тому, куда ложится плата; `{tribe}` — племя
+   * РАЗЫГРАННОЙ карты (из `tribeTextWords`), именованные группы: `aph`/`alit`
+   * — атака (плейсхолдер/литерал), `hph`/`hlit` — здоровье, `target` — кому
+   * прибавка (племя словами или «minions»), `every` — плейсхолдер «раз в N
+   * розыгрышей», `twice`/`double` — кратность.
+   *
+   * - `shop` — витрина до конца партии: «After you play an Elemental, give
+   *   Elementals in the Tavern +{0}/+{1} this game» (Nomi `BGS_104`,
+   *   Timewarped Nomi). Цена одной прибавки — та же, что у заклинания
+   *   «this game» (D176): каждая будущая покупка.
+   * - `steal` — статы из таверны: «After you play {1} Elementals, gain
+   *   the stats of the highest-Health minion in the Tavern» (Unbound Tempest
+   *   `BG36_352`); у золотого «double the stats».
+   * - `self` — рост самого плательщика: «gain +{1} Health» (Molten Rock),
+   *   «gain +{0}/+{1}» (Timewarped Molten Rock, Groundbreaker, Sub Scrubber),
+   *   «Has +{0}/+{1} for each Elemental you played this game» (Flourishing
+   *   Frostling).
+   * - `board` — свои племени: «give your Elementals +{0}/+{1}» (Unleashed
+   *   Mana Surge), «give all your Naga» (Timewarped Siren). Предложение
+   *   обязано кончаться прибавкой: «…and deal 1 damage to them» (Rabid
+   *   Panther) — уже не чистая прибавка, и такой текст не читается.
+   *
+   * part60: золотая Nomi сработала 61 раз (+8/+8 витрине за каждого
+   * разыгранного элементаля), две бури забрали из таверны +14703/+14227,
+   * а советник семь раз советовал продать Nomi и четырежды — Kelp Keeper,
+   * чья активация приносила элементаля в руку. Розыгрыш Water Droplet 3/3
+   * при бурях со счётчиком 1 стоил +921/+924, советник давал ему 11.0.
+   */
+  readonly playTribePayoffWords: {
+    readonly shop: readonly string[];
+    readonly steal: readonly string[];
+    readonly self: readonly string[];
+    readonly board: readonly string[];
+  };
+
+  /**
+   * Активация, повторяющая клич своего миньона: «Activate ({0}): Trigger
+   * a friendly minion's Battlecry» (Kelp Keeper `BG36_701`), у золотого —
+   * «…twice» (группа 1). part60 (D260): семь нажатий за партию, все на Tavern
+   * Tempest («Battlecry: Get a random Elemental»), девять принесённых
+   * элементалей разыграны при Nomi и бурях и проданы за монету.
+   */
+  readonly retriggerBattlecryWords: readonly string[];
+
+  /**
    * Где Discover — ДЕЙСТВИЕ самой карты, а не слово в триггере («After you
    * Discover», «When you buy or Discover this»): после клича, при продаже
    * и в начале текста заклинания или активации (D232).
@@ -2271,6 +2317,45 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   discoverPayoffWords: [
     '\\bafter\\s+you\\s+(?:<b>)?discover(?:<\\/b>)?\\s+a\\s+card\\s*,\\s*give\\s+your\\s+(other\\s+)?{tribe}\\s+' +
       '\\+(?:\\{(\\d)\\}|(\\d+))\\s*\\/\\s*\\+(?:\\{(\\d)\\}|(\\d+))',
+  ],
+
+  // Тексты снапшота (переносы сведены в пробел, D198): «[x]After you play an
+  // Elemental, give Elementals in the Tavern +{0}/+{1} this game.» (Nomi);
+  // «[x]After you play {1} Elementals, gain the stats of the highest- Health
+  // minion in the Tavern.» (Unbound Tempest — дефис с переносом строки);
+  // «[x]After you play an Elemental, gain +{1} Health twice.» (золотой Molten
+  // Rock); «[x]Has +{0}/+{1} for each Elemental you played this game»
+  // (Flourishing Frostling); «After you play an Elemental, give your
+  // Elementals +{0}/+{1}.» (Unleashed Mana Surge).
+  playTribePayoffWords: {
+    shop: [
+      '\\bafter\\s+you\\s+play\\s+an?\\s+{tribe}\\s*,\\s*give\\s+(?<target>\\w+)\\s+in\\s+the\\s+tavern\\s+' +
+        '\\+(?:\\{(?<aph>\\d)\\}|(?<alit>\\d+))\\s*\\/\\s*\\+(?:\\{(?<hph>\\d)\\}|(?<hlit>\\d+))\\s+this\\s+game' +
+        '(?:\\s+(?<twice>twice))?',
+    ],
+    steal: [
+      '\\bafter\\s+you\\s+play\\s+\\{(?<every>\\d)\\}\\s+{tribe}\\s*,\\s*gain\\s+(?:(?<double>double)\\s+)?' +
+        'the\\s+stats\\s+of\\s+the\\s+highest-\\s*health\\s+minion\\s+in\\s+the\\s+tavern',
+    ],
+    self: [
+      '\\bafter\\s+you\\s+play\\s+an?\\s+{tribe}\\s*,\\s*gain\\s+' +
+        '\\+(?:\\{(?<aph>\\d)\\}|(?<alit>\\d+))\\s*\\/\\s*\\+(?:\\{(?<hph>\\d)\\}|(?<hlit>\\d+))' +
+        '(?:\\s+(?<twice>twice))?\\s*(?:\\.|and\\s+improve\\s+this)',
+      '\\bafter\\s+you\\s+play\\s+an?\\s+{tribe}\\s*,\\s*gain\\s+\\+(?:\\{(?<hph>\\d)\\}|(?<hlit>\\d+))\\s+health' +
+        '(?:\\s+(?<twice>twice))?\\s*\\.',
+      '\\bhas\\s+\\+(?:\\{(?<aph>\\d)\\}|(?<alit>\\d+))\\s*\\/\\s*\\+(?:\\{(?<hph>\\d)\\}|(?<hlit>\\d+))\\s+' +
+        'for\\s+each\\s+{tribe}\\s+you\\s+played\\s+this\\s+game',
+    ],
+    board: [
+      '\\bafter\\s+you\\s+play\\s+an?\\s+{tribe}\\s*,\\s*give\\s+(?:all\\s+)?your\\s+(?<target>\\w+)\\s+' +
+        '\\+(?:\\{(?<aph>\\d)\\}|(?<alit>\\d+))\\s*\\/\\s*\\+(?:\\{(?<hph>\\d)\\}|(?<hlit>\\d+))' +
+        '(?:\\s+(?<twice>twice))?\\s*\\.',
+    ],
+  },
+
+  // «<b>Activate ({0}):</b> Trigger a friendly minion's <b>Battlecry</b> twice.»
+  retriggerBattlecryWords: [
+    "\\btrigger\\s+a\\s+friendly\\s+minion'?s\\s+(?:<b>)?battlecry(?:<\\/b>)?(?:\\s+(twice))?",
   ],
   // Клич: «<b>Battlecry:</b> <b>Discover</b> a Tavern spell» (Rodeo Performer).
   // Продажа: «When you sell this, <b>Discover</b> a Tier 1 minion» (Patient

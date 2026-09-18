@@ -11,6 +11,7 @@ import {
   tripleRewardGold,
   withBattlecryPayoff,
   withKeyword,
+  withPlayPayoff,
   trinketAdvice,
   withMagnetDoublingSpent,
   type Recommendation,
@@ -1199,6 +1200,21 @@ function triggersBattlecry(
 }
 
 /**
+ * Выложил ли шаг карту на борд — то есть РАЗЫГРАЛ её (D259). Прокрутка
+ * разыгрывает всегда; покупка и розыгрыш — когда карта появилась на борде;
+ * примагничивание тела на борд не ставит.
+ */
+function placesCard(before: GameState, after: GameState, rec: Recommendation): boolean {
+  const minion = rec.minion;
+  if (minion === null) return false;
+  if (rec.action === 'spin') return true;
+  if (rec.action !== 'buy' && rec.action !== 'play') return false;
+  if (rec.magnetizeTo != null) return false;
+  const placed = (s: GameState): boolean => s.board.some((m) => m.entityId === minion.entityId);
+  return placed(after) && !placed(before);
+}
+
+/**
  * Настоящий подъём — единственная трата жадной цепочки, а нынешний тир взят
  * позже своей строки кривой (D229). Остальные шаги цепочки бесплатны.
  */
@@ -1264,9 +1280,16 @@ function buildChain(
     if (applied === null) break;
     // Сработавший клич кормит плательщиков борда (D224): прибавка известна
     // числом, и следующий шаг обязан считать драконов уже с ней.
-    const after = triggersBattlecry(current, applied.state, rec, deps)
+    const afterBattlecry = triggersBattlecry(current, applied.state, rec, deps)
       ? withBattlecryPayoff(applied.state, deps, rules)
       : applied.state;
+    // Разыгранная карта племени платит плательщикам борда (D259): буря
+    // считает розыгрыши и забирает статы витрины, Nomi растит витрину —
+    // следующий шаг обязан видеть и то, и другое.
+    const after =
+      rec.minion !== null && placesCard(current, applied.state, rec)
+        ? withPlayPayoff(afterBattlecry, rec.minion, deps, rules)
+        : afterBattlecry;
 
     steps.push({
       recommendation: rec,

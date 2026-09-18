@@ -564,6 +564,36 @@
    "BG33_334",
    "BG33_334_G"
   ],
+  "playTribePayoffWords.shop": [
+   "BG30_MagicItem_544",
+   "BG30_MagicItem_544t",
+   "BG34_Giant_032",
+   "BG34_Giant_032_G",
+   "BGS_104"
+  ],
+  "playTribePayoffWords.steal": [
+   "BG36_352",
+   "BG36_352_G"
+  ],
+  "playTribePayoffWords.self": [
+   "BG22_HERO_200_Buddy",
+   "BG22_HERO_200_Buddy_G",
+   "BG26_137",
+   "BG26_137_G",
+   "BG26_537",
+   "BG26_537_G",
+   "BG31_035",
+   "BG31_035_G",
+   "BG34_Giant_006",
+   "BG34_Giant_006_G",
+   "BGS_127"
+  ],
+  "playTribePayoffWords.board": [
+   "BG32_846",
+   "BG32_846_G",
+   "BG34_PreMadeChamp_058",
+   "BG34_PreMadeChamp_058_G"
+  ],
   "rebornGainStatsWords": [
    "BG36_514",
    "BG36_514_G"
@@ -589,6 +619,20 @@
    "BG36_MagicItem_217",
    "TB_BaconShop_HERO_22_Buddy",
    "TB_BaconShop_HERO_22_Buddy_G"
+  ],
+  "retriggerBattlecryWords": [
+   "BG26_355",
+   "BG26_355_G",
+   "BG26_355_Gt",
+   "BG26_355t",
+   "BG28_883",
+   "BG29_870",
+   "BG29_870_G",
+   "BG29_870_Gt",
+   "BG29_870t",
+   "BG36_701",
+   "BG36_701_G",
+   "TB_BaconShop_HP_022"
   ],
   "selfAuraWords": 51,
   "selfTriggerWords": 65,

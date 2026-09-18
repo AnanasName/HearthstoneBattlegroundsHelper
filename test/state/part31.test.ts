@@ -155,6 +155,13 @@ describe('part31: цена придержанного заряда дара, м�
       // и жал. Верхней строкой всего списка с part51 стоит бесплатный Shiny
       // Ring из руки: он раздаёт +6/+6 каждому из шести-семи своих (+84 и +120
       // статов), а считался на одного — и за золото с даром не спорит.
+      //
+      // Ход 21 с part60 (D259) судится иначе: розыгрыш наги кормит Groundbreaker
+      // («After you play a Naga, gain +{1}/+{1}», {1}=13), Ominous Seer стоит
+      // 27 очков, и план берёт подъём с Seer вместо дара. Корпусный A/B
+      // (`spike:plandiff`) на этой точке: +0.40 п.п. — шум; правило дара
+      // по-прежнему говорит «жать» (проверено выше).
+      if (s !== turn19) continue;
       const advice = adviseTavern(s, { cards });
       const paid = advice?.recommendations.filter((r) => r.cost > 0);
       expect(paid?.[0]?.action).toBe('darkGift');

@@ -420,6 +420,20 @@ export interface ValueBreakdown {
    * `battlecryPayoff`: у своего миньона борда клич уже отыграл.
    */
   readonly discoverPayoff: number;
+  /**
+   * Что розыгрыш этой карты заплатит плательщикам борда за её племя (Nomi,
+   * Unbound Tempest, Molten Rock — D259). Про ПРИОБРЕТЕНИЕ, как
+   * `battlecryPayoff`: свой миньон борда уже разыгран, и `ownValue` вычитает.
+   */
+  readonly playPayoff: number;
+  /** Кто платит за этот розыгрыш — для причины совета. */
+  readonly playPayers: readonly string[];
+  /**
+   * Сам кандидат — плательщик за розыгрыш своего племени (D259): плата
+   * за один розыгрыш, помноженная на розыгрыши за ход таверны. Про
+   * УДЕРЖАНИЕ: остаётся и в `ownValue`.
+   */
+  readonly playEngine: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1446,6 +1460,14 @@ export function minionValue(
         );
   const discoverPayoff = discoverPay === null ? 0 : discoverPay.points * discoverEvents;
 
+  // Розыгрыш кормит плательщиков борда за племя (D259): Nomi прибавляет
+  // витрине, буря приближает кражу статов из таверны, Molten Rock растёт.
+  const playPay = playPayoffOf(candidate, state, state.board, cards, rules);
+  const playPayoff = playPay?.points ?? 0;
+  // Сам кандидат — такой плательщик: число розыгрышей его племени за ход
+  // таверны делает из текста цену удержания (D259, по образцу D184).
+  const playEngine = playEngineValue(candidate, state, cards, rules);
+
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
   // 2 Mechs that died») на борде из мехов была слабейшей по голым статам,
@@ -1610,8 +1632,12 @@ export function minionValue(
   // на нашей шкале статов, своего веса у него нет намеренно.
   const heroPowerPlay = heroPowerPlayStats(state, cards, rules) * w.perStatPoint;
 
-  // Активация (part44): на нашей же шкале статов, своего веса нет.
-  const activation = activationBoardStats(candidate, state, cards, rules) * w.perStatPoint;
+  // Активация (part44): на нашей же шкале статов, своего веса нет. Нажатие,
+  // повторяющее клич «Get a random <Tribe>» при плательщиках за розыгрыш
+  // (Kelp Keeper, D260), — сверху, в тех же очках; у цели — её доля.
+  const activation =
+    activationBoardStats(candidate, state, cards, rules) * w.perStatPoint +
+    activationRetriggerPoints(candidate, state, cards, rules);
 
   return {
     techLevel: tech,
@@ -1638,6 +1664,9 @@ export function minionValue(
       combatGrant === null ? null : { field: combatGrant.field, recipient: combatGrant.recipient },
     battlecryPayoff,
     discoverPayoff,
+    playPayoff,
+    playPayers: playPay?.payers ?? [],
+    playEngine,
     total:
       tech +
       stats +
@@ -1657,7 +1686,9 @@ export function minionValue(
       heroPowerPlay +
       heroPowerBuy +
       battlecryPayoff +
-      discoverPayoff,
+      discoverPayoff +
+      playPayoff +
+      playEngine,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -2162,6 +2193,414 @@ function discoverPayoffNote(
 ): string {
   const times = count > 1 ? ` ×${String(count)}` : '';
   return `${payoff.payers.join(', ')}: Discover кормит своих (${payoff.points.toFixed(1)}${times})`;
+}
+
+/**
+ * Плательщик за РОЗЫГРЫШ карты племени (part60, D259) — третий плательщик
+ * после клича (D224) и Discover (D232): платит розыгрыш любой карты
+ * названного племени. Виды и шаблоны — `playTribePayoffWords`.
+ *
+ * part60: золотая Nomi за партию сработала 61 раз (по разу на каждого
+ * разыгранного элементаля, +8/+8 витрине), две Unbound Tempest забрали
+ * из таверны +14703/+14227, а советник видел в Nomi тело 21/16 и семь раз
+ * советовал её продать, розыгрыш Water Droplet при бурях со счётчиком 1
+ * (+921/+924) оценивал в 11.0, а только что выставленную бурю 3/12
+ * предлагал продать ради Moat Custodian.
+ */
+type PlayPayoffKind = 'shop' | 'steal' | 'self' | 'board';
+
+const PLAY_PAYOFF_KINDS: readonly PlayPayoffKind[] = ['shop', 'steal', 'self', 'board'];
+
+interface PlayPayoffText {
+  readonly kind: PlayPayoffKind;
+  /** Племя РАЗЫГРАННОЙ карты, за которое платят. */
+  readonly race: string;
+  /** Кому прибавка у `shop` и `board`: племя; `null` — всем («minions»). */
+  readonly target: string | null;
+  readonly attack: readonly [string | undefined, string | undefined];
+  readonly health: readonly [string | undefined, string | undefined];
+  /** `steal`: плейсхолдеры «раз в N розыгрышей» и «осталось». */
+  readonly every: string | undefined;
+  readonly left: string | undefined;
+  /** «twice» у золотых, «double the stats» у золотой бури. */
+  readonly times: number;
+}
+
+/** Племя, названное словом («Elementals», «Naga»); не племя — `null`. */
+function raceOfWord(word: string, rules: TavernRules): string | null {
+  for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+    if (new RegExp(`^(?:${tribe})$`, 'i').test(word)) return race;
+  }
+  return null;
+}
+
+function playPayoffTextOf(cardId: string, cards: CardIndex, rules: TavernRules): PlayPayoffText | null {
+  return memoByCard(PLAY_PAYOFF_CACHE, cardId, cards, rules, (): PlayPayoffText | null => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (!/\bplay/i.test(text)) return null;
+    // Работает из РУКИ («While this is in your hand, after you play
+    // a Murloc…», Bream Counter) — на борде не платит ничего.
+    if (rules.handWorkerWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+    for (const kind of PLAY_PAYOFF_KINDS) {
+      for (const pattern of rules.playTribePayoffWords[kind]) {
+        for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+          const g = new RegExp(pattern.replace('{tribe}', `(?:${tribe})`), 'i').exec(text)?.groups;
+          if (g === undefined) continue;
+          let target: string | null = null;
+          const word = g['target'];
+          if (word !== undefined && !/^minions$/i.test(word)) {
+            target = raceOfWord(word, rules);
+            if (target === null) continue;
+          }
+          return {
+            kind,
+            race,
+            target,
+            attack: [g['aph'], g['alit']] as const,
+            health: [g['hph'], g['hlit']] as const,
+            every: g['every'],
+            left: kind === 'steal' ? /\(\{(\d)\}\s+left/i.exec(text)?.[1] : undefined,
+            times: g['twice'] !== undefined || g['double'] !== undefined ? 2 : 1,
+          };
+        }
+      }
+    }
+    return null;
+  });
+}
+
+const PLAY_PAYOFF_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, PlayPayoffText | null>>
+>();
+
+/** Самое здоровое тело витрины — то, чьи статы забирает буря. */
+function highestHealthIn(shop: readonly Minion[]): Minion | null {
+  return shop.reduce<Minion | null>(
+    (best, m) => (best === null || (m.health ?? 0) > (best.health ?? 0) ? m : best),
+    null,
+  );
+}
+
+/** Прибавка одного срабатывания в статах: {0}+{1} с сущности, с кратностью. */
+function playPayoffStats(payer: Minion, spec: PlayPayoffText): { attack: number; health: number } {
+  const read = (ph: string | undefined, lit: string | undefined): number =>
+    ph !== undefined ? (payer.scriptData[Number(ph)] ?? 0) : Number(lit ?? 0);
+  return {
+    attack: read(spec.attack[0], spec.attack[1]) * spec.times,
+    health: read(spec.health[0], spec.health[1]) * spec.times,
+  };
+}
+
+function isPlayTarget(m: Minion, spec: PlayPayoffText, cards: CardIndex): boolean {
+  if (spec.target === null) return true;
+  const races = racesOf(m, cards);
+  return races.includes(spec.target) || races.includes(RACE_ALL);
+}
+
+/**
+ * Очки ОДНОГО розыгрыша для одного плательщика. `board` — борд после
+ * розыгрыша; `played` — разыгранная карта (у бури она уже не в витрине).
+ *
+ * - `self` и `board` — статы на НАШИХ телах, по `perStatPoint`;
+ * - `shop` — формула витринного баффа «this game» (D176): прибавку получит
+ *   каждая будущая покупка племени, не больше мест на борде, доля — по
+ *   составу остального борда; своих такого племени нет — ноль;
+ * - `steal` — статы самого здорового тела витрины (у золотой вдвое),
+ *   делённые на число розыгрышей между срабатываниями: розыгрыш
+ *   приближает срабатывание на одну N-ю.
+ */
+function playPayerPoints(
+  payer: Minion,
+  spec: PlayPayoffText,
+  state: GameState,
+  board: readonly Minion[],
+  playedId: number | null,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const w = rules.value;
+  const { attack, health } = playPayoffStats(payer, spec);
+  switch (spec.kind) {
+    case 'self':
+      return (attack + health) * w.perStatPoint;
+    case 'board':
+      return (attack + health) * board.filter((m) => isPlayTarget(m, spec, cards)).length * w.perStatPoint;
+    case 'shop': {
+      const others = board.filter((m) => m.entityId !== payer.entityId);
+      const share =
+        spec.target === null
+          ? 1
+          : others.filter((m) => isPlayTarget(m, spec, cards)).length / Math.max(1, others.length);
+      const bodies = Math.min(remainingBuys(state, rules), rules.boardSize) * share;
+      // Прибавка витрине кормит и БУРЮ (part60): буря забирает самое
+      // здоровое тело витрины, и если оно того же племени, каждое её
+      // срабатывание после розыгрыша уносит и эту прибавку. Считаются
+      // срабатывания ЭТОГО хода: половина розыгрышей хода (в среднем
+      // после нынешнего), делённая на период бури. В part60 на долю Nomi
+      // пришлось 65 % статов, забранных бурями, — формула покупок D176
+      // этого канала не видит вовсе.
+      const top = highestHealthIn(state.shop.filter((m) => m.entityId !== playedId));
+      let steals = 0;
+      if (top !== null && isPlayTarget(top, spec, cards)) {
+        for (const m of others) {
+          const steal = playPayoffTextOf(m.cardId, cards, rules);
+          if (steal === null || steal.kind !== 'steal' || steal.every === undefined) continue;
+          const every = m.scriptData[Number(steal.every)] ?? 0;
+          if (every <= 0) continue;
+          steals += (steal.times * tribePlaysPerTurn(state, steal.race, cards)) / 2 / every;
+        }
+      }
+      return (attack + health) * (bodies + steals) * w.perStatPoint;
+    }
+    case 'steal': {
+      const every = spec.every === undefined ? 0 : (payer.scriptData[Number(spec.every)] ?? 0);
+      const top = highestHealthIn(state.shop.filter((m) => m.entityId !== playedId));
+      if (every <= 0 || top === null) return 0;
+      return (((top.attack ?? 0) + (top.health ?? 0)) * spec.times * w.perStatPoint) / every;
+    }
+  }
+}
+
+/** Что платят плательщики борда за один розыгрыш; `null` — платить некому. */
+export interface PlayPayoff {
+  readonly points: number;
+  readonly payers: readonly string[];
+}
+
+/**
+ * Плата плательщиков `board` за розыгрыш карты `played` (D259). Сам
+ * разыгранный себе не платит: «After you play» срабатывает на ДРУГИЕ карты.
+ */
+export function playPayoffOf(
+  played: Minion,
+  state: GameState,
+  board: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): PlayPayoff | null {
+  const after = board.some((m) => m.entityId === played.entityId) ? board : [...board, played];
+  return playPayoffByRaces(racesOf(played, cards), played.entityId, state, after, cards, rules);
+}
+
+/**
+ * То же по ПЛЕМЕНИ карты, а не по сущности: карта, которую принесёт клич
+ * (Kelp Keeper → Tavern Tempest, D260), ещё не существует. `playedId` —
+ * разыгранная сущность (платить себе она не может, у бури она уже не
+ * в витрине); `board` — борд после розыгрыша.
+ */
+function playPayoffByRaces(
+  races: readonly string[],
+  playedId: number | null,
+  state: GameState,
+  board: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules,
+): PlayPayoff | null {
+  if (races.length === 0) return null;
+  let points = 0;
+  const payers: string[] = [];
+  for (const payer of board) {
+    if (payer.entityId === playedId) continue;
+    const spec = playPayoffTextOf(payer.cardId, cards, rules);
+    if (spec === null || (!races.includes(spec.race) && !races.includes(RACE_ALL))) continue;
+    const p = playPayerPoints(payer, spec, state, board, playedId, cards, rules);
+    if (p <= 0) continue;
+    points += p;
+    payers.push(cards.info(payer.cardId)?.name ?? payer.cardId);
+  }
+  return payers.length === 0 ? null : { points, payers };
+}
+
+/**
+ * «Activate: Trigger a friendly minion's Battlecry» (Kelp Keeper `BG36_701`,
+ * part60, D260) — что даст одно нажатие на лучшую цель `board`.
+ *
+ * Читается ОДИН вид клича цели — «Get a random <Tribe>» (Tavern Tempest
+ * `BGS_123`, у золотого «Get 2»): карта племени приходит в руку, её
+ * разыгрывают — плата плательщиков за розыгрыш (D259) — и продают за монету.
+ * Без плательщиков нажатие немо, как и было: плоского курса «6 очков
+ * за карту» тут нет (его опроверг скептик на part21 и part53 — спор с D213).
+ * Кратность: «twice» у золотого Kelp и удвоитель клича на борде (Бранн).
+ */
+function retriggerValueOn(
+  keeper: Minion,
+  board: readonly Minion[],
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { readonly target: Minion; readonly points: number; readonly count: number; readonly payers: readonly string[] } | null {
+  const effect = activateEffectText(keeper, cards);
+  if (effect === null) return null;
+  let twice: string | undefined;
+  const reads = rules.retriggerBattlecryWords.some((w) => {
+    const found = new RegExp(w, 'i').exec(effect);
+    if (found === null) return false;
+    twice = found[1];
+    return true;
+  });
+  if (!reads) return null;
+  const times = (twice === undefined ? 1 : 2) * battlecryTimesOn(board, cards, rules);
+  let best: { target: Minion; points: number; count: number; payers: readonly string[] } | null = null;
+  for (const target of board) {
+    if (target.entityId === keeper.entityId) continue;
+    const info = cards.info(target.cardId);
+    if (!(info?.mechanics ?? []).includes('BATTLECRY')) continue;
+    const text = info?.text ?? '';
+    const race = tribeMinionRace(text, rules);
+    if (race === null) continue;
+    const pay = playPayoffByRaces([race], null, state, board, cards, rules);
+    if (pay === null) continue;
+    const count = Math.max(1, promisedCardCount(text, rules)) * times;
+    const points = count * (pay.points + rules.sellGold * rules.goldPointValue);
+    if (best === null || points > best.points) best = { target, points, count, payers: pay.payers };
+  }
+  return best;
+}
+
+/**
+ * Нажатие, повторяющее клич (D260), в очках ценности миньона — по образцу
+ * `activationBoardStats` (D184): числом, а не запретом. У самого носителя —
+ * одно нажатие на лучшую цель остального борда; у цели — её доля: насколько
+ * нажатие соседа беднее без неё. Золото нажатия не вычитается — это цена
+ * ТЕЛА, а «жать ли сейчас» решает `activationRules`.
+ */
+function activationRetriggerPoints(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const without = state.board.filter((m) => m.entityId !== candidate.entityId);
+  const own = retriggerValueOn(candidate, [...without, candidate], state, cards, rules);
+  if (own !== null) return own.points;
+  // Доля есть у тех, от кого нажатие зависит: кличевой цели, удвоителя клича
+  // (Бранн: карт вдвое) и плательщика за розыгрыш. Прочему телу доли нет —
+  // иначе оно получало бы крошечный минус, сдвигая долю племени у Nomi.
+  const relevant =
+    (cards.info(candidate.cardId)?.mechanics ?? []).includes('BATTLECRY') ||
+    battlecryPayoffTextOf(candidate.cardId, cards, rules).times > 1 ||
+    playPayoffTextOf(candidate.cardId, cards, rules) !== null;
+  if (!relevant) return 0;
+  const withIt = [...without, candidate];
+  let share = 0;
+  for (const keeper of without) {
+    const full = retriggerValueOn(keeper, withIt, state, cards, rules);
+    if (full === null) continue;
+    share += full.points - (retriggerValueOn(keeper, without, state, cards, rules)?.points ?? 0);
+  }
+  return share;
+}
+
+/** Есть ли на борде плательщик за розыгрыш. */
+function hasPlayPayer(board: readonly Minion[], cards: CardIndex, rules: TavernRules): boolean {
+  return board.some((m) => playPayoffTextOf(m.cardId, cards, rules) !== null);
+}
+
+/**
+ * Сколько карт племени игрок разыгрывает за ход таверны — среднее по трём
+ * последним ЗАКОНЧЕННЫМ ходам таверны, из журнала своих действий. Читаемый
+ * факт, а не коэффициент: в part60 число срабатываний золотой Nomi совпало
+ * с числом розыгрышей элементалей в журнале, 61 из 61.
+ */
+function tribePlaysPerTurn(state: GameState, race: string, cards: CardIndex): number {
+  const recent = [2, 4, 6].map((d) => state.turn - d).filter((t) => t >= 1);
+  if (recent.length === 0) return 0;
+  const plays = state.actions.filter((a) => {
+    if (a.type !== 'play' || a.cardId === null || !recent.includes(a.turn)) return false;
+    const races = cards.info(a.cardId)?.races ?? [];
+    return races.includes(race) || races.includes(RACE_ALL);
+  }).length;
+  return plays / recent.length;
+}
+
+/**
+ * Ценность плательщика как ДВИГАТЕЛЯ (D259): плата за один розыгрыш своего
+ * племени, помноженная на розыгрыши за ход таверны. Горизонт — один ход:
+ * продажа отнимает все будущие розыгрыши, и оценка от этого НИЖНЯЯ.
+ * Считается против остального борда (D150), числом, а не запретом (D184).
+ */
+function playEngineValue(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const spec = playPayoffTextOf(candidate.cardId, cards, rules);
+  if (spec === null) return 0;
+  const rate = tribePlaysPerTurn(state, spec.race, cards);
+  if (rate <= 0) return 0;
+  const rest = state.board.filter((m) => m.entityId !== candidate.entityId);
+  return playPayerPoints(candidate, spec, state, [...rest, candidate], null, cards, rules) * rate;
+}
+
+/**
+ * Состояние после розыгрыша `played`: плательщики борда получили своё
+ * (D259). Самоприрост и «свои племени» — на борд, витринный бафф — на
+ * витрину, буря считает розыгрыши точно: на последнем из N забирает статы
+ * самого здорового тела витрины и заводит счётчик заново.
+ */
+export function withPlayPayoff(
+  state: GameState,
+  played: Minion,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): GameState {
+  const races = racesOf(played, deps.cards);
+  if (races.length === 0) return state;
+  const grow = (m: Minion, attack: number, health: number): Minion =>
+    attack + health === 0 ? m : { ...m, attack: (m.attack ?? 0) + attack, health: (m.health ?? 0) + health };
+  let board = state.board;
+  let shop = state.shop;
+  for (const payer of state.board) {
+    if (payer.entityId === played.entityId) continue;
+    const spec = playPayoffTextOf(payer.cardId, deps.cards, rules);
+    if (spec === null || (!races.includes(spec.race) && !races.includes(RACE_ALL))) continue;
+    const { attack, health } = playPayoffStats(payer, spec);
+    switch (spec.kind) {
+      case 'self':
+        board = board.map((m) => (m.entityId === payer.entityId ? grow(m, attack, health) : m));
+        break;
+      case 'board':
+        board = board.map((m) => (isPlayTarget(m, spec, deps.cards) ? grow(m, attack, health) : m));
+        break;
+      case 'shop':
+        shop = shop.map((m) => (isPlayTarget(m, spec, deps.cards) ? grow(m, attack, health) : m));
+        break;
+      case 'steal': {
+        const every = spec.every === undefined ? 0 : (payer.scriptData[Number(spec.every)] ?? 0);
+        const leftAt = spec.left === undefined ? null : Number(spec.left);
+        if (every <= 0 || leftAt === null) break;
+        board = board.map((m) => {
+          if (m.entityId !== payer.entityId) return m;
+          const left = m.scriptData[leftAt] ?? every;
+          const scriptData = [...m.scriptData];
+          if (left > 1) {
+            scriptData[leftAt] = left - 1;
+            return { ...m, scriptData };
+          }
+          scriptData[leftAt] = every;
+          const top = highestHealthIn(shop);
+          const gained = top === null
+            ? m
+            : grow(m, (top.attack ?? 0) * spec.times, (top.health ?? 0) * spec.times);
+          return { ...gained, scriptData };
+        });
+        break;
+      }
+    }
+  }
+  return board === state.board && shop === state.shop ? state : { ...state, board, shop };
+}
+
+/** Причина к совету: кто платит за этот розыгрыш. */
+function playPayoffNote(points: number, payers: readonly string[]): string {
+  return `розыгрыш кормит: ${payers.join(', ')} (${points.toFixed(1)})`;
+}
+
+/** Причина к совету: сам кандидат платит за розыгрыши своего племени. */
+function playEngineNote(points: number): string {
+  return `платит за розыгрыш своего племени — ${points.toFixed(1)} за ход`;
 }
 
 /**
@@ -2909,14 +3348,17 @@ function ownValue(
   // Доля награды за покупку (part34) — тоже про приобретение: свой кличевой
   // миньон второй раз не покупается, и Бранна за него больше не дадут.
   // Цена клича через плательщиков (D224) — туда же: клич своего миньона
-  // борда уже отыграл. И Discover его клича (D232) — тоже.
+  // борда уже отыграл. И Discover его клича (D232) — тоже. И плата за его
+  // розыгрыш (D259): разыгран он раньше. Ценность плательщика как двигателя
+  // (`playEngine`) остаётся — это про удержание.
   return (
     value.total -
     value.copies -
     value.heroPowerPlay -
     value.heroPowerBuy -
     value.battlecryPayoff -
-    value.discoverPayoff
+    value.discoverPayoff -
+    value.playPayoff
   );
 }
 
@@ -3288,6 +3730,8 @@ export function buyRules(
         notes.push(`связана по имени: своих ${String(value.namedCardMates)}`);
       }
       if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
+      if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
+      if (value.playEngine > 0) notes.push(playEngineNote(value.playEngine));
       if (value.heroPowerBuyLeft !== null && value.heroPowerBuyReward !== null) {
         notes.push(
           value.heroPowerBuyLeft === 0
@@ -3550,6 +3994,7 @@ export function playRules(
     const coinGold = isTripledGolden(minion) ? tripleRewardGold(state, deps.cards, rules) : 0;
     const notes: string[] = [];
     if (doomed) notes.push('умрёт при розыгрыше в этот ход — но хрип/перерождение сработают');
+    if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
     if (coinGold > 0) notes.push(`сила героя: даст монетку (+${String(coinGold)} золота)`);
     if (value.completesTriple) notes.push('собирает тройку');
     else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
@@ -3825,13 +4270,19 @@ export function spinRule(
   // плательщик за клич: Discover прокрутки кормит своих, и слот под неё
   // стоит продажи слабейшего.
   const discoverPayer = discoverPayoffOf(state.board, deps.cards, rules) !== null;
+  // Плательщик за РОЗЫГРЫШ племени (D259) открывает полный борд так же:
+  // прокрутка любой карты его племени — это его плата, и слот под неё
+  // стоит продажи слабейшего не-плательщика (part60: игрок крутил
+  // элементалей при Nomi и бурях десятками за ход).
+  const playPayer = hasPlayPayer(state.board, deps.cards, rules);
   const full = state.board.length >= rules.boardSize;
   let victim: { minion: Minion; value: number } | null = null;
   if (full) {
-    if (payoff === null && !discoverPayer) return null;
+    if (payoff === null && !discoverPayer && !playPayer) return null;
     for (const m of state.board) {
       if (feedsBattlecries(m, deps.cards, rules)) continue;
       if (discoverPayoffTextOf(m.cardId, deps.cards, rules) !== null) continue;
+      if (playPayoffTextOf(m.cardId, deps.cards, rules) !== null) continue;
       const value = ownValue(m, state, deps, rules);
       if (victim === null || value < victim.value) victim = { minion: m, value };
     }
@@ -3885,7 +4336,11 @@ export function spinRule(
         ? // Прокрученное тело продаётся, своя доля прибавки ему не впрок.
           battlecryPayoffPoints(payoff, boardAfterSale, null, deps.cards, rules)
         : 0;
-    const kind = generator ?? (fed > 0 ? 'battlecry' : null);
+    // Розыгрыш кормит плательщиков за племя (D259): крутится любая карта
+    // этого племени — прибавка их, а тело всё равно продаётся.
+    const playPay = playPayer ? playPayoffOf(minion, state, boardAfterSale, deps.cards, rules) : null;
+    const playFed = playPay?.points ?? 0;
+    const kind = generator ?? (fed > 0 || playFed > 0 ? 'battlecry' : null);
     if (kind === null) continue;
     // Discover прокрутки (D232): клич — столько раз, сколько клич срабатывает,
     // продажа — один. Прокрученное тело к тому моменту продано или будет
@@ -3897,7 +4352,9 @@ export function spinRule(
     const discoverPay = discovers > 0 ? discoverPayoffOf(boardAfterSale, deps.cards, rules) : null;
     const discoverFed = discoverPay === null ? 0 : discoverPay.points * discovers;
     // Через проданный слот крутится только то, что кормит плательщиков.
-    if (victim !== null && !((kind === 'battlecry' && fed > 0) || discoverFed > 0)) continue;
+    if (victim !== null && !((kind === 'battlecry' && fed > 0) || discoverFed > 0 || playFed > 0)) {
+      continue;
+    }
     // Батлкрайного генератора, который сам — лучшая покупка, не прокручивают.
     // Кличевого без добычи при плательщике — прокручивают: лучшей покупкой
     // его делает та же прибавка, что получит и прокрутка, а «купить или
@@ -3919,23 +4376,26 @@ export function spinRule(
       base =
         count * rules.heroPowerSpellValue +
         fed +
-        discoverFed -
+        discoverFed +
+        playFed -
         net * rules.goldPointValue -
         (victim?.value ?? 0);
       const notes: string[] = [];
       if (count > 0) notes.push(`клич даст ${String(count)} карт.`);
       if (fed > 0 && payoff !== null) notes.push(payoffNote(payoff, deps.cards));
       if (discoverPay !== null) notes.push(discoverPayoffNote(discoverPay, discovers));
+      if (playPay !== null) notes.push(playPayoffNote(playPay.points, playPay.payers));
       note = notes.join(', ');
     } else {
       const spun = sellSpinValue(minion, state, deps, rules, true);
       if (spun === null) continue;
-      base = spun.score + discoverFed - (victim?.value ?? 0);
+      base = spun.score + discoverFed + playFed - (victim?.value ?? 0);
       note =
         (spun.tier === null
           ? 'продажа даст миньона'
           : `продажа даст миньона тира ${String(spun.tier)}`) +
-        (discoverPay === null ? '' : `, ${discoverPayoffNote(discoverPay, discovers)}`);
+        (discoverPay === null ? '' : `, ${discoverPayoffNote(discoverPay, discovers)}`) +
+        (playPay === null ? '' : `, ${playPayoffNote(playPay.points, playPay.payers)}`);
     }
     if (base <= 0) continue;
 
@@ -4489,6 +4949,26 @@ export function freezeRule(
   // Копия под тройку — другое дело: копию не даст и новая витрина.
   const justLevelled = state.techLevelUpTurn === state.turn;
 
+  // Миньона, которого заморозка УЖЕ держит, ради него самого морозить
+  // незачем (part60, D258). Сила Varden «Twice as Nice» (`BG22_HERO_004p`:
+  // «After the Tavern is Refreshed, copy its highest-Tier minion and Freeze
+  // them both») ставит `FROZEN` каждой сущности пары отдельно, а кнопка —
+  // переключатель на всю витрину: при частичной заморозке она морозит ВСЁ.
+  // На ходу 1 план советовал «ЗАМОРОЗИТЬ Tusked Camper» при Camper-копии
+  // под заморозкой силы; нажатие удержало бы витрину 3 из 3 на тире 1 —
+  // ни одной новой карты, ни обновления в начале хода, ни копии силы.
+  // За партию таких советов шесть, шагов плана — 41, и игрок не нажал
+  // ни разу. Одноимённая карта тоже «держит» цель: пара под тройку — это
+  // копия, а копия уже доживёт.
+  const covered = (m: Minion): boolean =>
+    m.frozen ||
+    state.shop.some(
+      (f) =>
+        f.frozen &&
+        f.entityId !== m.entityId &&
+        baseMinionCardId(f.cardId) === baseMinionCardId(m.cardId),
+    );
+
   const valued = state.shop
     .map((m) => {
       const value = minionValue(m, state, deps, rules);
@@ -4525,6 +5005,7 @@ export function freezeRule(
     .slice(affordable)
     .filter(
       (v) =>
+        !covered(v.minion) &&
         v.value >= threshold &&
         (v.completes ||
           (v.bet && v.tier >= state.techLevel) ||
@@ -4803,6 +5284,7 @@ export function freezeRule(
             // (`spinRule`), витрины это не стоит.
             if (buyCostOf(v.minion, rules) <= state.gold) return [];
             if (v.copies > 0) return [];
+            if (covered(v.minion)) return [];
             const spun = sellSpinValue(v.minion, state, deps, rules, false);
             if (spun === null) return [];
             // То же обещание и та же проверка, что у заклинания: цепочка
@@ -7353,6 +7835,9 @@ export function activationRules(
     const consumed = consumeGain(effectText, state, deps, rules);
     // Приманка Lurking Lionfish: прибавка читается бортом и расстановкой (part56).
     const bait = fishbaitOf(effectText, state, deps.cards, rules);
+    // Повтор клича своего миньона (Kelp Keeper, D260): цель — кличевой
+    // «Get a random <Tribe>», чью карту кормят плательщики за розыгрыш.
+    const retrigger = retriggerValueOn(minion, state.board, state, deps.cards, rules);
 
     if (bait !== null) {
       score = bait.total * rules.value.perStatPoint - cost * rules.goldPointValue;
@@ -7389,6 +7874,12 @@ export function activationRules(
     } else if (goldNextTurn > 0) {
       score = (goldNextTurn - cost) * rules.goldPointValue;
       what = `+${String(goldNextTurn)} золота на следующий ход`;
+    } else if (retrigger !== null) {
+      score = retrigger.points - cost * rules.goldPointValue;
+      const targetName = deps.cards.info(retrigger.target.cardId)?.name ?? retrigger.target.cardId;
+      what =
+        `клич ${targetName} принесёт ${String(retrigger.count)} карт. племени — ` +
+        `разыграть (кормит: ${retrigger.payers.join(', ')}) и продать`;
     } else if (givesMinion) {
       // Приносимое тело оценивается как средний миньон текущего тира.
       score = rules.value.perTechLevel * state.techLevel - cost * rules.goldPointValue;
@@ -7408,6 +7899,8 @@ export function activationRules(
       bait !== null
         ? // У приманки цель — карта ВИТРИНЫ, которую она заменит.
           bait.replaced
+        : retrigger !== null && stats <= 0 && setStats === null && consumed === null
+        ? retrigger.target
         : setBest !== null && setBest.gain > 0
         ? setBest.minion
         : destroysTarget && pool.length > 0
