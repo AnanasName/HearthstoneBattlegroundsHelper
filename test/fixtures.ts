@@ -1314,3 +1314,26 @@ export function part59Game(): string {
 export function part60Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part60', 'game.log'), 'utf8');
 }
+
+/**
+ * part61 — Tickatus `TB_BaconShop_HERO_94`, 18.09.2026, 23:44–00:01,
+ * **6-е место**, 10 ходов таверны, билд 251952. Пираты: Aureate Laureate ×3
+ * с Surfing Sylvar, Doubloon Grifter (тринкет Grifter Portrait), Locked-up
+ * Mutineer, на последнем ходу Brann и Bounties от Sky Admiral Rogers.
+ *
+ * Своя сессия клиента (23:42:51), ровно одна партия, доиграна до
+ * `FINAL_GAMEOVER`; вырезана `fixture:passport --game=1 --write=part61`
+ * сразу после партии, пока игрок начинал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **Пассивная сила «Prize Wall»** `TB_BaconShop_HP_106`: «Every 4 turns,
+ *     Discover a Darkmoon Prize». Выбор приходит каналом
+ *     `DebugPrintEntityChoices` с `Source=` силы (id=136) — дважды: ход 7
+ *     (23:47:43, Crystallization / The Good Stuff / New Recruit, взят New
+ *     Recruit) и ход 15 (23:54:24, Evolving Tavern / Mageroyal Blossom /
+ *     The Bouncer, взят Evolving Tavern и до конца партии не разыгран).
+ */
+export function part61Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part61', 'game.log'), 'utf8');
+}
