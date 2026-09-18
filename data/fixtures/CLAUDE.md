@@ -1017,3 +1017,4 @@ Deathly Phylactery и Sinstone Sticker, золотой Gearfin из Lockbox
 нежить через Drustfallen Butcher и Butchering, активации Dead Bellringer.
 Бои: четыре выигрыша на старте (ходы 2–8), затем −6, −10, два выигрыша,
 −15, −11, выигрыш и −15, выбивший игрока.
+Тест — `test/state/part59.test.ts`.

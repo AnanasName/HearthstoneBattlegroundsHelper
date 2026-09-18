@@ -1932,3 +1932,66 @@ D 13:19:12.27…     FULL_ENTITY - Creating ID=5819 CardID=BG28_810    COST=0, Z
   на нём: part58 — 10 монеток из 10 от золотых с тегом (включая золотого
   из раскрытого Lockbox, `CREATOR_DBID=0`), part55 — 18 наград за тройку
   из 18. Наград за тройку в part58 ноль, в part2 (False Idols) — тоже ноль.
+
+## Тир награды за тройку фиксируется РОЗЫГРЫШЕМ золотого (part59, part16)
+
+Награда `TB_BaconShop_Triples_01` рождается внутри блока розыгрыша золотого
+(триггер `TB_BaconShop_3ofKindChecke`), и её тир написан на ней сразу:
+
+```
+D 13:39:34.95… TAG_CHANGE Entity=AngryMem#2886 tag=PLAYER_TECH_LEVEL value=5          (подъём 4 → 5)
+D 13:39:39.00… BLOCK_START BlockType=TRIGGER Entity=[… cardId=TB_BaconShop_3ofKindChecke …]
+                  Source = [… id=1286 zone=HAND … cardId=BG36_764_G …]              (золотой Gearfin)
+D 13:39:39.00…     FULL_ENTITY - Creating ID=4793 CardID=TB_BaconShop_Triples_01
+D 13:39:39.00…     TAG_CHANGE Entity=4793 tag=TAG_SCRIPT_DATA_NUM_1 value=6
+```
+
+Варианты выбора из неё (13:39:40) — все тира 6, взят Eternal Summoner.
+Скан разбора по корпусу: 305 сыгранных наград, `NUM_1` = min(тир в момент
+розыгрыша золотого + 1, 6) — в 302 (три расхождения — сканер на склеенных
+логах part35 и part41). В руке число не менялось ни разу: part16, id=4209,
+награда создана при тире 3 (`NUM_1=4`), подъём до 4 в 23:09:12, варианты
+в 23:09:21 — снова тиров 4/4/3. Значит, подниматься выгодно ДО розыгрыша
+золотого, а не до розыгрыша награды.
+
+## Перерождение в таверне и выплата Snazzy Phantom (part59, ходы 21–23)
+
+Butchering в Handless Forsaken с перерождением (13:49:14): та же сущность
+остаётся на месте — `ZONE=GRAVEYARD`, энчанты уходят в `REMOVEDFROMGAME`,
+затем `REBORN=0`, `HEALTH=1`, `ATK=2` (атака карты); хрип срабатывает
+(жетон Helping Hand `BG25_010t` 2/1 с `REBORN=1`). Надбавка всей нежити
+к атаке снимается энчантом и возвращается.
+
+Dead Bellringer в Eternal Knight (13:51:23, строка 267881: `Target=[… Вечный
+рыцарь id=14789]`) — рыцарь перерождается, и срабатывает Snazzy Phantom
+«After a friendly minion is Reborn, give stats equal to its Attack to your
+right-most Undead»:
+
+```
+D 13:51:23.17… BLOCK_START BlockType=TRIGGER Entity=[… Стильный фантом id=14790 … cardId=BG36_515 …]
+               энчант BG36_515e на Deathly Striker (ATTACHED=14799): TAG_SCRIPT_DATA_NUM_1=77, NUM_2=77
+```
+
+77 — атака копии рыцаря: 4 (карта) + 4 × 8 (павших рыцарей, считая его
+самого; на точке решения `eternalKnightsDead=7`) + 41 (надбавка нежити).
+Второе нажатие в 13:51:26 — +81 (NUM_1 энчанта 158). Три активации в самого
+Snazzy (13:47:52, 13:49:58, 13:50:18) его триггера не дали: собственное
+перерождение плательщика ему не платит.
+
+## Золото следующего хода из руки (part59, ходы 15 и 17)
+
+Розыгрыш Careful Investment `BG28_800` из руки (строка 100359) сразу пишет
+`BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` на игрока, и значение копится: 2
+на ходу 15, затем 2 → 4 → 6 за три розыгрыша хода 17 (строки 134959,
+135369, 135757); золото следующих ходов — 12/10 и 16/10. У Overconfidence
+`BG28_884` («If you win your next combat, gain 3 Gold») тег при розыгрыше
+НЕ пишется: part19 — розыгрыш в 00:05:24, тег впервые в 00:11:03.
+
+## Сила Крысиного короля — вариант на ход (part59)
+
+`TB_BaconShop_HP_041` «A Tale of Kings» — базовая сущность; нажимается
+вариант этого хода: `…041b` King of Mechs, `…041f` Dragons, `…041g` Pirates,
+`…041i` Quilboar, `…041k` Undead («Discover a <Tribe>. Swaps type each
+turn», `COST=2`). Найденная карта приходит в руку; на ходу 1 (13:32:09)
+Harmless Bonehead разыгран из руки через 6 секунд, следом Tavern Dish
+Banana `BG28_897` за 1 («Give a minion +{0}/+{1}», 2/2) — на него.
