@@ -1235,3 +1235,32 @@ export function part56Game(): string {
 export function part57Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part57', 'game.log'), 'utf8');
 }
+
+/**
+ * part58 — Mister Clocksworth `BG34_HERO_002`, 18.09.2026, 13:09–13:25,
+ * **6-е место**, 10 ходов таверны, билд 251952. Пираты и кабаны, Maritime
+ * Extortionist, выросший на золотых до 164/165.
+ *
+ * Следующая партия игрока после part57, своя сессия клиента (13:07:39),
+ * ровно одна партия, доиграна до `FINAL_GAMEOVER`; вырезана
+ * `fixture:passport --game=1 --write=part58` сразу после партии, пока
+ * игрок начинал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **Пассивная сила «Double Time»** `BG34_HERO_002p`: «You only need
+ *     2 copies to make minions Golden. They give Tavern Coins instead of
+ *     Triple Rewards». Сущность силы без `COST` и без `HAS_ACTIVATE_POWER`.
+ *  2. **Слияние двух копий**: купленная вторая копия и копия на борде
+ *     исчезают, в руку приходит золотой с тегом
+ *     `BACON_TRIPLED_BASE_MINION_ID` и статами «золотая база плюс
+ *     усиления копий» (Blade Collector 9/8 + 3/2 → 12/10, Roadboar 4/6 +
+ *     2/4 → 6/10). Девять слияний за партию, шесть — покупкой второй копии.
+ *  3. **Монетка вместо награды**: розыгрыш каждого золотого с этим тегом
+ *     кладёт в руку Tavern Coin `BG28_810` (`CREATOR` — энчант проверки
+ *     троек, `COST=0`), 10 из 10 — девять слитых и золотой из раскрытого
+ *     Lockbox; наград за тройку за партию ноль.
+ */
+export function part58Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part58', 'game.log'), 'utf8');
+}

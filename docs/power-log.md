@@ -1900,3 +1900,35 @@ D 18:11:56.91…     TAG_CHANGE Entity=[… id=4563 … BG36_180 …] tag=HEALTH
 (со всеми её баффами), приходит в блоке покупки и не зависит от того,
 встал миньон на борд или ушёл в руку. Три нажатия партии: +37/+27,
 +28/+19, +33/+23.
+
+## Слияние копий в золотого и монетка вместо награды (part58, part2)
+
+Сила Mister Clocksworth «Double Time» `BG34_HERO_002p` — пассивная: у её
+сущности нет ни `COST`, ни `HAS_ACTIVATE_POWER` (только `HIDE_COST=1`).
+Текст: «You only need 2 copies to make minions Golden. They give Tavern
+Coins instead of Triple Rewards». Слово в слово тот же текст у аномалии
+«False Idols» `BG27_Anomaly_301` (part2).
+
+Покупка второй копии (ход 15, Blade Collector):
+
+```
+D 13:19:09.74… TAG_CHANGE Entity=[… id=4750 zone=PLAY zonePos=1 cardId=BG26_817 player=2] tag=ZONE value=SETASIDE    (копия с борда)
+D 13:19:09.74… TAG_CHANGE Entity=[… id=5679 zone=PLAY zonePos=4 cardId=BG26_817 player=10] tag=ZONE value=SETASIDE   (купленная)
+D 13:19:09.74… FULL_ENTITY - Creating ID=5769 CardID=BG26_817_G    tag=ZONE value=HAND, ATK 6, HEALTH 4,
+               BACON_TRIPLED_BASE_MINION_ID=99035, CREATOR_DBID=72675
+D 13:19:12.27… TAG_CHANGE Entity=[… id=5769 zone=HAND … cardId=BG26_817_G …] tag=ZONE value=PLAY               (розыгрыш)
+D 13:19:12.27… BLOCK_START BlockType=TRIGGER Entity=[… cardId=TB_BaconShop_3ofKindChecke …]
+D 13:19:12.27…     FULL_ENTITY - Creating ID=5819 CardID=BG28_810    COST=0, ZONE=HAND                    (Tavern Coin)
+```
+
+- Обе копии уходят в `SETASIDE`, золотой рождается В РУКЕ со статами
+  золотой карты (6/4), и усиления копий переезжают на него энчантами:
+  разыгрывается он уже 12/10 (копия на борде была 9/8, купленная — 3/2,
+  база 3/2). Roadboar хода 11 — 4/6 и 2/4 при базе 2/4 → 6/10.
+- Монетка приходит РОЗЫГРЫШЕМ золотого, не слиянием, — там же, где
+  у обычного героя приходит `TB_BaconShop_Triples_01`. Tavern Coin
+  «Gain 1 Gold» создаётся с `COST=1` и тут же получает `COST=0`.
+- Признак «этот золотой даст награду» — тег `BACON_TRIPLED_BASE_MINION_ID`
+  на нём: part58 — 10 монеток из 10 от золотых с тегом (включая золотого
+  из раскрытого Lockbox, `CREATOR_DBID=0`), part55 — 18 наград за тройку
+  из 18. Наград за тройку в part58 ноль, в part2 (False Idols) — тоже ноль.
