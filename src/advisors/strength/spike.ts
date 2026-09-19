@@ -63,7 +63,7 @@ import { toBattleInfo, type BattleSetup } from '../battle/mapper.js';
 import { withSeededRandom } from '../position/rng.js';
 import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 import { tavernTurnOf } from '../tavern/rules.js';
-import type { Minion } from '../../state/types.js';
+import { EMPTY_GLOBAL_INFO, type GlobalInfo, type Minion } from '../../state/types.js';
 import { boardsOfTurn, loadFieldBoards } from './boards.js';
 import { DEFAULT_FIELD_STRENGTH_OPTIONS } from './strength.js';
 
@@ -73,6 +73,8 @@ interface Point {
   readonly part: number;
   readonly tavernTurn: number;
   readonly strength: number;
+  /** Та же сила со СВОИМИ счётчиками боя, обнулёнными, как у бордов поля (D205). */
+  readonly symmetric: number;
   readonly naive: number;
   readonly actual: number;
 }
@@ -118,33 +120,39 @@ function main(): void {
       const field = boardsOfTurn(snapshot, tavernTurn, part);
       if (field.length < OPTIONS.minBoards) continue;
 
-      let sum = 0;
-      for (const opponent of field) {
-        const setup: BattleSetup = {
-          turn: episode.turn,
-          playerBoard: episode.playerBoard,
-          playerHand: episode.playerHand,
-          opponentBoard: opponent.board,
-          playerHero: episode.playerHero,
-          techLevel: episode.techLevel,
-          anomalyCardId: episode.anomalyCardId,
-          globalInfo: episode.globalInfo,
-          playerTrinketDbfIds: episode.playerTrinketDbfIds,
-          opponentTrinketDbfIds: opponent.trinketDbfIds,
-        };
-        const info = toBattleInfo(setup, OPTIONS.simulations);
-        const result = withSeededRandom(OPTIONS.seed, () =>
-          simulator.run(info, OPTIONS.simulations),
-        );
-        sum += result.wonPercent + result.tiedPercent / 2;
-      }
+      const strengthWith = (globalInfo: GlobalInfo): number => {
+        let sum = 0;
+        for (const opponent of field) {
+          const setup: BattleSetup = {
+            turn: episode.turn,
+            playerBoard: episode.playerBoard,
+            playerHand: episode.playerHand,
+            opponentBoard: opponent.board,
+            playerHero: episode.playerHero,
+            techLevel: episode.techLevel,
+            anomalyCardId: episode.anomalyCardId,
+            globalInfo,
+            playerTrinketDbfIds: episode.playerTrinketDbfIds,
+            opponentTrinketDbfIds: opponent.trinketDbfIds,
+          };
+          const info = toBattleInfo(setup, OPTIONS.simulations);
+          const result = withSeededRandom(OPTIONS.seed, () =>
+            simulator.run(info, OPTIONS.simulations),
+          );
+          sum += result.wonPercent + result.tiedPercent / 2;
+        }
+        return sum / field.length;
+      };
+      const strength = strengthWith(episode.globalInfo);
+      const differs = JSON.stringify(episode.globalInfo) !== JSON.stringify(EMPTY_GLOBAL_INFO);
 
       const mine = statsOf(episode.playerBoard);
       const weaker = field.filter((o) => statsOf(o.board) < mine).length;
       points.push({
         part,
         tavernTurn,
-        strength: sum / field.length,
+        strength,
+        symmetric: differs ? strengthWith(EMPTY_GLOBAL_INFO) : strength,
         naive: (weaker / field.length) * 100,
         actual: episode.outcome === 'won' ? 1 : episode.outcome === 'tied' ? 0.5 : 0,
       });
@@ -201,6 +209,36 @@ function main(): void {
       ? 'ВЕРДИКТ: калибрована — проценты можно печатать как есть'
       : 'ВЕРДИКТ: НЕ калибрована — числом печатать нельзя',
   );
+
+  // Симметрия счётчиков (D205, docs/next-steps.md): рантайм отдаёт
+  // симулятору наши счётчики боя, а у бордов поля их нет. Тот же прогон
+  // с обнулёнными своими — какой из двух честнее по факту.
+  const brier = (key: 'strength' | 'symmetric', list: readonly Point[]): number =>
+    list.reduce((s, p) => s + (p[key] / 100 - p.actual) ** 2, 0) / list.length;
+  const touched = points.filter((p) => p.symmetric !== p.strength);
+  console.log('');
+  console.log(
+    `симметрия счётчиков: боёв, где обнуление меняет силу, ${String(touched.length)} из ${String(points.length)}`,
+  );
+  console.log(
+    `  Brier по всем: как в рантайме ${brier('strength', points).toFixed(4)} | ` +
+      `обнулены свои ${brier('symmetric', points).toFixed(4)}`,
+  );
+  if (touched.length > 0) {
+    const shift = touched.reduce((s, p) => s + p.strength - p.symmetric, 0) / touched.length;
+    const actual = (touched.reduce((s, p) => s + p.actual, 0) / touched.length) * 100;
+    const mean = (key: 'strength' | 'symmetric'): number =>
+      touched.reduce((s, p) => s + p[key], 0) / touched.length;
+    console.log(
+      `  на затронутых: Brier ${brier('strength', touched).toFixed(4)} против ` +
+        `${brier('symmetric', touched).toFixed(4)}; обещано ${mean('strength').toFixed(1)} % против ` +
+        `${mean('symmetric').toFixed(1)} %, фактически ${actual.toFixed(1)} %; сдвиг ${shift.toFixed(2)} п.п.`,
+    );
+    console.log(
+      `  корреляция с фактом: как в рантайме ${correlation(strengths, actuals).toFixed(3)} | ` +
+        `обнулены свои ${correlation(points.map((p) => p.symmetric), actuals).toFixed(3)}`,
+    );
+  }
 
   console.log('');
   console.log('по ходам таверны:');
