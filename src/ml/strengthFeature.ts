@@ -15,7 +15,7 @@ import { CARDS_PATH } from '../app/paths.js';
 import { readFixtureGame } from '../data/fixtureGames.js';
 import { DATASET_DIR, type DatasetRecord } from '../dataset/recorder.js';
 import { EMPTY_GLOBAL_INFO, type GameState } from '../state/types.js';
-import type { DatasetGame } from './dataset.js';
+import { firstPointKey, fixturePartOf, recordKey, type DatasetGame } from './dataset.js';
 import type { FeatureExtractor } from './evaluate.js';
 import { extractHistoryFeatures, HISTORY_FEATURE_NAMES } from './historyFeatures.js';
 
@@ -51,7 +51,8 @@ import { extractHistoryFeatures, HISTORY_FEATURE_NAMES } from './historyFeatures
  *
  * Поле собрано из боёв наших фикстур. Точка партии partN считается против
  * поля БЕЗ бордов partN (`excludePart`). Номер фикстуры у записи досбора —
- * в имени файла, у живой записи — по первой точке: билд, ход и витрина
+ * поле `fixturePart` или имя файла (`fixturePartOf`), у живой записи без
+ * номера — по первой точке (`recordKey`): билд, ход и витрина
  * (без героя и места — у part10, part44 и part46 они разошлись
  * с сегодняшним разбором). Неоднозначный отпечаток и запись без фикстуры
  * вне списка известных делают прогон недействительным (`measure6.ts`).
@@ -102,31 +103,6 @@ export function indicatorExtractor(points: readonly StrengthPoint[]): FeatureExt
   ];
 }
 
-/** Номер фикстуры у записи досбора: `backfill_part25_b248348_p3.json` → 25. */
-export function partFromFileName(fileName: string): number | null {
-  const m = /^backfill_part(\d+)_/.exec(fileName);
-  return m === null ? null : Number(m[1]);
-}
-
-interface FirstPoint {
-  readonly turn: number;
-  readonly state: { readonly shop: readonly { readonly cardId: string }[] };
-}
-
-/** Отпечаток первой точки без героя и места: билд, ход, витрина. */
-export function firstPointKey(build: number | null, first: FirstPoint | undefined): string {
-  if (first === undefined) return '';
-  const shop = first.state.shop
-    .map((m) => m.cardId)
-    .sort()
-    .join(',');
-  return [build ?? 'unknown', first.turn, shop].join('|');
-}
-
-export function recordKey(record: DatasetRecord): string {
-  return firstPointKey(record.buildNumber, record.checkpoints[0]);
-}
-
 export interface FixtureIndex {
   /** Отпечаток первой точки → номер фикстуры; неоднозначные ключи сюда не входят. */
   readonly byKey: ReadonlyMap<string, number>;
@@ -168,12 +144,7 @@ export function buildFixtureIndex(
 
 /** Номер фикстуры партии датасета или `null` — сопоставить не с чем. */
 export function partOfGame(game: DatasetGame, index: FixtureIndex): number | null {
-  return (
-    game.record.fixturePart ??
-    partFromFileName(game.fileName) ??
-    index.byKey.get(recordKey(game.record)) ??
-    null
-  );
+  return fixturePartOf(game) ?? index.byKey.get(recordKey(game.record)) ?? null;
 }
 
 /** Состояние, которое уходит в симулятор: свои счётчики боя обнулены (D205). */

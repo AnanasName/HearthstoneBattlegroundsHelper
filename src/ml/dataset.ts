@@ -51,6 +51,43 @@ export interface DedupeResult {
   readonly duplicates: readonly { readonly kept: string; readonly dropped: readonly string[] }[];
 }
 
+const byName = (a: RecordFile, b: RecordFile): number => a.fileName.localeCompare(b.fileName);
+
+/**
+ * Общий ход обеих ступеней дедупа: записи группируются по ключу, из группы
+ * остаётся лучшая. Файлы идут в порядке имён, а лучшая сменяется только
+ * СТРОГО лучшей, поэтому при равенстве остаётся лексикографически первое
+ * имя — выбор детерминирован. Запись без ключа (`null`) проходит как есть.
+ */
+function dedupeBy<K>(
+  files: readonly RecordFile[],
+  keyOf: (file: RecordFile) => K | null,
+  better: (a: RecordFile, b: RecordFile) => boolean,
+): DedupeResult {
+  const groups = new Map<K, RecordFile[]>();
+  const kept: RecordFile[] = [];
+  for (const file of [...files].sort(byName)) {
+    const key = keyOf(file);
+    if (key === null) {
+      kept.push(file);
+      continue;
+    }
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [file]);
+    else group.push(file);
+  }
+
+  const duplicates: { kept: string; dropped: string[] }[] = [];
+  for (const group of groups.values()) {
+    const best = group.reduce((a, b) => (better(b, a) ? b : a));
+    kept.push(best);
+    const dropped = group.filter((f) => f !== best).map((f) => f.fileName);
+    if (dropped.length > 0) duplicates.push({ kept: best.fileName, dropped });
+  }
+  kept.sort(byName);
+  return { kept, duplicates };
+}
+
 /**
  * Из группы записей одной партии остаётся ЗАПИСЬ С БОЛЬШИМ ЧИСЛОМ ТОЧЕК:
  * помощник, запущенный посреди партии, пишет обрывок, а досбор из фикстуры —
@@ -59,33 +96,42 @@ export interface DedupeResult {
  * первое имя файла, чтобы выбор был детерминирован.
  */
 export function dedupeBySignature(files: readonly RecordFile[]): DedupeResult {
-  const groups = new Map<string, RecordFile[]>();
-  for (const file of [...files].sort((a, b) => a.fileName.localeCompare(b.fileName))) {
-    const signature = gameSignature(file.record);
-    const group = groups.get(signature);
-    if (group === undefined) groups.set(signature, [file]);
-    else group.push(file);
-  }
-
-  const kept: RecordFile[] = [];
-  const duplicates: { kept: string; dropped: string[] }[] = [];
-  for (const [, group] of groups) {
-    const best = group.reduce((a, b) =>
-      b.record.checkpoints.length > a.record.checkpoints.length ? b : a,
-    );
-    kept.push(best);
-    const dropped = group.filter((f) => f !== best).map((f) => f.fileName);
-    if (dropped.length > 0) duplicates.push({ kept: best.fileName, dropped });
-  }
-  kept.sort((a, b) => a.fileName.localeCompare(b.fileName));
-  return { kept, duplicates };
+  return dedupeBy(
+    files,
+    (f) => gameSignature(f.record),
+    (a, b) => a.record.checkpoints.length > b.record.checkpoints.length,
+  );
 }
 
-/** Номер фикстуры записи: поле досбора или имя `backfill_partN_…`; `null` — не знаем. */
+/**
+ * Номер фикстуры записи: поле `fixturePart` или имя файла досбора
+ * (`backfill_part25_b248348_p3.json` → 25); `null` — не знаем. Единственное
+ * место, где номер читается из записи, — загрузчику, досбору и замеру 6б.
+ */
 export function fixturePartOf(file: RecordFile): number | null {
   if (file.record.fixturePart !== undefined) return file.record.fixturePart;
   const m = /^backfill_part(\d+)_/.exec(file.fileName);
   return m === null ? null : Number(m[1]);
+}
+
+interface FirstPoint {
+  readonly turn: number;
+  readonly state: { readonly shop: readonly { readonly cardId: string }[] };
+}
+
+/** Отпечаток первой точки без героя и места: билд, ход, витрина. */
+export function firstPointKey(build: number | null, first: FirstPoint | undefined): string {
+  if (first === undefined) return '';
+  const shop = first.state.shop
+    .map((m) => m.cardId)
+    .sort()
+    .join(',');
+  return [build ?? 'unknown', first.turn, shop].join('|');
+}
+
+/** Отпечаток первой точки записи — `firstPointKey` её билда и первой точки. */
+export function recordKey(record: DatasetRecord): string {
+  return firstPointKey(record.buildNumber, record.checkpoints[0]);
 }
 
 /**
@@ -99,37 +145,11 @@ export function fixturePartOf(file: RecordFile): number | null {
  * она собрана сегодняшним редьюсером из лога целиком.
  */
 export function dedupeByFixture(files: readonly RecordFile[]): DedupeResult {
-  const groups = new Map<number, RecordFile[]>();
-  const kept: RecordFile[] = [];
-  for (const file of files) {
-    const part = fixturePartOf(file);
-    if (part === null) {
-      kept.push(file);
-      continue;
-    }
-    groups.set(part, [...(groups.get(part) ?? []), file]);
-  }
-  const rank = (f: RecordFile): [number, number, string] => [
-    -f.record.checkpoints.length,
-    f.fileName.startsWith('backfill_') ? 0 : 1,
-    f.fileName,
-  ];
-  const better = (a: RecordFile, b: RecordFile): RecordFile => {
-    const [ra, rb] = [rank(a), rank(b)];
-    for (let i = 0; i < ra.length; i += 1) {
-      if (ra[i] !== rb[i]) return (ra[i] ?? 0) < (rb[i] ?? 0) ? a : b;
-    }
-    return a;
-  };
-  const duplicates: { kept: string; dropped: string[] }[] = [];
-  for (const [, group] of groups) {
-    const best = group.reduce(better);
-    kept.push(best);
-    const dropped = group.filter((f) => f !== best).map((f) => f.fileName);
-    if (dropped.length > 0) duplicates.push({ kept: best.fileName, dropped });
-  }
-  kept.sort((a, b) => a.fileName.localeCompare(b.fileName));
-  return { kept, duplicates };
+  const isBackfill = (f: RecordFile): boolean => f.fileName.startsWith('backfill_');
+  return dedupeBy(files, fixturePartOf, (a, b) => {
+    const points = a.record.checkpoints.length - b.record.checkpoints.length;
+    return points !== 0 ? points > 0 : isBackfill(a) && !isBackfill(b);
+  });
 }
 
 export interface LoadedDataset {

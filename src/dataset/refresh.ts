@@ -32,7 +32,9 @@ import type { DatasetRecord } from './recorder.js';
  * Что сохраняется от старой записи: `savedAt` (имя файла живой записи —
  * это время), `contributor`, `contributorRating`, `overlay` — то, чего
  * в логе нет. Что берётся из свежей: точки решения и журнал действий.
- * Билд, герой и место у обеих одинаковы по построению отпечатка.
+ * Билд, герой и место у обеих одинаковы по построению отпечатка — кроме
+ * записи, найденной по номеру фикстуры (`rebuildFromFixture`): у неё они
+ * тоже из свежей.
  *
  * Дописывание только действий остаётся отдельной ветвью — для записи
  * текущей схемы, у которой журнала нет (так было до 19.08). Запись
@@ -99,7 +101,7 @@ export function refreshRecord(stored: DatasetRecord, fresh: DatasetRecord, force
  * part31 — 7-е место вместо 6-го), а обрывок после перезапуска клиента
  * (part35, part41) становится партией целиком. Паспорт — от старой.
  */
-export function rebuildFromFixture(stored: DatasetRecord, fresh: DatasetRecord): DatasetRecord {
+function rebuildFromFixture(stored: DatasetRecord, fresh: DatasetRecord): DatasetRecord {
   return {
     ...stored,
     buildNumber: fresh.buildNumber,
@@ -107,6 +109,6 @@ export function rebuildFromFixture(stored: DatasetRecord, fresh: DatasetRecord):
     finalPlace: fresh.finalPlace,
     checkpoints: fresh.checkpoints,
     actions: fresh.actions,
-    ...(fresh.fixturePart === undefined ? {} : { fixturePart: fresh.fixturePart }),
+    fixturePart: fresh.fixturePart,
   };
 }

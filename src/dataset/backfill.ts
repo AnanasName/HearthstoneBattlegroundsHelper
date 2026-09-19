@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { readTavernTurns } from '../advisors/tavern/turns.js';
 import { CURRENT_BUILD_PARTS, fixtureLogPaths, readFixtureGame } from '../data/fixtureGames.js';
-import { firstPointKey, partFromFileName } from '../ml/strengthFeature.js';
+import { firstPointKey, fixturePartOf, recordKey } from '../ml/dataset.js';
 import { reduceLog } from '../state/reducer.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from './recorder.js';
 import { refreshRecord } from './refresh.js';
@@ -91,12 +91,19 @@ function main(): void {
     }
   }
 
-
   // Сначала — свежий разбор всех фикстур: ключи первых точек нужны все
   // сразу, чтобы ключ, общий для двух партий, не приписал запись чужой.
   // Свежие записи ждут второго прохода во временных файлах: все партии
   // сразу в памяти — это 4 ГБ на 52 партиях (замер 19.09).
   const staging = mkdtempSync(join(tmpdir(), 'hsbg-backfill-'));
+  try {
+    backfill([...existing.values()].flat(), staging, force);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+function backfill(all: readonly ExistingRecord[], staging: string, force: boolean): void {
   const fresh: { part: number; path: string; keys: string[] }[] = [];
   for (const part of FIXTURES) {
     const text = readFixtureGame(part);
@@ -130,25 +137,29 @@ function main(): void {
   for (const { part, keys } of fresh) {
     for (const key of keys) partsByKey.set(key, (partsByKey.get(key) ?? new Set()).add(part));
   }
-  const all = [...existing.values()].flat();
+  // Ключ, общий для двух партий, не сопоставляет ни одну из них.
+  const partByKey = new Map<string, number>();
+  for (const [key, parts] of partsByKey) {
+    const [only] = parts;
+    if (parts.size === 1 && only !== undefined) partByKey.set(key, only);
+  }
 
   let written = 0;
   let patched = 0;
   let rebuilt = 0;
-  for (const { part, path, keys } of fresh) {
+  for (const { part, path } of fresh) {
     const record = JSON.parse(readFileSync(path, 'utf8')) as DatasetRecord;
     const signature = gameSignature(record);
-    const own = new Set(keys.filter((k) => partsByKey.get(k)?.size === 1));
     // Та же партия, найденная любым из путей: номер (поле или имя файла
     // досбора), отпечаток — или первая точка партии либо её сегмента
     // у записи, которой номер ещё не назначен. Последний путь и ловит
     // записи, которые отпечаток пропускал: старый герой (part10, part46),
     // старое место (part31, part44), обрывок после перезапуска (part35,
     // part41 — первая точка обрывка совпадает с первой точкой сегмента).
-    const already = all.filter(({ fileName, record: stored }) => {
-      const known = stored.fixturePart ?? partFromFileName(fileName);
+    const already = all.filter((file) => {
+      const known = fixturePartOf(file);
       if (known !== null) return known === part;
-      return gameSignature(stored) === signature || own.has(firstPointKey(stored.buildNumber, stored.checkpoints[0]));
+      return gameSignature(file.record) === signature || partByKey.get(recordKey(file.record)) === part;
     });
 
     if (already.length > 0) {
@@ -192,15 +203,12 @@ function main(): void {
 
     const fileName = `backfill_part${String(part)}_b${String(record.buildNumber ?? 'unknown')}_p${String(record.finalPlace ?? 'x')}.json`;
     writeFileSync(join(DATASET_DIR, fileName), JSON.stringify(record), 'utf8');
-    all.push({ fileName, record });
     written += 1;
     console.log(
       `part${String(part)}: ${String(record.checkpoints.length)} точек решения, ` +
         `место ${String(record.finalPlace ?? '—')}, билд ${String(record.buildNumber ?? '—')} → ${fileName}`,
     );
   }
-
-  rmSync(staging, { recursive: true, force: true });
 
   const ambiguous = [...partsByKey].filter(([, parts]) => parts.size > 1);
   for (const [key, parts] of ambiguous) {
@@ -218,13 +226,10 @@ function main(): void {
  * а не партии (part35: ход 21, part41: ход 25).
  */
 function firstPointKeys(part: number, record: DatasetRecord): string[] {
-  const keys = [firstPointKey(record.buildNumber, record.checkpoints[0])];
-  const segments = fixtureLogPaths(part);
-  if (segments.length > 1) {
-    for (const path of segments.slice(1)) {
-      const first = readTavernTurns(readFileSync(path, 'utf8'))[0];
-      if (first !== undefined) keys.push(firstPointKey(record.buildNumber, first));
-    }
+  const keys = [recordKey(record)];
+  for (const path of fixtureLogPaths(part).slice(1)) {
+    const first = readTavernTurns(readFileSync(path, 'utf8'))[0];
+    if (first !== undefined) keys.push(firstPointKey(record.buildNumber, first));
   }
   return keys;
 }

@@ -8,7 +8,7 @@ import { DEFAULT_FIELD_STRENGTH_OPTIONS } from '../advisors/strength/strength.js
 import { tavernTurnOf } from '../advisors/tavern/rules.js';
 import { createRng, mean, shuffleInPlace, summarize } from '../advisors/tavern/statAnalysis.js';
 import { CURRENT_BUILD_PARTS } from '../data/fixtureGames.js';
-import { loadDataset, type DatasetGame } from './dataset.js';
+import { loadDataset, recordKey, type DatasetGame } from './dataset.js';
 import {
   bucketIndexOf,
   evaluateLogo,
@@ -60,9 +60,7 @@ import {
   gameStrengths,
   indicatorExtractor,
   INDICATOR_FEATURE_NAMES,
-  partFromFileName,
   partOfGame,
-  recordKey,
   STRENGTH_CACHE_PATH,
   STRENGTH_FEATURE_NAMES,
   StrengthCache,
@@ -405,7 +403,9 @@ function measureStrength(
     parts.set(g.fileName, part);
     if (part === null) {
       unmapped.push(g.fileName);
-      if (partFromFileName(g.fileName) === null && index.ambiguous.has(recordKey(g.record))) ambiguous.push(g.fileName);
+      // Номера нет ни в записи, ни в имени (`partOfGame` проверил оба), и
+      // первая точка у неё общая с двумя фикстурами.
+      if (index.ambiguous.has(recordKey(g.record))) ambiguous.push(g.fileName);
       continue;
     }
     byPart.set(part, [...(byPart.get(part) ?? []), g.fileName]);

@@ -8,17 +8,14 @@ import type { BattleSimulator } from '../../src/advisors/battle/simulator.js';
 import type { FieldBoard, FieldSnapshot } from '../../src/advisors/strength/boards.js';
 import { DEFAULT_FIELD_STRENGTH_OPTIONS } from '../../src/advisors/strength/strength.js';
 import type { TavernTurn } from '../../src/advisors/tavern/turns.js';
-import type { DatasetGame } from '../../src/ml/dataset.js';
+import { firstPointKey, fixturePartOf, recordKey, type DatasetGame } from '../../src/ml/dataset.js';
 import { extractHistoryFeatures } from '../../src/ml/historyFeatures.js';
 import {
   buildFixtureIndex,
-  firstPointKey,
   gameStrengths,
   INDICATOR_FEATURE_NAMES,
   indicatorExtractor,
-  partFromFileName,
   partOfGame,
-  recordKey,
   STRENGTH_FEATURE_NAMES,
   StrengthCache,
   strengthColumns,
@@ -141,8 +138,8 @@ describe('сопоставление записи с фикстурой', () => 
     stateOf({ turn: 1, buildNumber: 251952, shop: shop.map((c, i) => minion(i + 1, { cardId: c })), ...patch });
 
   it('досбор называет партию в имени файла', () => {
-    expect(partFromFileName('backfill_part25_b248348_p3.json')).toBe(25);
-    expect(partFromFileName('2026-09-16T14-28-12_b251952_p3.json')).toBeNull();
+    expect(fixturePartOf(gameOf('backfill_part25_b248348_p3.json', []))).toBe(25);
+    expect(fixturePartOf(gameOf('2026-09-16T14-28-12_b251952_p3.json', []))).toBeNull();
   });
 
   it('отпечаток первой точки не зависит от героя, места и порядка витрины', () => {
