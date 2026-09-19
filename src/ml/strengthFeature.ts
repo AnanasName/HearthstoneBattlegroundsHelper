@@ -168,7 +168,12 @@ export function buildFixtureIndex(
 
 /** Номер фикстуры партии датасета или `null` — сопоставить не с чем. */
 export function partOfGame(game: DatasetGame, index: FixtureIndex): number | null {
-  return partFromFileName(game.fileName) ?? index.byKey.get(recordKey(game.record)) ?? null;
+  return (
+    game.record.fixturePart ??
+    partFromFileName(game.fileName) ??
+    index.byKey.get(recordKey(game.record)) ??
+    null
+  );
 }
 
 /** Состояние, которое уходит в симулятор: свои счётчики боя обнулены (D205). */

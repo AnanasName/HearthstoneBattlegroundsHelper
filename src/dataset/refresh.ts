@@ -76,6 +76,9 @@ export function lobbyKnown(record: DatasetRecord): boolean {
  * пересборке.
  */
 export function refreshRecord(stored: DatasetRecord, fresh: DatasetRecord, force = false): RefreshPlan {
+  if (stored.fixturePart === undefined && fresh.fixturePart !== undefined) {
+    return { action: 'rebuild', record: rebuildFromFixture(stored, fresh) };
+  }
   if (force || !lobbyKnown(stored)) {
     return {
       action: 'rebuild',
@@ -86,4 +89,24 @@ export function refreshRecord(stored: DatasetRecord, fresh: DatasetRecord, force
     return { action: 'patchActions', record: { ...stored, actions: fresh.actions } };
   }
   return { action: 'keep', record: stored };
+}
+
+/**
+ * Запись той же партии, найденная НЕ по отпечатку, а по номеру фикстуры
+ * или по первой точке (19.09): всё, что берётся из лога, — из свежего
+ * разбора, включая героя и место, которые у такой записи и расходятся
+ * (part10 и part46 — герой до подмены D200, part44 — место до D235,
+ * part31 — 7-е место вместо 6-го), а обрывок после перезапуска клиента
+ * (part35, part41) становится партией целиком. Паспорт — от старой.
+ */
+export function rebuildFromFixture(stored: DatasetRecord, fresh: DatasetRecord): DatasetRecord {
+  return {
+    ...stored,
+    buildNumber: fresh.buildNumber,
+    heroCardId: fresh.heroCardId,
+    finalPlace: fresh.finalPlace,
+    checkpoints: fresh.checkpoints,
+    actions: fresh.actions,
+    ...(fresh.fixturePart === undefined ? {} : { fixturePart: fresh.fixturePart }),
+  };
 }

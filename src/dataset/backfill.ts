@@ -1,11 +1,13 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { readTavernTurns } from '../advisors/tavern/turns.js';
-import { CURRENT_BUILD_PARTS, readFixtureGame } from '../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, fixtureLogPaths, readFixtureGame } from '../data/fixtureGames.js';
+import { firstPointKey, partFromFileName } from '../ml/strengthFeature.js';
 import { reduceLog } from '../state/reducer.js';
 import { DATASET_DIR, gameSignature, type DatasetRecord } from './recorder.js';
-import { lobbyKnown, refreshRecord } from './refresh.js';
+import { refreshRecord } from './refresh.js';
 
 /**
  * Разовый досбор датасета из фикстур: партии, сыгранные ДО включения
@@ -36,7 +38,7 @@ const FIXTURES = CURRENT_BUILD_PARTS;
 
 interface ExistingRecord {
   readonly fileName: string;
-  readonly record: DatasetRecord;
+  record: DatasetRecord;
 }
 
 /** Отпечатки партий, которые в датасете уже лежат, — любым путём записи. */
@@ -78,7 +80,6 @@ function main(): void {
 
   mkdirSync(DATASET_DIR, { recursive: true });
   const existing = existingSignatures();
-  let written = 0;
 
   // Задвоенное уже лежащим датасетом называется вслух: чистить его —
   // решение владельца данных, а не скрипта.
@@ -90,8 +91,13 @@ function main(): void {
     }
   }
 
-  let patched = 0;
-  let rebuilt = 0;
+
+  // Сначала — свежий разбор всех фикстур: ключи первых точек нужны все
+  // сразу, чтобы ключ, общий для двух партий, не приписал запись чужой.
+  // Свежие записи ждут второго прохода во временных файлах: все партии
+  // сразу в памяти — это 4 ГБ на 52 партиях (замер 19.09).
+  const staging = mkdtempSync(join(tmpdir(), 'hsbg-backfill-'));
+  const fresh: { part: number; path: string; keys: string[] }[] = [];
   for (const part of FIXTURES) {
     const text = readFixtureGame(part);
     if (text === null) {
@@ -113,80 +119,114 @@ function main(): void {
       finalPlace: finalState.finalPlace,
       checkpoints,
       actions: finalState.actions,
+      fixturePart: part,
     };
+    const path = join(staging, `part${String(part)}.json`);
+    writeFileSync(path, JSON.stringify(record), 'utf8');
+    fresh.push({ part, path, keys: firstPointKeys(part, record) });
+  }
 
-    const already = existing.get(gameSignature(record));
-    if (already !== undefined) {
-      // Партия уже в датасете. Что с ней делать, решает `refreshRecord`:
-      // запись старой схемы (без таблицы лобби) пересобирается целиком —
-      // точки и журнал берутся из сегодняшнего разбора, паспорт записи
-      // (время, исполнитель, флаг оверлея) остаётся; запись текущей схемы
-      // без журнала получает только журнал; остальное не трогается.
-      for (const { fileName, record: stored } of already) {
-        const plan = refreshRecord(stored, record, force);
+  const partsByKey = new Map<string, Set<number>>();
+  for (const { part, keys } of fresh) {
+    for (const key of keys) partsByKey.set(key, (partsByKey.get(key) ?? new Set()).add(part));
+  }
+  const all = [...existing.values()].flat();
+
+  let written = 0;
+  let patched = 0;
+  let rebuilt = 0;
+  for (const { part, path, keys } of fresh) {
+    const record = JSON.parse(readFileSync(path, 'utf8')) as DatasetRecord;
+    const signature = gameSignature(record);
+    const own = new Set(keys.filter((k) => partsByKey.get(k)?.size === 1));
+    // Та же партия, найденная любым из путей: номер (поле или имя файла
+    // досбора), отпечаток — или первая точка партии либо её сегмента
+    // у записи, которой номер ещё не назначен. Последний путь и ловит
+    // записи, которые отпечаток пропускал: старый герой (part10, part46),
+    // старое место (part31, part44), обрывок после перезапуска (part35,
+    // part41 — первая точка обрывка совпадает с первой точкой сегмента).
+    const already = all.filter(({ fileName, record: stored }) => {
+      const known = stored.fixturePart ?? partFromFileName(fileName);
+      if (known !== null) return known === part;
+      return gameSignature(stored) === signature || own.has(firstPointKey(stored.buildNumber, stored.checkpoints[0]));
+    });
+
+    if (already.length > 0) {
+      // Что делать с найденной записью, решает `refreshRecord`: запись
+      // без номера фикстуры пересобирается из лога целиком (с героем
+      // и местом), запись старой схемы — точками и журналом, запись
+      // текущей схемы без журнала получает журнал; паспорт записи (время,
+      // исполнитель, флаг оверлея) остаётся всегда.
+      for (const file of already) {
+        const plan = refreshRecord(file.record, record, force);
         if (plan.action === 'keep') continue;
-        writeFileSync(join(DATASET_DIR, fileName), JSON.stringify(plan.record), 'utf8');
+        writeFileSync(join(DATASET_DIR, file.fileName), JSON.stringify(plan.record), 'utf8');
+        const before = file.record;
+        file.record = plan.record;
         if (plan.action === 'rebuild') {
           rebuilt += 1;
+          const relabel =
+            before.heroCardId !== record.heroCardId || before.finalPlace !== record.finalPlace
+              ? `, герой/место ${String(before.heroCardId)}/${String(before.finalPlace)} → ` +
+                `${String(record.heroCardId)}/${String(record.finalPlace)}`
+              : '';
           console.log(
-            `part${String(part)}: пересобрана запись${force ? '' : ' старой схемы'} — точек ` +
-              `${String(stored.checkpoints.length)} → ${String(checkpoints.length)}, ` +
-              `таблица лобби во всех точках, действий ${String(finalState.actions.length)} → ${fileName}`,
+            `part${String(part)}: пересобрана запись — точек ${String(before.checkpoints.length)} → ` +
+              `${String(record.checkpoints.length)}${relabel} → ${file.fileName}`,
           );
         } else {
           patched += 1;
           console.log(
-            `part${String(part)}: дописаны действия (${String(finalState.actions.length)}) → ${fileName}`,
+            `part${String(part)}: дописаны действия (${String(record.actions?.length ?? 0)}) → ${file.fileName}`,
           );
         }
+      }
+      if (already.length > 1) {
+        console.log(
+          `part${String(part)}: записей партии ${String(already.length)} — загрузчик оставит одну ` +
+            `(${already.map((f) => f.fileName).join(', ')})`,
+        );
       }
       continue;
     }
 
-    // Отпечаток не нашёлся, а партия того же билда, героя и места лежит:
-    // досбор сейчас положит вторую запись рядом, и дедуп загрузчика такую
-    // пару не сведёт. Причин у расхождения отпечатка ДВЕ, и вторая нашлась
-    // 02.09, когда список дошёл до part35:
-    //
-    //  - редьюсер сдвинул ПЕРВУЮ точку решения (запись старой схемы);
-    //  - живая запись НЕПОЛНАЯ — оверлей включили посреди партии (part28:
-    //    первая точка на ходу 3 вместо 1) или клиент перезапускался и живой
-    //    путь начал с реконнекта (part35: три точки с хода 21 из двенадцати).
-    //
-    // Прежде проверка молчала во втором случае: она пропускала записи,
-    // у которых `lobby` уже есть, — а у живых записей 26–28.08 он есть.
-    // Условие снято: это ПРЕДУПРЕЖДЕНИЕ, а не действие, и цена ложного
-    // срабатывания (совпали билд, герой и место у разных партий) — одна
-    // строка в отчёте против молча задвоенной партии в обучении.
-    const passport = `${String(record.buildNumber)}|${String(record.heroCardId)}|${String(record.finalPlace)}|`;
-    for (const [signature, files] of existing) {
-      if (!signature.startsWith(passport)) continue;
-      for (const { fileName, record: stored } of files) {
-        const why = lobbyKnown(stored)
-          ? `в лежащей записи ${String(stored.checkpoints.length)} точек против ` +
-            `${String(checkpoints.length)} здесь — похоже на неполную живую запись`
-          : 'запись старой схемы';
-        console.log(
-          `ВНИМАНИЕ: part${String(part)} не нашлась по отпечатку, а партия того же ` +
-            `билда, героя и места лежит — ${fileName} (${why}); проверьте первую точку решения`,
-        );
-      }
-    }
-
     const fileName = `backfill_part${String(part)}_b${String(record.buildNumber ?? 'unknown')}_p${String(record.finalPlace ?? 'x')}.json`;
     writeFileSync(join(DATASET_DIR, fileName), JSON.stringify(record), 'utf8');
-    existing.set(gameSignature(record), [{ fileName, record }]);
+    all.push({ fileName, record });
     written += 1;
     console.log(
-      `part${String(part)}: ${String(checkpoints.length)} точек решения, ` +
+      `part${String(part)}: ${String(record.checkpoints.length)} точек решения, ` +
         `место ${String(record.finalPlace ?? '—')}, билд ${String(record.buildNumber ?? '—')} → ${fileName}`,
     );
   }
 
+  rmSync(staging, { recursive: true, force: true });
+
+  const ambiguous = [...partsByKey].filter(([, parts]) => parts.size > 1);
+  for (const [key, parts] of ambiguous) {
+    console.log(`ВНИМАНИЕ: первая точка ${key} общая у партий ${[...parts].join(', ')} — по ней не сопоставляется`);
+  }
   console.log(
-    `\nзаписано партий: ${String(written)}, пересобрано записей${force ? '' : ' старой схемы'}: ${String(rebuilt)}, ` +
+    `\nзаписано партий: ${String(written)}, пересобрано записей: ${String(rebuilt)}, ` +
       `дописано действий в записей: ${String(patched)}`,
   );
+}
+
+/**
+ * Ключи первых точек партии: всей партии и каждого сегмента. Живая запись,
+ * начатая после перезапуска клиента, начинается с первой точки сегмента,
+ * а не партии (part35: ход 21, part41: ход 25).
+ */
+function firstPointKeys(part: number, record: DatasetRecord): string[] {
+  const keys = [firstPointKey(record.buildNumber, record.checkpoints[0])];
+  const segments = fixtureLogPaths(part);
+  if (segments.length > 1) {
+    for (const path of segments.slice(1)) {
+      const first = readTavernTurns(readFileSync(path, 'utf8'))[0];
+      if (first !== undefined) keys.push(firstPointKey(record.buildNumber, first));
+    }
+  }
+  return keys;
 }
 
 main();

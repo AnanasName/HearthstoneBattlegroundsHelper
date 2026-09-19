@@ -180,4 +180,28 @@ describe('досбор поверх лежащей записи', () => {
     expect(plan.record.contributor).toBe('alice');
     expect(plan.record.overlay).toBe(true);
   });
+
+  it('запись, найденная по номеру фикстуры, берёт из лога и героя с местом, паспорт остаётся', () => {
+    // part10: живая запись с Н'Зотом до подмены D200; part44: 6-е место до D235.
+    const stored = recordOf([{ turn: 1, state: tavern(1, { lobby: LOBBY }) }], {
+      heroCardId: 'TB_BaconShop_HERO_93_SKIN_B',
+      finalPlace: 6,
+      actions: [],
+      overlay: true,
+    });
+    const fresh = { ...FRESH, heroCardId: 'TB_BaconShop_HERO_33_SKIN_F', finalPlace: 5, fixturePart: 44 };
+
+    const plan = refreshRecord(stored, fresh);
+
+    expect(plan.action).toBe('rebuild');
+    expect(plan.record.heroCardId).toBe('TB_BaconShop_HERO_33_SKIN_F');
+    expect(plan.record.finalPlace).toBe(5);
+    expect(plan.record.fixturePart).toBe(44);
+    expect(plan.record.checkpoints).toBe(FRESH.checkpoints);
+    expect(plan.record.savedAt).toBe(stored.savedAt);
+    expect(plan.record.overlay).toBe(true);
+
+    // Второй прогон досбора ту же запись уже не трогает.
+    expect(refreshRecord(plan.record, fresh).action).toBe('keep');
+  });
 });

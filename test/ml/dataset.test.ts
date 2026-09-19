@@ -4,7 +4,13 @@ import { readFileSync } from 'node:fs';
 
 import { adviseTavern } from '../../src/advisors/tavern/advisor.js';
 import { CARDS_PATH, createCardIndex } from '../../src/data/cards.js';
-import { dedupeBySignature, upgradeRecord, type RecordFile } from '../../src/ml/dataset.js';
+import {
+  dedupeByFixture,
+  dedupeBySignature,
+  fixturePartOf,
+  upgradeRecord,
+  type RecordFile,
+} from '../../src/ml/dataset.js';
 import type { DatasetRecord } from '../../src/dataset/recorder.js';
 import { EMPTY_STATE, type GameState, type Hero } from '../../src/state/types.js';
 import { board } from '../minions.js';
@@ -72,6 +78,48 @@ describe('дедуп датасета по отпечатку', () => {
     const other = recordOf('b.json', { shopIds: [301, 302, 303] });
     const result = dedupeBySignature([one, other]);
     expect(result.kept).toHaveLength(2);
+    expect(result.duplicates).toHaveLength(0);
+  });
+});
+
+/**
+ * Вторая ступень — по номеру фикстуры. Пары, которые отпечаток пропускал
+ * (найдено 17.09): живая part31 с 7-м местом рядом с досбором (6-е)
+ * и обрывки part35/part41 после перезапуска клиента.
+ */
+describe('dedupeByFixture: одна запись на фикстуру', () => {
+  const tagged = (file: RecordFile, part: number): RecordFile => ({
+    ...file,
+    record: { ...file.record, fixturePart: part },
+  });
+
+  it('живая запись с другим местом и досбор той же фикстуры сводятся, остаётся досбор', () => {
+    const live = tagged(recordOf('2026-08-27T18-49-39_b250339_p7.json', { place: 7 }), 31);
+    const backfill = recordOf('backfill_part31_b250339_p6.json', { place: 6 });
+    // Отпечаток разный — первая ступень пару не видит.
+    expect(dedupeBySignature([live, backfill]).kept).toHaveLength(2);
+
+    const result = dedupeByFixture([live, backfill]);
+    expect(result.kept.map((f) => f.fileName)).toEqual(['backfill_part31_b250339_p6.json']);
+    expect(result.duplicates).toEqual([
+      { kept: 'backfill_part31_b250339_p6.json', dropped: ['2026-08-27T18-49-39_b250339_p7.json'] },
+    ]);
+  });
+
+  it('обрывок после перезапуска уступает полной записи, даже если сам — досбор', () => {
+    const stub = tagged(recordOf('2026-08-28T15-17-40_b250339_p5.json', { checkpointTurns: [21, 23, 25] }), 35);
+    const full = tagged(recordOf('z_full.json', { checkpointTurns: [1, 3, 5, 7, 21, 23, 25] }), 35);
+    expect(dedupeByFixture([stub, full]).kept.map((f) => f.fileName)).toEqual(['z_full.json']);
+  });
+
+  it('записи без номера фикстуры не трогаются, номер из имени досбора читается', () => {
+    const unknown = recordOf('2026-08-28T14-43-31_b250339_p3.json');
+    const other = recordOf('own_x.json');
+    const a = recordOf('backfill_part4_b248348_p7.json');
+    expect(fixturePartOf(a)).toBe(4);
+    expect(fixturePartOf(unknown)).toBeNull();
+    const result = dedupeByFixture([unknown, other, a]);
+    expect(result.kept).toHaveLength(3);
     expect(result.duplicates).toHaveLength(0);
   });
 });

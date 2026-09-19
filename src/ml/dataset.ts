@@ -81,6 +81,57 @@ export function dedupeBySignature(files: readonly RecordFile[]): DedupeResult {
   return { kept, duplicates };
 }
 
+/** Номер фикстуры записи: поле досбора или имя `backfill_partN_…`; `null` — не знаем. */
+export function fixturePartOf(file: RecordFile): number | null {
+  if (file.record.fixturePart !== undefined) return file.record.fixturePart;
+  const m = /^backfill_part(\d+)_/.exec(file.fileName);
+  return m === null ? null : Number(m[1]);
+}
+
+/**
+ * Вторая ступень дедупа — по НОМЕРУ ФИКСТУРЫ. Отпечаток включает героя
+ * и место, и пара «живая запись + досбор» одной партии не сводилась, когда
+ * живую писал старый редьюсер (part31 — 7-е место вместо 6-го) или она
+ * обрывок после перезапуска клиента (part35, part41: три точки с хода шва).
+ * Замеры 1–4 считали 57 записей как 57 партий, а их было 54 (17.09).
+ *
+ * Остаётся запись с большим числом точек, при равенстве — запись досбора:
+ * она собрана сегодняшним редьюсером из лога целиком.
+ */
+export function dedupeByFixture(files: readonly RecordFile[]): DedupeResult {
+  const groups = new Map<number, RecordFile[]>();
+  const kept: RecordFile[] = [];
+  for (const file of files) {
+    const part = fixturePartOf(file);
+    if (part === null) {
+      kept.push(file);
+      continue;
+    }
+    groups.set(part, [...(groups.get(part) ?? []), file]);
+  }
+  const rank = (f: RecordFile): [number, number, string] => [
+    -f.record.checkpoints.length,
+    f.fileName.startsWith('backfill_') ? 0 : 1,
+    f.fileName,
+  ];
+  const better = (a: RecordFile, b: RecordFile): RecordFile => {
+    const [ra, rb] = [rank(a), rank(b)];
+    for (let i = 0; i < ra.length; i += 1) {
+      if (ra[i] !== rb[i]) return (ra[i] ?? 0) < (rb[i] ?? 0) ? a : b;
+    }
+    return a;
+  };
+  const duplicates: { kept: string; dropped: string[] }[] = [];
+  for (const [, group] of groups) {
+    const best = group.reduce(better);
+    kept.push(best);
+    const dropped = group.filter((f) => f !== best).map((f) => f.fileName);
+    if (dropped.length > 0) duplicates.push({ kept: best.fileName, dropped });
+  }
+  kept.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  return { kept, duplicates };
+}
+
 export interface LoadedDataset {
   /** Партии после дедупа, фильтра билда и отбора записей. */
   readonly games: readonly DatasetGame[];
@@ -264,7 +315,10 @@ export function loadDataset(dir: string = DATASET_DIR): LoadedDataset {
     .filter((f) => !sameGameBuild(f.record.buildNumber, build))
     .map((f) => f.fileName);
 
-  const { kept, duplicates } = dedupeBySignature(currentBuild);
+  const bySignature = dedupeBySignature(currentBuild);
+  const byFixture = dedupeByFixture(bySignature.kept);
+  const kept = byFixture.kept;
+  const duplicates = [...bySignature.duplicates, ...byFixture.duplicates];
 
   const games: DatasetGame[] = [];
   const droppedUnusable: string[] = [];
