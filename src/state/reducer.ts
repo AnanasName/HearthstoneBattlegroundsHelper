@@ -285,20 +285,26 @@ export function createReducer(players: Players): Reducer {
   let darkGiftUsedThisTurn = false;
   const activatedEntityIds = new Set<number>();
 
+  /** Признаки «в этом ходу» с нуля — смена хода партии и шов сегментов (D264). */
+  const resetTurnFlags = (): void => {
+    heroPowerUsedThisTurn = false;
+    darkGiftUsedThisTurn = false;
+    activatedEntityIds.clear();
+    tempSpent = 0;
+  };
+
   /**
    * Журнал своих действий за партию — сырьё фазы 6 («какие действия ведут
    * к победе» не выучить, не записывая действий). Блок PLAY стоит в стеке
-   * у многих событий подряд, а действие он значит ОДНО: WeakSet по самому
+   * у многих событий подряд, а действие он значит ОДНО: WeakMap по самому
    * объекту блока делает запись одноразовой — стек держит один объект
-   * от открытия до закрытия, и события несут ссылки на него.
+   * от открытия до закрытия, и события несут ссылки на него. Значение —
+   * номер записи в журнале: направление заморозки видно только внутри
+   * блока (снятие ставит витрине `FROZEN value=0`, part60), и запись
+   * уточняется уже после того, как сделана.
    */
   const actions: PlayerAction[] = [];
-  const journaledBlocks = new WeakSet<BlockContext>();
-  /**
-   * Блок нажатия заморозки → номер его записи в журнале. Направление видно
-   * только внутри блока: снятие ставит витрине `FROZEN value=0` (part60).
-   */
-  const freezePresses = new WeakMap<BlockContext, number>();
+  const journaledBlocks = new WeakMap<BlockContext, number>();
 
   const journal = (
     block: BlockContext,
@@ -307,7 +313,7 @@ export function createReducer(players: Players): Reducer {
     entityId: number | null,
   ): void => {
     if (journaledBlocks.has(block)) return;
-    journaledBlocks.add(block);
+    journaledBlocks.set(block, actions.length);
     actions.push({
       turn,
       type,
@@ -543,10 +549,7 @@ export function createReducer(players: Players): Reducer {
       case 'TURN':
         if (subject.kind === 'game' && n !== null && n !== turn) {
           turn = n;
-          heroPowerUsedThisTurn = false;
-          darkGiftUsedThisTurn = false;
-          activatedEntityIds.clear();
-          tempSpent = 0;
+          resetTurnFlags();
         }
         return;
       case 'STEP':
@@ -795,7 +798,6 @@ export function createReducer(players: Players): Reducer {
     entities.clear();
     enchantmentsCache = null;
     counterEnchantIds.clear();
-    activatedEntityIds.clear();
     current = null;
     currentIsGameEntity = false;
     openChoice = null;
@@ -810,15 +812,13 @@ export function createReducer(players: Players): Reducer {
     goldTotal = 0;
     goldSpent = 0;
     goldTemp = 0;
-    tempSpent = 0;
     extraGoldNextTurn = 0;
     heroEntityId = null;
     nextOpponentPlayerId = null;
     currentOpponentPlayerId = null;
     opponentBoardCaptured = false;
-    heroPowerUsedThisTurn = false;
-    darkGiftUsedThisTurn = false;
     altTavern = false;
+    resetTurnFlags();
   };
 
   const step = (event: PowerEvent): void => {
@@ -915,7 +915,6 @@ export function createReducer(players: Players): Reducer {
       } else if (TECH_UP_BUTTON_RE.test(pressed.cardId)) {
         journal(block, 'levelUp', null, null);
       } else if (pressed.cardId === LOCK_ALL_BUTTON) {
-        if (!journaledBlocks.has(block)) freezePresses.set(block, actions.length);
         journal(block, 'freeze', null, null);
       } else {
         // Розыгрыш из руки — та же зона на открытии блока, что и у активации.
@@ -926,9 +925,10 @@ export function createReducer(players: Players): Reducer {
     // Заморозка, оказавшаяся СНЯТИЕМ: витрина оттаивает внутри блока кнопки.
     if (content.includes('tag=FROZEN value=0')) {
       for (const block of event.blocks) {
-        const index = freezePresses.get(block);
-        const pressed = index === undefined ? undefined : actions[index];
-        if (index !== undefined && pressed?.type === 'freeze') actions[index] = { ...pressed, type: 'unfreeze' };
+        const index = journaledBlocks.get(block);
+        if (index === undefined) continue;
+        const pressed = actions[index];
+        if (pressed?.type === 'freeze') actions[index] = { ...pressed, type: 'unfreeze' };
       }
     }
 

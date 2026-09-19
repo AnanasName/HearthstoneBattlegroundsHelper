@@ -32,13 +32,14 @@ const fingerprint = (t: TavernTurn): unknown => ({
 
 describe.each([1, 35, 41])('part%i: склейка сегментов', (part) => {
   it('точки решения склейки совпадают с точками сегментов порознь, включая ход шва', async () => {
+    const segments = fixtureLogPaths(part);
+    expect(segments.length).toBeGreaterThan(1);
     const breather = createBreather();
     const stitched = await readTavernTurnsAsync(readFixtureGame(part) ?? '', breather);
     const separate: TavernTurn[] = [];
-    for (const path of fixtureLogPaths(part)) {
+    for (const path of segments) {
       separate.push(...(await readTavernTurnsAsync(readFileSync(path, 'utf8'), breather)));
     }
-    expect(fixtureLogPaths(part).length).toBeGreaterThan(1);
     expect(stitched.map(fingerprint)).toEqual(separate.map(fingerprint));
     for (const t of stitched) {
       expect(t.state.board.length).toBeLessThanOrEqual(7);
