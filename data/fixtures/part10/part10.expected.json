@@ -38,7 +38,10 @@
     "capturedAt": "2026-08-14T00:42:56+03:00",
     "playerBattleTag": "AngryMem#2886",
     "playerId": 3,
-    "hero": { "cardId": "TB_BaconShop_HERO_93_SKIN_B" },
+    "hero": {
+      "cardId": "TB_BaconShop_HERO_33_SKIN_F",
+      "$comment": "Выбран «Мастер ремиксов Н'Зот» TB_BaconShop_HERO_93_SKIN_B, но CHANGE_ENTITY в 00:26:55 подменил его на Смотрителя (D200); исправлено 19.09 по логу."
+    },
     "heroPower": { "cardId": "TB_BaconShop_HP_062", "cost": null, "passive": true }
   },
 

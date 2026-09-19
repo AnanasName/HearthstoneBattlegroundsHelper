@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -49,6 +51,18 @@ describe('part10: заморозка, продажи на полном борд�
     const state = reduceTo(text);
     expect(state.playerBattleTag).toBe('AngryMem#2886');
     expect(state.finalPlace).toBe(6);
+  });
+
+  it('герой — Смотритель, подменивший Н\'Зота при выборе (D200), и expected.json говорит то же', () => {
+    // 00:26:55: выбран «Мастер ремиксов Н'Зот» (id=109), строкой ниже
+    // CHANGE_ENTITY переписывает его в TB_BaconShop_HERO_33_SKIN_F.
+    const expected = JSON.parse(readFileSync('data/fixtures/part10/part10.expected.json', 'utf8')) as {
+      game: { hero: { cardId: string }; heroPower: { cardId: string } };
+    };
+    const state = reduceTo(text);
+    expect(state.hero?.cardId).toBe('TB_BaconShop_HERO_33_SKIN_F');
+    expect(expected.game.hero.cardId).toBe(state.hero?.cardId);
+    expect(expected.game.heroPower.cardId).toBe(state.hero?.heroPowerCardId);
   });
 
   it('ход 3: золотая копия и амальгама больше не повод морозить (жалоба 1)', () => {
