@@ -292,6 +292,14 @@ export interface TavernRules {
   readonly tripleCopiesWords: readonly string[];
 
   /**
+   * Чем карта объявляет себя ДЖОКЕРОМ тройки: собирает золотого с любой
+   * парой одинаковых названного племени (`{tribe}` из `tribeTextWords`).
+   * «This minion can triple with any Elemental» — Elemental of Surprise
+   * `BG26_175`, part60 (D268).
+   */
+  readonly tripleWildcardWords: readonly string[];
+
+  /**
    * Чем сила героя меняет награду за тройку на МОНЕТКУ.
    *
    * Та же «Double Time», вторая половина текста: «They give Tavern Coins
@@ -1926,6 +1934,8 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // «You only need 2 copies to make minions Golden.» (Double Time). Слово
   // «copies» в силах пула больше нигде в этом смысле не встречается.
   tripleCopiesWords: ['\\bonly\\s+need\\s+(\\d+)\\s+copies\\b'],
+
+  tripleWildcardWords: ['\\bcan\\s+triple\\s+with\\s+any\\s+{tribe}\\b'],
 
   // «They give Tavern Coins instead of Triple Rewards.» (Double Time).
   // Перенос строки в снапшоте ходит посреди предложения — пробелы как `\s`.

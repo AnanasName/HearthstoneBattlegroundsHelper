@@ -754,6 +754,10 @@
    "BG27_Anomaly_301",
    "BG34_HERO_002p"
   ],
+  "tripleWildcardWords": [
+   "BG26_175",
+   "BG26_175_G"
+  ],
   "unpricedFutureBonusWords": [
    "BG32_237_Gt",
    "BG32_237_Gt2",

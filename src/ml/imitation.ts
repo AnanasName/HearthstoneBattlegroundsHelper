@@ -163,6 +163,7 @@ export function candidateFeatures(
     (candidate.attack ?? 0) + (candidate.health ?? 0),
     candidate.golden ? 1 : 0,
     tribeMates(candidate, state.board, cards),
+    // Без справочника намеренно: джокера тройки прибор не знает, он предрегистрирован (D268).
     copiesOwned(candidate, state),
     buyCostOf(candidate),
   ];

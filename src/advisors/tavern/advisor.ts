@@ -841,14 +841,15 @@ export function tribeMates(candidate: Minion, board: readonly Minion[], cards: C
  * не меняет — её миньонов в руке нет, — а вот карта ИЗ РУКИ без этого
  * считала бы копией саму себя и получала бонус «вторая копия» на ровном месте.
  */
-export function copiesOwned(candidate: Minion, state: GameState, cards?: CardIndex): number {
+export function copiesOwned(
+  candidate: Minion,
+  state: GameState,
+  cards?: CardIndex,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): number {
   if (candidate.golden) return 0;
-  const same = (m: Minion): boolean =>
-    m.cardId === candidate.cardId &&
-    !m.golden &&
-    m.entityId !== candidate.entityId &&
-    !isStandIn(m);
-  const plain = state.board.filter(same).length + state.hand.filter(same).length;
+  const owned = tripleOwned(candidate, state);
+  const plain = owned.filter((m) => m.cardId === candidate.cardId).length;
   if (cards === undefined) return plain;
 
   // Джокер тройки: «This minion can triple with any Elemental» (Elemental
@@ -857,31 +858,64 @@ export function copiesOwned(candidate: Minion, state: GameState, cards?: CardInd
   // тройку с ПАРОЙ одинаковых своего племени, а обычному миньону племени
   // джокер на борде или в руке засчитывается одной копией. Два джокера
   // с одной картой в логе не встречались и копиями не считаются.
-  const others = [...state.board, ...state.hand].filter(
-    (m) => !m.golden && !isStandIn(m) && m.entityId !== candidate.entityId && m.cardId !== candidate.cardId,
-  );
-  const wild = tripleWildcardRace(candidate, cards);
+  const others = owned.filter((m) => m.cardId !== candidate.cardId);
+  const wild = tripleWildcardRace(candidate, cards, rules);
   if (wild !== null) {
-    const pairs = new Map<string, number>();
-    for (const m of others) {
-      if (racesOf(m, cards).includes(wild)) pairs.set(m.cardId, (pairs.get(m.cardId) ?? 0) + 1);
-    }
-    return Math.max(plain, ...pairs.values());
+    return Math.max(plain, ...[...wildcardPairs(others, wild, cards).values()].map((g) => g.length));
   }
-  const races = racesOf(candidate, cards);
-  const jokers = others.filter((m) => {
-    const race = tripleWildcardRace(m, cards);
-    return race !== null && races.includes(race);
-  }).length;
-  return plain + Math.min(1, jokers);
+  return plain + (tripleJoker(candidate, others, cards, rules) === undefined ? 0 : 1);
 }
 
-/** Племя, с любым миньоном которого карта собирает тройку («can triple with any X»). */
-function tripleWildcardRace(m: Minion, cards: CardIndex): string | null {
-  const text = (cards.info(m.cardId)?.text ?? '').replace(/<[^>]*>/g, '');
-  const word = /can triple with any (\w+)/i.exec(text)?.[1];
-  return word === undefined ? null : word.toUpperCase();
+/** Свои незолотые миньоны борда и руки, годные в слияние с `candidate`, — кроме него самого и заготовок. */
+function tripleOwned(candidate: Minion, state: GameState): Minion[] {
+  return [...state.board, ...state.hand].filter(
+    (m) => !m.golden && m.entityId !== candidate.entityId && !isStandIn(m),
+  );
 }
+
+/** Свои миньоны племени джокера, сгруппированные по карте: с какой парой он соберёт тройку. */
+function wildcardPairs(owned: readonly Minion[], race: string, cards: CardIndex): Map<string, Minion[]> {
+  const groups = new Map<string, Minion[]>();
+  for (const m of owned) {
+    if (!racesOf(m, cards).includes(race)) continue;
+    const group = groups.get(m.cardId);
+    if (group === undefined) groups.set(m.cardId, [m]);
+    else group.push(m);
+  }
+  return groups;
+}
+
+/** Свой джокер тройки, чьё племя есть у `candidate`, — или `undefined`. */
+function tripleJoker(
+  candidate: Minion,
+  owned: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules,
+): Minion | undefined {
+  const races = racesOf(candidate, cards);
+  return owned.find((m) => {
+    const race = tripleWildcardRace(m, cards, rules);
+    return race !== null && races.includes(race);
+  });
+}
+
+/** Племя, с любым миньоном которого карта собирает тройку (`tripleWildcardWords`), — или `null`. */
+function tripleWildcardRace(m: Minion, cards: CardIndex, rules: TavernRules): string | null {
+  return memoByCard(TRIPLE_WILDCARD_CACHE, m.cardId, cards, rules, () => {
+    const text = (cards.info(m.cardId)?.text ?? '').replace(/<[^>]*>/g, '');
+    for (const pattern of rules.tripleWildcardWords) {
+      for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+        if (new RegExp(pattern.replace('{tribe}', `(?:${tribe})`), 'i').test(text)) return race;
+      }
+    }
+    return null;
+  });
+}
+
+const TRIPLE_WILDCARD_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, string | null>>
+>();
 
 /**
  * Заготовка найденного миньона в гипотетическом состоянии плана
@@ -1014,46 +1048,38 @@ export function tripleMergeOf(
 ): { readonly consumed: readonly number[]; readonly golden: Minion } | null {
   if (minion.golden) return null;
   const needed = copiesForTriple(state, cards, rules);
-  const owned = [...state.board, ...state.hand].filter(
-    (m) => !m.golden && m.entityId !== minion.entityId && !isStandIn(m),
-  );
+  const owned = tripleOwned(minion, state);
   const same = owned.filter((m) => m.cardId === minion.cardId);
-  const wild = tripleWildcardRace(minion, cards);
+  const others = owned.filter((m) => m.cardId !== minion.cardId);
 
-  // Кто уходит в слияние (`copies`) и чья карта станет золотой (`card`).
+  // Кто уходит в слияние (`copies`) и чья карта станет золотой (`body`).
   // Джокер тройки («can triple with any Elemental», part60, 15:01:04)
   // своей прибавки золотому НЕ отдаёт: золотая Unbound Tempest вышла
   // 6/24 + прибавки двух Tempest (1206/1269, затем 2489/2616), а 354/366
   // купленного Elemental of Surprise в неё не вошли. Поэтому прибавки
   // и слова считаются только по копиям карты (`all`), без джокера.
-  let copies: Minion[] = same.slice(0, needed - 1);
-  let card = minion.cardId;
-  let all: Minion[] = [...copies, minion];
+  let copies: Minion[];
   let body = minion;
-  if (copies.length < needed - 1 && wild !== null) {
-    const groups = new Map<string, Minion[]>();
-    for (const m of owned) {
-      if (racesOf(m, cards).includes(wild)) groups.set(m.cardId, [...(groups.get(m.cardId) ?? []), m]);
+  if (same.length >= needed - 1) {
+    copies = same.slice(0, needed - 1);
+  } else {
+    const wild = tripleWildcardRace(minion, cards, rules);
+    if (wild !== null) {
+      const group = [...wildcardPairs(others, wild, cards).values()]
+        .filter((g) => g.length >= needed - 1)
+        .sort((a, b) => b.length - a.length)[0];
+      if (group?.[0] === undefined) return null;
+      copies = group.slice(0, needed - 1);
+      body = { ...minion, ...group[0], entityId: minion.entityId };
+    } else {
+      if (same.length + 1 < needed - 1) return null;
+      const joker = tripleJoker(minion, others, cards, rules);
+      if (joker === undefined) return null;
+      copies = [...same, joker];
     }
-    const group = [...groups.values()]
-      .filter((g) => g.length >= needed - 1)
-      .sort((a, b) => b.length - a.length)[0];
-    if (group === undefined) return null;
-    copies = group.slice(0, needed - 1);
-    card = copies[0]?.cardId ?? card;
-    all = copies;
-    body = { ...minion, ...(copies[0] ?? minion), entityId: minion.entityId };
-  } else if (copies.length < needed - 1) {
-    const races = racesOf(minion, cards);
-    const joker = owned.find((m) => {
-      const race = tripleWildcardRace(m, cards);
-      return race !== null && races.includes(race);
-    });
-    if (joker === undefined || copies.length + 1 < needed - 1) return null;
-    copies = [...copies, joker];
-    all = [...same.slice(0, needed - 2), minion];
   }
-  if (copies.length < needed - 1) return null;
+  const card = body.cardId;
+  const all = [...copies, minion].filter((m) => m.cardId === card);
 
   const base = cards.info(card);
   const goldenCard = cards.info(`${card}_G`);
@@ -1460,7 +1486,7 @@ export function minionValue(
       ? 0
       : keywordValue(reached.field, reached.attack, candidate.health ?? 0, rules));
 
-  const owned = copiesOwned(candidate, state, cards);
+  const owned = copiesOwned(candidate, state, cards, rules);
   // Сколько копий собирают золотого, решает сила героя, а не константа:
   // «Double Time» делает тройку из двух (part7). Выше порога бонус не растёт.
   const needed = copiesForTriple(state, cards, rules);
@@ -3563,7 +3589,7 @@ function electiveVictim(
   };
   const pool = state.board.filter(
     (m) =>
-      !isAuraOverOthers(m, deps.cards, rules) && copiesOwned(m, state, deps.cards) === 0 && !triggered(m),
+      !isAuraOverOthers(m, deps.cards, rules) && copiesOwned(m, state, deps.cards, rules) === 0 && !triggered(m),
   );
   if (pool.length === 0) return null;
   return pool
@@ -3648,7 +3674,7 @@ export function buyRules(
   const sellValueOnBoard = state.board.some((m) => {
     const text = deps.cards.info(m.cardId)?.text ?? '';
     return (
-      copiesOwned(m, state, deps.cards) === 0 &&
+      copiesOwned(m, state, deps.cards, rules) === 0 &&
       rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))
     );
   });
@@ -3917,7 +3943,7 @@ export function playRules(
     const copy = (b: Minion): boolean =>
       !minion.golden && !b.golden && b.cardId === minion.cardId && !isStandIn(b);
     const tripled =
-      copiesOwned(minion, state, deps.cards) + 1 >= copiesForTriple(state, deps.cards, rules);
+      copiesOwned(minion, state, deps.cards, rules) + 1 >= copiesForTriple(state, deps.cards, rules);
     const victim =
       weakest !== null && tripled && copy(weakest.minion)
         ? weakestOwn({ ...state, board: state.board.filter((b) => !copy(b)) }, deps, rules)
@@ -4399,7 +4425,7 @@ export function spinRule(
     const cost = buyCostOf(minion, rules);
     if (cost > state.gold + refund) continue;
     // Копию не прокручивают: продажа ломает будущую тройку.
-    if (copiesOwned(minion, state, deps.cards) > 0) continue;
+    if (copiesOwned(minion, state, deps.cards, rules) > 0) continue;
 
     const info = deps.cards.info(minion.cardId);
     const text = info?.text ?? '';
@@ -4593,7 +4619,7 @@ export function lostCombatFlipRule(
     const sale = Number(hit[1]);
     const cost = buyCostOf(minion, rules);
     if (!Number.isFinite(sale) || sale <= cost || cost > state.gold) continue;
-    if (copiesOwned(minion, state, deps.cards) > 0) continue;
+    if (copiesOwned(minion, state, deps.cards, rules) > 0) continue;
     if (best === null || sale - cost > best.sale - best.cost) best = { minion, cost, sale };
   }
   if (best === null) return null;
@@ -4649,7 +4675,7 @@ export function sellForGoldRule(
     }
     // Копия, из которой собирается тройка, не продаётся: тройка стоит
     // больше любого обещания текста, и вторая копия — ставка на неё.
-    return copiesOwned(m, state, deps.cards) === 0;
+    return copiesOwned(m, state, deps.cards, rules) === 0;
   });
   if (sellable.length === 0) return null;
 
@@ -9720,7 +9746,7 @@ function sellCandidateIds(
   if (victim !== null) ids.add(victim.minion.entityId);
   for (const m of state.board) {
     const text = deps.cards.info(m.cardId)?.text ?? '';
-    if (text === '' || copiesOwned(m, state, deps.cards) > 0) continue;
+    if (text === '' || copiesOwned(m, state, deps.cards, rules) > 0) continue;
     if (rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))) ids.add(m.entityId);
   }
   return ids;
@@ -9976,13 +10002,13 @@ function spellTargetOn(
   // на цели с провокацией заклинание её СНИМАЕТ. План клал оба Trousers
   // на один Gearfin. Цель — тело без провокации; если таких нет, потеря
   // слова вычитается из очков (`tauntScoreOnTarget`).
-  if (effect.grantsTaunt && effect.tauntToggles) {
+  if (effect.tauntToggles) {
     const bare = pool.filter((m) => !m.taunt);
-    if (bare.length > 0 && bare.length < pool.length) {
+    if (bare.length === 0) {
+      notes.push('провокация у цели уже есть — заклинание её снимет');
+    } else if (bare.length < pool.length) {
       if (largest(pool).taunt) notes.push('у крупнейшего провокация уже есть — заклинание её сняло бы');
       pool = bare;
-    } else if (bare.length === 0) {
-      notes.push('провокация у цели уже есть — заклинание её снимет');
     }
   }
 
