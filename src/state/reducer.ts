@@ -783,6 +783,39 @@ export function createReducer(players: Players): Reducer {
     opponentBoardCaptured = true;
   };
 
+  /** Встречен ли уже CREATE_GAME — следующий будет дампом переподключения. */
+  let gameCreated = false;
+
+  const resetEntities = (): void => {
+    entities.clear();
+    enchantmentsCache = null;
+    counterEnchantIds.clear();
+    activatedEntityIds.clear();
+    current = null;
+    currentIsGameEntity = false;
+    openChoice = null;
+    heroChoice = null;
+    collectingChoice = null;
+    pendingOpponentHeroId = null;
+    // Состояние хода — тоже с дампа, как у сегмента, прочитанного отдельно.
+    // Иначе редьюсер входит в ход шва с ходом, золотом и героем прошлого
+    // сегмента, и точка решения этого хода пропадает (D023).
+    phase = 'tavern';
+    turn = 0;
+    goldTotal = 0;
+    goldSpent = 0;
+    goldTemp = 0;
+    tempSpent = 0;
+    extraGoldNextTurn = 0;
+    heroEntityId = null;
+    nextOpponentPlayerId = null;
+    currentOpponentPlayerId = null;
+    opponentBoardCaptured = false;
+    heroPowerUsedThisTurn = false;
+    darkGiftUsedThisTurn = false;
+    altTavern = false;
+  };
+
   const step = (event: PowerEvent): void => {
     const { content } = event.line;
 
@@ -808,6 +841,19 @@ export function createReducer(players: Players): Reducer {
     // ни `current`, ни стек блоков: их строки вклиниваются между блоками.
     if (event.line.source !== SOURCE_OF_TRUTH) {
       stepChoice(event.line.source, content);
+      return;
+    }
+
+    // Повторный CREATE_GAME — дамп ПЕРЕПОДКЛЮЧЕНИЯ посреди той же партии
+    // (склейка сегментов part1, part35, part41). Дамп перечисляет все живые
+    // сущности заново и полностью, а умерших за время разрыва не называет
+    // вовсе — их прежние записи оставались в PLAY, и после шва на борду
+    // стояло 12–20 миньонов, а в витрине 10–16. Таблица сущностей и всё, что
+    // выведено из неё, начинаются с дампа; история партии (борды соперников,
+    // журнал, виденные карты) — накопление, и она сохраняется (D264).
+    if (content === 'CREATE_GAME') {
+      if (gameCreated) resetEntities();
+      gameCreated = true;
       return;
     }
 
