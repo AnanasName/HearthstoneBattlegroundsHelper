@@ -1039,3 +1039,21 @@ Air Revenant, тринкеты Baller Portrait и Jarred Frostling, тёмный
 (ходы 14–18), четыре выигрыша, −13 на ходу 28 (hp 14 → 1) и четыре выигрыша
 при одном здоровье.
 Тест — `test/state/part60.test.ts`.
+
+`part61` — 18.09, Tickatus `TB_BaconShop_HERO_94`, **6-е место**, 10 ходов
+таверны (23:44–00:01, партия переходит через полночь). Своя сессия клиента
+23:42:51, ровно одна партия, доиграна, билд 251952; вырезана сразу после
+партии, кадров нет. Фактура: пассивная сила «Prize Wall»
+`TB_BaconShop_HP_106` («Every 4 turns, Discover a Darkmoon Prize») — два
+выбора каналом `DebugPrintEntityChoices` с `Source=` силы (id=136): ход 7
+(Crystallization / The Good Stuff / New Recruit, взят New Recruit — лишний
+миньон витрины +2/+2 виден на ходах 9–15) и ход 15 (Evolving Tavern /
+Mageroyal Blossom / The Bouncer, взят Evolving Tavern, не разыгран);
+у сущностей вариантов тега `COST` нет — призы бесплатны. Tortollan Blue
+Shell: `BACON_SELL_VALUE` 1 в витрине и 5 в руке после проигранного боя,
+три перепродажи; урон прошлого боя — тег `DAMAGE_DEALT_TO_HERO_LAST_TURN`
+своего игрока (3, 5, 5, 15, 15, 15 на проигрышах, 0 в начале каждого боя).
+Тринкеты Grifter Portrait и Designer Eyepatch, Aureate Laureate ×3 с Surfing
+Sylvar, золотой Locked-up Mutineer, на ходу 19 — Brann и Bounties Sky Admiral
+Rogers. Бои: ничья, −3, три выигрыша (ходы 6–10), −5, −5, −15, −15, −15.
+Тест — `test/state/part61.test.ts`.
