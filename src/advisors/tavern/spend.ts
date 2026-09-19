@@ -119,6 +119,14 @@ function withTargetDestroyed(board: readonly Minion[], rec: Recommendation): rea
     : board.map((m) => (m.entityId === target.entityId ? copy : m));
 }
 
+/** Борд, где цель заклинания получила или потеряла провокацию (`setsTaunt`). */
+function withSpellTaunt(board: readonly Minion[], rec: Recommendation): readonly Minion[] {
+  const target = rec.targetMinion ?? null;
+  const taunt = rec.setsTaunt;
+  if (taunt === undefined || target === null) return board;
+  return board.map((m) => (m.entityId === target.entityId ? { ...m, taunt } : m));
+}
+
 /**
  * Витрина после покупки миньона, чей клич дешевит заклинания (part49).
  *
@@ -321,7 +329,7 @@ export function applyRecommendation(
         return {
           state: paid({
             shopSpells: withoutSpell(state.shopSpells, rec.spellCardId),
-            board: withStandIn(withTargetDestroyed(state.board, rec), state.hand, rec, rules),
+            board: withStandIn(withTargetDestroyed(withSpellTaunt(state.board, rec), rec), state.hand, rec, rules),
             // Золото следующего хода — туда же, куда его пишет игра (D238).
             extraGoldNextTurn: state.extraGoldNextTurn + (rec.grantsGoldNextTurn ?? 0),
           }),
@@ -421,7 +429,7 @@ export function applyRecommendation(
             // Дневной заряд магнита-хранителя потрачен: следующее чародейское
             // заклинание той же цепочки постоянным на нём уже не станет
             // (part21). Счётчик живёт в `scriptData[0]` — «({0} left!)».
-            board: withTargetDestroyed(withoutMagnetCharge(state.board, rec), rec),
+            board: withTargetDestroyed(withSpellTaunt(withoutMagnetCharge(state.board, rec), rec), rec),
             shop: refreshes ? [] : state.shop,
             // Покупки после обновления обещаны самим советом («на 4 золота
             // покупок 4 по 1»), и их золото уходит здесь же: шаг обрывает

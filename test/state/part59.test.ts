@@ -249,6 +249,22 @@ describe('part59: Крысиный король, сила-Discover и банан
   });
 
   /**
+   * Tricky Trousers `BG28_520`: «Give a minion +{0}/+{1} and Taunt. If it
+   * already has Taunt, remove it.» План клал оба на золотой Gearfin, и второе
+   * снимало провокацию, данную первым (D267).
+   */
+  it('ход 17: вторые Tricky Trousers идут на другую цель — провокацию с Gearfin они сняли бы', () => {
+    const plan = spendPlan(decisionPoint(17), { cards });
+    const trousers = plan.steps.filter((s) => s.recommendation.spellCardId === 'BG28_520');
+    expect(trousers).toHaveLength(2);
+    const [first, second] = trousers.map((s) => s.recommendation);
+    expect(first?.setsTaunt).toBe(true);
+    expect(second?.targetMinion?.entityId).not.toBe(first?.targetMinion?.entityId);
+    expect(second?.targetMinion?.taunt).toBe(false);
+    expect(second?.reason).toContain('провокация уже есть');
+  });
+
+  /**
    * Ход 19: пять бесплатных заклинаний руки съедали все восемь шагов
    * плана, и он печатал «остаётся 10 — сгорит» при подъёме-хвосте D214
    * в списке (hp 13 при пороге 15). Игрок поднялся до 6.

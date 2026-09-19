@@ -155,6 +155,13 @@ export interface Recommendation {
    */
   readonly grantsKeyword?: BinaryKeywordField;
   /**
+   * Провокация `targetMinion` после заклинания: `true` — дана, `false` —
+   * снята («If it already has Taunt, remove it», part59). План кладёт её
+   * на гипотетический борд, иначе второе такое заклинание видит цель
+   * без провокации и снова считает её прибавкой.
+   */
+  readonly setsTaunt?: boolean;
+  /**
    * Статы, которые действие КЛАДЁТ на цель, — «Give a minion Attack equal
    * to your Tier» силой героя (part45). Нужно плану ровно затем же, зачем
    * `grantsKeyword`: прибавка постоянная и известна числом, значит шаг
@@ -8086,6 +8093,11 @@ export interface SpellEffect {
    */
   readonly grantsTaunt: boolean;
   /**
+   * «If it already has Taunt, remove it» — провокация у цели с ней
+   * снимается, а не добавляется (Tricky Trousers `BG28_520`, part59).
+   */
+  readonly tauntToggles: boolean;
+  /**
    * Даёт перерождение или вихрь.
    *
    * Читаются рядом с провокацией и щитом: у модального «Choose One» именно
@@ -8324,6 +8336,26 @@ function grantedKeywordScore(effect: SpellEffect, rules: TavernRules): number {
     (effect.grantsReborn ? rules.value.reborn : 0) +
     (effect.grantsWindfury ? rules.value.windfury : 0)
   );
+}
+
+/**
+ * Поправка к очкам провокации на КОНКРЕТНОЙ цели. Провокация, которая
+ * у цели уже есть, ничего не добавляет; у «If it already has Taunt, remove
+ * it» (Tricky Trousers) она ещё и снимается — минус слово дважды: прибавки
+ * нет, и то, что было, теряется (part59, ход 17).
+ */
+function tauntScoreOnTarget(effect: SpellEffect, target: Minion | null, rules: TavernRules): number {
+  if (!effect.grantsTaunt || target === null || !target.taunt) return 0;
+  return -(effect.tauntToggles ? 2 : 1) * rules.value.taunt;
+}
+
+/**
+ * Провокация цели после заклинания — поле рекомендации для гипотетического
+ * борда плана. Пусто — заклинание провокации не трогает или цели нет.
+ */
+function tauntField(effect: SpellEffect, target: Minion | null): { readonly setsTaunt?: boolean } {
+  if (!effect.grantsTaunt || target === null) return {};
+  return { setsTaunt: !(effect.tauntToggles && target.taunt) };
 }
 
 function branchScore(effect: SpellEffect, rules: TavernRules): number {
@@ -9353,6 +9385,7 @@ function computeSpellEffect(
   const transforms = destroy !== null && /to (?:get|summon|discover)/i.test(text);
 
   const grantsTaunt = /\btaunt\b/i.test(text);
+  const tauntToggles = grantsTaunt && /already has (?:<b>)?taunt(?:<\/b>)?, remove it/i.test(text);
   // Перерождение и вихрь читаются так же, как провокация и щит, и по той же
   // причине: они и есть весь смысл выбора у «Choose One». У Sprightly Scarab
   // ветви различаются словами («+1/+1 и Reborn» против «+4 к атаке
@@ -9453,6 +9486,7 @@ function computeSpellEffect(
     destroyRace,
     transforms,
     grantsTaunt,
+    tauntToggles,
     grantsReborn,
     grantsWindfury,
     targetRace,
@@ -9871,6 +9905,20 @@ function spellTargetOn(
     }
   }
 
+  // «If it already has Taunt, remove it» (Tricky Trousers, part59, ход 17):
+  // на цели с провокацией заклинание её СНИМАЕТ. План клал оба Trousers
+  // на один Gearfin. Цель — тело без провокации; если таких нет, потеря
+  // слова вычитается из очков (`tauntScoreOnTarget`).
+  if (effect.grantsTaunt && effect.tauntToggles) {
+    const bare = pool.filter((m) => !m.taunt);
+    if (bare.length > 0 && bare.length < pool.length) {
+      if (largest(pool).taunt) notes.push('у крупнейшего провокация уже есть — заклинание её сняло бы');
+      pool = bare;
+    } else if (bare.length === 0) {
+      notes.push('провокация у цели уже есть — заклинание её снимет');
+    }
+  }
+
   // Ветвь-кандидат «вихрь» сужает пул ДО фильтра кандидатов в продажу,
   // и это не мелочь порядка, а весь её смысл. `weakestOwn` считает статами,
   // и на part40 (ход 11) слабейшим своим у него выходит ровно Crackling
@@ -9985,6 +10033,7 @@ export function buffTarget(
     destroyRace: null,
     transforms: false,
     grantsTaunt,
+    tauntToggles: false,
     grantsReborn: false,
     grantsWindfury: false,
     targetRace: null,
@@ -10334,7 +10383,8 @@ export function spellRules(
       (boosted.transforms
         ? rules.value.transform
         : (trade?.stats ?? boosted.stats) * rules.value.perStatPoint +
-          grantedKeywordScore(boosted, rules)) -
+          grantedKeywordScore(boosted, rules) +
+          tauntScoreOnTarget(boosted, aimed.target, rules)) -
       spell.cost * rules.goldPointValue;
     if (score <= 0) return [];
     const branch = branchAdvice(boosted);
@@ -10347,6 +10397,7 @@ export function spellRules(
         spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
         ...(aimed.destroyed === undefined ? {} : { destroysTarget: aimed.destroyed }),
+        ...tauntField(boosted, aimed.target),
         spellBranches: branch.branches,
         buffsWholeBoard: onBoard.wide,
         score,
@@ -10871,7 +10922,8 @@ export function shopSpellRules(
     const score = boosted.transforms
       ? rules.value.transform
       : (trade?.stats ?? boosted.stats) * rules.value.perStatPoint +
-        grantedKeywordScore(boosted, rules);
+        grantedKeywordScore(boosted, rules) +
+        tauntScoreOnTarget(boosted, aimed.target, rules);
     if (score <= 0) return [];
     const branch = branchAdvice(boosted);
     return [
@@ -10882,6 +10934,7 @@ export function shopSpellRules(
         spendsMagnetCharge: aimed.spendsCharge ?? false,
         targetMinion: aimed.target,
         ...(aimed.destroyed === undefined ? {} : { destroysTarget: aimed.destroyed }),
+        ...tauntField(boosted, aimed.target),
         spellBranches: branch.branches,
         buffsWholeBoard: onBoard.wide,
         score,

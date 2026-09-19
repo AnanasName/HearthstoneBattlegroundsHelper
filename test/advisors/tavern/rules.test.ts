@@ -1804,6 +1804,7 @@ describe('заклинания руки', () => {
       destroyRace: null,
       transforms: false,
       grantsTaunt: false,
+      tauntToggles: false,
       grantsReborn: false,
       grantsWindfury: false,
       targetRace: null,
@@ -1933,6 +1934,7 @@ describe('заклинания руки', () => {
       destroyRace: 'UNDEAD',
       transforms: false,
       grantsTaunt: false,
+      tauntToggles: false,
       grantsReborn: false,
       grantsWindfury: false,
       // Племя ЖЕРТВЫ читается своим полем (`destroyRace`), а `targetRace` —
