@@ -841,14 +841,46 @@ export function tribeMates(candidate: Minion, board: readonly Minion[], cards: C
  * не меняет — её миньонов в руке нет, — а вот карта ИЗ РУКИ без этого
  * считала бы копией саму себя и получала бонус «вторая копия» на ровном месте.
  */
-export function copiesOwned(candidate: Minion, state: GameState): number {
+export function copiesOwned(candidate: Minion, state: GameState, cards?: CardIndex): number {
   if (candidate.golden) return 0;
   const same = (m: Minion): boolean =>
     m.cardId === candidate.cardId &&
     !m.golden &&
     m.entityId !== candidate.entityId &&
     !isStandIn(m);
-  return state.board.filter(same).length + state.hand.filter(same).length;
+  const plain = state.board.filter(same).length + state.hand.filter(same).length;
+  if (cards === undefined) return plain;
+
+  // Джокер тройки: «This minion can triple with any Elemental» (Elemental
+  // of Surprise `BG26_175`, part60, 15:01:04 — две Unbound Tempest и купленный
+  // джокер ушли в SETASIDE, в руку пришла золотая Tempest). Джокер собирает
+  // тройку с ПАРОЙ одинаковых своего племени, а обычному миньону племени
+  // джокер на борде или в руке засчитывается одной копией. Два джокера
+  // с одной картой в логе не встречались и копиями не считаются.
+  const others = [...state.board, ...state.hand].filter(
+    (m) => !m.golden && !isStandIn(m) && m.entityId !== candidate.entityId && m.cardId !== candidate.cardId,
+  );
+  const wild = tripleWildcardRace(candidate, cards);
+  if (wild !== null) {
+    const pairs = new Map<string, number>();
+    for (const m of others) {
+      if (racesOf(m, cards).includes(wild)) pairs.set(m.cardId, (pairs.get(m.cardId) ?? 0) + 1);
+    }
+    return Math.max(plain, ...pairs.values());
+  }
+  const races = racesOf(candidate, cards);
+  const jokers = others.filter((m) => {
+    const race = tripleWildcardRace(m, cards);
+    return race !== null && races.includes(race);
+  }).length;
+  return plain + Math.min(1, jokers);
+}
+
+/** Племя, с любым миньоном которого карта собирает тройку («can triple with any X»). */
+function tripleWildcardRace(m: Minion, cards: CardIndex): string | null {
+  const text = (cards.info(m.cardId)?.text ?? '').replace(/<[^>]*>/g, '');
+  const word = /can triple with any (\w+)/i.exec(text)?.[1];
+  return word === undefined ? null : word.toUpperCase();
 }
 
 /**
@@ -982,17 +1014,52 @@ export function tripleMergeOf(
 ): { readonly consumed: readonly number[]; readonly golden: Minion } | null {
   if (minion.golden) return null;
   const needed = copiesForTriple(state, cards, rules);
-  const same = (m: Minion): boolean =>
-    m.cardId === minion.cardId && !m.golden && m.entityId !== minion.entityId && !isStandIn(m);
-  const copies = [...state.board.filter(same), ...state.hand.filter(same)].slice(0, needed - 1);
+  const owned = [...state.board, ...state.hand].filter(
+    (m) => !m.golden && m.entityId !== minion.entityId && !isStandIn(m),
+  );
+  const same = owned.filter((m) => m.cardId === minion.cardId);
+  const wild = tripleWildcardRace(minion, cards);
+
+  // Кто уходит в слияние (`copies`) и чья карта станет золотой (`card`).
+  // Джокер тройки («can triple with any Elemental», part60, 15:01:04)
+  // своей прибавки золотому НЕ отдаёт: золотая Unbound Tempest вышла
+  // 6/24 + прибавки двух Tempest (1206/1269, затем 2489/2616), а 354/366
+  // купленного Elemental of Surprise в неё не вошли. Поэтому прибавки
+  // и слова считаются только по копиям карты (`all`), без джокера.
+  let copies: Minion[] = same.slice(0, needed - 1);
+  let card = minion.cardId;
+  let all: Minion[] = [...copies, minion];
+  let body = minion;
+  if (copies.length < needed - 1 && wild !== null) {
+    const groups = new Map<string, Minion[]>();
+    for (const m of owned) {
+      if (racesOf(m, cards).includes(wild)) groups.set(m.cardId, [...(groups.get(m.cardId) ?? []), m]);
+    }
+    const group = [...groups.values()]
+      .filter((g) => g.length >= needed - 1)
+      .sort((a, b) => b.length - a.length)[0];
+    if (group === undefined) return null;
+    copies = group.slice(0, needed - 1);
+    card = copies[0]?.cardId ?? card;
+    all = copies;
+    body = { ...minion, ...(copies[0] ?? minion), entityId: minion.entityId };
+  } else if (copies.length < needed - 1) {
+    const races = racesOf(minion, cards);
+    const joker = owned.find((m) => {
+      const race = tripleWildcardRace(m, cards);
+      return race !== null && races.includes(race);
+    });
+    if (joker === undefined || copies.length + 1 < needed - 1) return null;
+    copies = [...copies, joker];
+    all = [...same.slice(0, needed - 2), minion];
+  }
   if (copies.length < needed - 1) return null;
 
-  const base = cards.info(minion.cardId);
-  const goldenCard = cards.info(`${minion.cardId}_G`);
+  const base = cards.info(card);
+  const goldenCard = cards.info(`${card}_G`);
   const real = base !== null && goldenCard !== null && goldenCard.id !== base.id;
-  const baseAttack = base?.attack ?? minion.attack ?? 0;
-  const baseHealth = base?.health ?? minion.health ?? 0;
-  const all = [...copies, minion];
+  const baseAttack = base?.attack ?? body.attack ?? 0;
+  const baseHealth = base?.health ?? body.health ?? 0;
   const bonus = (pick: (m: Minion) => number | null, of: number): number =>
     all.reduce((sum, m) => sum + (pick(m) ?? of) - of, 0);
   const attack = (real ? (goldenCard.attack ?? 0) : 2 * baseAttack) + bonus((m) => m.attack, baseAttack);
@@ -1003,8 +1070,8 @@ export function tripleMergeOf(
   return {
     consumed: copies.map((m) => m.entityId),
     golden: {
-      ...minion,
-      cardId: real ? goldenCard.id : `${minion.cardId}_G`,
+      ...body,
+      cardId: real ? goldenCard.id : `${card}_G`,
       zonePos: state.hand.length - copies.filter((m) => state.hand.includes(m)).length + 1,
       attack,
       health,
@@ -1020,8 +1087,8 @@ export function tripleMergeOf(
       frozen: false,
       enchantments: all.flatMap((m) => m.enchantments),
       // Накопленные счётчики живут на копии борда, а не на купленной.
-      scriptData: copies[0]?.scriptData ?? minion.scriptData,
-      tags: { ...minion.tags, PREMIUM: 1, [TRIPLED_TAG]: base?.dbfId ?? 1 },
+      scriptData: copies[0]?.scriptData ?? body.scriptData,
+      tags: { ...body.tags, PREMIUM: 1, [TRIPLED_TAG]: base?.dbfId ?? 1 },
       buyCost: null,
     },
   };
@@ -1393,7 +1460,7 @@ export function minionValue(
       ? 0
       : keywordValue(reached.field, reached.attack, candidate.health ?? 0, rules));
 
-  const owned = copiesOwned(candidate, state);
+  const owned = copiesOwned(candidate, state, cards);
   // Сколько копий собирают золотого, решает сила героя, а не константа:
   // «Double Time» делает тройку из двух (part7). Выше порога бонус не растёт.
   const needed = copiesForTriple(state, cards, rules);
@@ -3496,7 +3563,7 @@ function electiveVictim(
   };
   const pool = state.board.filter(
     (m) =>
-      !isAuraOverOthers(m, deps.cards, rules) && copiesOwned(m, state) === 0 && !triggered(m),
+      !isAuraOverOthers(m, deps.cards, rules) && copiesOwned(m, state, deps.cards) === 0 && !triggered(m),
   );
   if (pool.length === 0) return null;
   return pool
@@ -3581,7 +3648,7 @@ export function buyRules(
   const sellValueOnBoard = state.board.some((m) => {
     const text = deps.cards.info(m.cardId)?.text ?? '';
     return (
-      copiesOwned(m, state) === 0 &&
+      copiesOwned(m, state, deps.cards) === 0 &&
       rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))
     );
   });
@@ -3850,7 +3917,7 @@ export function playRules(
     const copy = (b: Minion): boolean =>
       !minion.golden && !b.golden && b.cardId === minion.cardId && !isStandIn(b);
     const tripled =
-      copiesOwned(minion, state) + 1 >= copiesForTriple(state, deps.cards, rules);
+      copiesOwned(minion, state, deps.cards) + 1 >= copiesForTriple(state, deps.cards, rules);
     const victim =
       weakest !== null && tripled && copy(weakest.minion)
         ? weakestOwn({ ...state, board: state.board.filter((b) => !copy(b)) }, deps, rules)
@@ -4332,7 +4399,7 @@ export function spinRule(
     const cost = buyCostOf(minion, rules);
     if (cost > state.gold + refund) continue;
     // Копию не прокручивают: продажа ломает будущую тройку.
-    if (copiesOwned(minion, state) > 0) continue;
+    if (copiesOwned(minion, state, deps.cards) > 0) continue;
 
     const info = deps.cards.info(minion.cardId);
     const text = info?.text ?? '';
@@ -4526,7 +4593,7 @@ export function lostCombatFlipRule(
     const sale = Number(hit[1]);
     const cost = buyCostOf(minion, rules);
     if (!Number.isFinite(sale) || sale <= cost || cost > state.gold) continue;
-    if (copiesOwned(minion, state) > 0) continue;
+    if (copiesOwned(minion, state, deps.cards) > 0) continue;
     if (best === null || sale - cost > best.sale - best.cost) best = { minion, cost, sale };
   }
   if (best === null) return null;
@@ -4582,7 +4649,7 @@ export function sellForGoldRule(
     }
     // Копия, из которой собирается тройка, не продаётся: тройка стоит
     // больше любого обещания текста, и вторая копия — ставка на неё.
-    return copiesOwned(m, state) === 0;
+    return copiesOwned(m, state, deps.cards) === 0;
   });
   if (sellable.length === 0) return null;
 
@@ -9653,7 +9720,7 @@ function sellCandidateIds(
   if (victim !== null) ids.add(victim.minion.entityId);
   for (const m of state.board) {
     const text = deps.cards.info(m.cardId)?.text ?? '';
-    if (text === '' || copiesOwned(m, state) > 0) continue;
+    if (text === '' || copiesOwned(m, state, deps.cards) > 0) continue;
     if (rules.sellValueWords.some((w) => new RegExp(w, 'i').test(text))) ids.add(m.entityId);
   }
   return ids;

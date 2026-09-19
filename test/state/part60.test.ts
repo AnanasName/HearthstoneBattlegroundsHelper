@@ -1,6 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { adviseTavern, minionValue, type Recommendation } from '../../src/advisors/tavern/advisor.js';
+import {
+  adviseTavern,
+  copiesOwned,
+  minionValue,
+  tripleMergeOf,
+  type Recommendation,
+} from '../../src/advisors/tavern/advisor.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
@@ -275,5 +281,36 @@ describe('part60: Varden — заморозка силы, плательщики
     expect(top?.reason).toContain('принесёт 2 карт.');
     const kelp = boardOf(t33, 'Kelp Keeper');
     expect(minionValue(kelp, t33, { cards }).activation).toBeGreaterThan(500);
+  });
+
+  /**
+   * Elemental of Surprise `BG26_175`: «This minion can triple with any
+   * Elemental». 15:01:04 — две Unbound Tempest и купленный джокер ушли
+   * в SETASIDE, в руку пришла золотая Tempest 6/24 плюс прибавки ОБЕИХ
+   * Tempest (1206/1269, затем 2489/2616); прибавка джокера в неё не вошла
+   * (D268). План прежде покупал джокера телом, продавая Air Revenant.
+   */
+  it('ход 29: Elemental of Surprise собирает тройку с парой Unbound Tempest (D268)', () => {
+    const state = decisionPoint(29);
+    const plan = spendPlan(state, { cards });
+    const buy = plan.steps.find((s) => s.recommendation.minion?.cardId === 'BG26_175')?.recommendation;
+    expect(buy?.action).toBe('buy');
+    expect(buy?.reason).toContain('собирает тройку');
+    expect(buy?.sellFirst).toBeNull();
+    expect(buy?.tripleMerge?.golden.cardId).toBe('BG36_352_G');
+
+    // На самой точке решения: джокер из витрины и пара на борде.
+    const joker = state.shop.find((m) => m.cardId === 'BG26_175');
+    expect(joker).toBeDefined();
+    expect(copiesOwned(joker!, state, cards)).toBe(2);
+    const merge = tripleMergeOf(joker!, state, cards);
+    const tempests = state.board.filter((m) => m.cardId === 'BG36_352');
+    expect(tempests).toHaveLength(2);
+    expect([...(merge?.consumed ?? [])].sort()).toEqual(tempests.map((m) => m.entityId).sort());
+    // Золотой — база 6/24 плюс прибавки двух Tempest, без прибавки джокера.
+    const bonus = (pick: (m: Minion) => number, base: number): number =>
+      tempests.reduce((sum, m) => sum + pick(m) - base, 0);
+    expect(merge?.golden.attack).toBe(6 + bonus((m) => m.attack ?? 0, 3));
+    expect(merge?.golden.health).toBe(24 + bonus((m) => m.health ?? 0, 12));
   });
 });
