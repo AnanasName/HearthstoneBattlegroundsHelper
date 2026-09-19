@@ -102,6 +102,7 @@ function spendsGold(action: PlayerAction): boolean {
     action.type === 'levelUp' ||
     action.type === 'roll' ||
     action.type === 'freeze' ||
+    action.type === 'unfreeze' ||
     action.type === 'darkGift' ||
     action.type === 'heroPower' ||
     action.type === 'activate'

@@ -71,6 +71,21 @@ describe('part60: Varden — заморозка силы, плательщики
     return found!;
   };
 
+  /**
+   * Кнопка заморозки одна на оба направления, и блок PLAY у них одинаковый;
+   * различает их витрина внутри блока: 14:35:34 — `FROZEN value=1` трём
+   * картам (четвёртую уже держала сила Varden), 14:35:35 — `value=0` всем
+   * четырём. Игрок жал «заморозить всё + снять всё» ради пары силы.
+   */
+  it('журнал различает заморозку и её снятие: 14 из 16 нажатий — пары', () => {
+    const presses = final.actions
+      .filter((a) => a.type === 'freeze' || a.type === 'unfreeze')
+      .map((a) => `${String(a.turn)}${a.type === 'freeze' ? '+' : '-'}`);
+    expect(presses).toEqual([
+      '1+', '1-', '3+', '3-', '11+', '13+', '13-', '15+', '15-', '21+', '21-', '23+', '23-', '27+', '27-', '33+',
+    ]);
+  });
+
   it('партия целая: один матч Battlegrounds, доигранный до конца, 1-е место', () => {
     expect(text.match(/GameType=GT_BATTLEGROUNDS/g)).toHaveLength(1);
     expect(text.includes('GameType=GT_RANKED')).toBe(false);

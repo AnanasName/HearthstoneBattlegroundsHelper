@@ -294,6 +294,11 @@ export function createReducer(players: Players): Reducer {
    */
   const actions: PlayerAction[] = [];
   const journaledBlocks = new WeakSet<BlockContext>();
+  /**
+   * Блок нажатия заморозки → номер его записи в журнале. Направление видно
+   * только внутри блока: снятие ставит витрине `FROZEN value=0` (part60).
+   */
+  const freezePresses = new WeakMap<BlockContext, number>();
 
   const journal = (
     block: BlockContext,
@@ -910,10 +915,20 @@ export function createReducer(players: Players): Reducer {
       } else if (TECH_UP_BUTTON_RE.test(pressed.cardId)) {
         journal(block, 'levelUp', null, null);
       } else if (pressed.cardId === LOCK_ALL_BUTTON) {
+        if (!journaledBlocks.has(block)) freezePresses.set(block, actions.length);
         journal(block, 'freeze', null, null);
       } else {
         // Розыгрыш из руки — та же зона на открытии блока, что и у активации.
         if (zoneAtPress === 'HAND') journal(block, 'play', pressed.cardId, pressed.id);
+      }
+    }
+
+    // Заморозка, оказавшаяся СНЯТИЕМ: витрина оттаивает внутри блока кнопки.
+    if (content.includes('tag=FROZEN value=0')) {
+      for (const block of event.blocks) {
+        const index = freezePresses.get(block);
+        const pressed = index === undefined ? undefined : actions[index];
+        if (index !== undefined && pressed?.type === 'freeze') actions[index] = { ...pressed, type: 'unfreeze' };
       }
     }
 

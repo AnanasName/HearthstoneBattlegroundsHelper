@@ -43,7 +43,9 @@ describe('журнал действий (part17)', () => {
       sell: 46,
       roll: 27,
       levelUp: 4,
-      freeze: 5,
+      // Пять нажатий кнопки: четыре заморозки и одно снятие (FROZEN=0 в блоке).
+      freeze: 4,
+      unfreeze: 1,
       play: 86,
       activate: 12,
       darkGift: 3,
