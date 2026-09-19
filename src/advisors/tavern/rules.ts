@@ -197,6 +197,18 @@ export interface TavernRules {
    * слагаемого — значит не получить его никогда.
    */
   readonly sellValueWords: readonly string[];
+  /**
+   * Цена ПРОДАЖИ выше цены покупки при проигранном прошлом бое — «If you
+   * lost your last combat, this minion sells for 5 Gold» (Tortollan Blue
+   * Shell `BG24_018`). Группа — цена продажи.
+   *
+   * Купить за 3 и тут же продать за 5 — это +2 золота за ход, и игрок так
+   * делает постоянно: 37 продаж за 5 в 22 фикстурах, на ходу 13 part61 — две
+   * подряд, на которые куплены обновления. Советник оценивал её телом 3/6
+   * (12.5 очка) и перепродажи не видел вовсе (D263). Условие читается живым
+   * тегом урона прошлого боя (`GameState.lastCombatDamage`), а не текстом.
+   */
+  readonly lostCombatSellWords: readonly string[];
 
   /**
    * Признаки боевого эффекта в тексте карты.
@@ -787,6 +799,42 @@ export interface TavernRules {
    * по пулу, а не лучшее-из-N (оценка нижняя, как у «Get a random X»).
    */
   readonly discountRefreshWords: readonly string[];
+  /**
+   * Заклинание, которое ЗАМЕНЯЕТ витрину картами тиром выше, — «Replace all
+   * cards in the Tavern with ones of a Tier higher» (приз Evolving Tavern
+   * `BGS_Treasures_006` силы Tickatus, part61; тот же текст у заклинания
+   * витрины Ritual of Growth `BG28_812`).
+   *
+   * Разбор эффекта молчал — ни статов, ни золота, ни миньона в тексте, — и
+   * в part61 приз пролежал в руке с хода 15 до конца партии: на ходах 17
+   * и 19 при таверне 5 и 11–14 золота он дал бы витрину тиров 2–6, а совет
+   * его не называл ни разу (D262).
+   *
+   * Ценность — та же разница ТЕЛ, что у `discountRefreshWords`: лучшие
+   * покупки новой витрины на остаток золота против лучших покупок нынешней.
+   * Каждая карта витрины тира t сменяется картой тира t+1 — так читается
+   * текст, и так же ровно на единицу поднимает «Алчность Галакронда» (D201,
+   * part47, лог пяти нажатий). Сам розыгрыш в фикстурах не встречается ни
+   * разу — ни у приза, ни у Ritual of Growth: это чтение ТЕКСТА, не лога.
+   */
+  readonly tierUpRefreshWords: readonly string[];
+  /**
+   * Заклинание, чья польза — ПРИБАВКА К БУДУЩИМ картам на всю партию, а цены
+   * у нас нет: «Your Tavern spells give an extra +{0}/+{1} this game»
+   * (приз Crystallization), «The Tavern offers an extra minion with
+   * +{0}/+{1} this game» (приз New Recruit) — оба на выборе Prize Wall
+   * part61, ход 7. Тот же текст у ветвей Intrepid Botanist (Pristine Lilies
+   * «+1 Attack», Giant Dewdrop «+1 Health») и у Meditation — они молчат
+   * тоже; карты, где прибавка — лишь часть текста, шаблон не берёт.
+   *
+   * Общий разбор читал их числа как разовое усиление своего миньона и
+   * называл цель («+2 статов → на Aureate Laureate»), которой заклинание
+   * не касается вовсе — тот же класс, что Gem Day у `bloodGemWords`
+   * (part30). Цены нет, потому что нет замера: сколько заклинаний таверны
+   * игрок разыграет до конца партии, мы не считали, а лишний слот витрины
+   * меряется выбором, а не статами. Молчание честнее выдуманного числа (D261).
+   */
+  readonly unpricedFutureBonusWords: readonly string[];
 
   /**
    * «Increase your maximum Gold by {0}» — ПРЕДЕЛ золота, а не разовая монета.
@@ -1841,6 +1889,9 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   economyTextWords: ['when you sell this', 'gain \\d+ gold', 'tavern coin'],
 
   sellValueWords: ['when you sell this'],
+  lostCombatSellWords: [
+    '\\bif\\s+you\\s+lost\\s+your\\s+last\\s+combat,\\s+this\\s+minion\\s+sells\\s+for\\s+(\\d+)\\s+gold\\b',
+  ],
 
   // Перенос строки в снапшоте ходит посреди предложения: «Deathrattle:
   // Summon⏎two 1/1 Skeletons» (Harmless Bonehead, part32) с пробелом
@@ -2001,6 +2052,16 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   // (там перенос строки). Группа — цена после обновления.
   discountRefreshWords: [
     '\\brefresh\\b[^.]*\\btavern\\b[^.]*\\bminions?\\b[^.]*\\.[^a-z]*they\\s+cost\\s+\\((\\d+)\\)',
+  ],
+  // Переносы строк посреди предложения (Ritual of Growth) — `\s+`.
+  tierUpRefreshWords: [
+    '\\breplace\\s+all\\s+cards\\s+in\\s+the\\s+tavern\\s+with\\s+ones\\s+of\\s+a\\s+tier\\s+higher\\b',
+  ],
+  // Только когда прибавка — ВЕСЬ текст: у Timewarped B.A.N.A.N.A.S. перед
+  // ней «Fill your hand with Tavern Dish Bananas», и бананы молчать не должны.
+  unpricedFutureBonusWords: [
+    '^(?:\\[x\\])?\\s*your\\s+tavern\\s+spells?\\s+give\\s+an\\s+extra\\s+[^.]*\\bthis\\s+game\\.?\\s*$',
+    '^(?:\\[x\\])?\\s*the\\s+tavern\\s+offers\\s+an\\s+extra\\s+minion\\s+with\\s+[^.]*\\bthis\\s+game\\.?\\s*$',
   ],
 
   // «Increase your maximum Gold by {0}.» (ветвь Collect the Bounty, part28)

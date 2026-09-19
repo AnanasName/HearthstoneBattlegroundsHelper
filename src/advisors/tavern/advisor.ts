@@ -4488,6 +4488,58 @@ export function sellRule(
 }
 
 /**
+ * Перепродажа с прибылью: купить миньона витрины и тут же продать дороже,
+ * — «If you lost your last combat, this minion sells for 5 Gold» (Tortollan
+ * Blue Shell, part61, ход 13, D263).
+ *
+ * Игрок делает это постоянно: 37 продаж за 5 в 22 фикстурах, на ходу 13
+ * part61 — две подряд, и четыре золотых ушли в обновления, которые нашли
+ * Blade Collector и третью Aureate Laureate. Советник видел в карте тело 3/6
+ * за 12.5 очка и перепродажи не называл.
+ *
+ * Условие — живой тег урона прошлого бою, а не догадка по исходу
+ * (`lastCombatDamage`): у ничьей урона нет, и тогда карта продаётся
+ * за обычный 1. Продают только с борда, поэтому нужен свободный слот. Шаг
+ * — та же прокрутка «купить-разыграть-продать»: цена — покупка, выручка —
+ * `grantsGold`, так что план знает и что золота на покупку должно хватить
+ * СНАЧАЛА, и что после шага его больше (D035, D042). Копию под тройку
+ * не перепродают — как и не прокручивают.
+ */
+export function lostCombatFlipRule(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  if (state.lastCombatDamage <= 0 || state.board.length >= rules.boardSize) return null;
+  let best: { minion: Minion; cost: number; sale: number } | null = null;
+  for (const minion of state.shop) {
+    const text = deps.cards.info(minion.cardId)?.text ?? '';
+    const hit = firstMatchAll(rules.lostCombatSellWords, text);
+    if (hit === null) continue;
+    const sale = Number(hit[1]);
+    const cost = buyCostOf(minion, rules);
+    if (!Number.isFinite(sale) || sale <= cost || cost > state.gold) continue;
+    if (copiesOwned(minion, state) > 0) continue;
+    if (best === null || sale - cost > best.sale - best.cost) best = { minion, cost, sale };
+  }
+  if (best === null) return null;
+  const profit = best.sale - best.cost;
+  const name = deps.cards.info(best.minion.cardId)?.name ?? best.minion.cardId;
+  return {
+    action: 'spin',
+    minion: best.minion,
+    score: profit * rules.goldPointValue,
+    cost: best.cost,
+    grantsGold: best.sale,
+    requiresSlot: true,
+    sellFirst: null,
+    reason:
+      `купить ${name} за ${String(best.cost)}, выложить и продать за ${String(best.sale)} ` +
+      `— прошлый бой проигран; +${String(profit)} золота`,
+  };
+}
+
+/**
  * Правило продажи карты, чья ценность РЕАЛИЗУЕТСЯ ПРОДАЖЕЙ.
  *
  * «When you sell this, get a random Tier 1 minion» (River Skipper),
@@ -9223,6 +9275,9 @@ function computeSpellEffect(
   // Проверка стоит ПОСЛЕ разбора ветвей: модальному миньону с одной
   // самоцветной ветвью вторая обязана остаться видимой.
   if (rules.bloodGemWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+  // Прибавка к БУДУЩИМ картам на всю партию (призы Crystallization и New
+  // Recruit, part61): числа не разовое усиление своего миньона, а цены нет.
+  if (rules.unpricedFutureBonusWords.some((w) => new RegExp(w, 'i').test(text))) return null;
 
   // «At the start of your next turn, give your minions +{0}/+{1} twice» —
   // ветвь Do It Later (Time Management, part51). Статы придут только
@@ -10021,6 +10076,9 @@ export function spellRules(
     // ни золота, ни миньона в тексте, и разбор эффекта вернул бы `null`.
     const discount = discountRefreshRule(spell, state, deps, rules);
     if (discount !== null) return [discount];
+    // Витрина тиром выше — приз Evolving Tavern (part61, D262).
+    const tierUp = tierUpRefreshRule(spell, state, deps, rules);
+    if (tierUp !== null) return [tierUp];
 
     // Бесплатные обновления из РУКИ — «Gain 2 free Refreshes» (Leaf Through
     // the Pages, part59, ход 15). У витрины ветка есть с part23 (D033),
@@ -10411,6 +10469,89 @@ export function discountRefreshRule(
       `${name} — обновление витрины ${filling}по ${String(price)}: ` +
       `на ${String(goldAfter)} золота покупок ${String(bodiesAfter)} ` +
       `(тело по пулу ≈ ${expected.toFixed(1)}) против ${String(bodiesNow)} по карману сейчас`,
+  };
+}
+
+/**
+ * Заклинание руки, которое ЗАМЕНЯЕТ витрину картами тиром выше, — «Replace
+ * all cards in the Tavern with ones of a Tier higher» (приз Evolving Tavern
+ * силы Tickatus, part61, D262).
+ *
+ * Счёт — форма `heroPowerUpgradeRule` (D201), только поднимается вся
+ * витрина, а не одна карта, и вместо выбора из трёх приходит СЛУЧАЙНАЯ
+ * карта: ожидание — среднее по пулу тира t+1 (`averagePoolValue`), а не
+ * лучшее из трёх. Лучшие покупки новой витрины на остаток золота минус
+ * лучшие покупки нынешней на всё золото; цена заклинания вычитается один
+ * раз — уменьшением бюджета (урок D201). Новые карты стоят обычную цену:
+ * тег скидки к новой сущности не относится. Карта верхнего тира, выше
+ * которого пула нет, остаётся как была.
+ *
+ * Что принесёт замена, решает игра, поэтому план после шага обрывается,
+ * как после обновления (`refreshesShop`).
+ */
+export function tierUpRefreshRule(
+  spell: HandSpell,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): Recommendation | null {
+  const info = deps.cards.info(spell.cardId);
+  const text = info?.text ?? '';
+  if (text === '') return null;
+  if (!rules.tierUpRefreshWords.some((w) => new RegExp(w, 'i').test(text))) return null;
+  if (spell.cost > state.gold || state.shop.length === 0) return null;
+  const goldAfter = state.gold - spell.cost;
+
+  // Лучшие по ценности, пока хватает золота, — одной функцией на «сейчас»
+  // и «после», иначе сравнивались бы числа с разной начинкой.
+  const bestBuys = (
+    offers: readonly { cost: number; value: number }[],
+    gold: number,
+  ): { value: number; spent: number; bodies: number } => {
+    let left = gold;
+    let value = 0;
+    let bodies = 0;
+    for (const offer of [...offers].sort((a, b) => b.value - a.value)) {
+      if (offer.cost > left || bodies >= rules.boardSize) continue;
+      left -= offer.cost;
+      value += offer.value;
+      bodies += 1;
+    }
+    return { value, spent: gold - left, bodies };
+  };
+
+  const now = bestBuys(
+    state.shop.map((m) => ({ cost: buyCostOf(m, rules), value: minionValue(m, state, deps, rules).total })),
+    state.gold,
+  );
+  const replaced = state.shop.map((m) => {
+    const tier = m.techLevel ?? state.techLevel;
+    const expected = averagePoolValue([tier + 1], state, deps, rules);
+    return expected === null
+      ? { cost: buyCostOf(m, rules), value: minionValue(m, state, deps, rules).total }
+      : { cost: rules.minionCost, value: expected };
+  });
+  const after = bestBuys(replaced, goldAfter);
+  const score = after.value - now.value;
+  if (score <= 0 || after.bodies === 0) return null;
+
+  const name = info?.name ?? spell.cardId;
+  const tiers = state.shop.map((m) => m.techLevel ?? state.techLevel);
+  return {
+    action: 'play',
+    minion: null,
+    spellCardId: spell.cardId,
+    score,
+    cost: spell.cost,
+    requiresSlot: false,
+    sellFirst: null,
+    refreshesShop: true,
+    refreshSpend: after.spent,
+    reason:
+      `${name} — витрина тиром выше (тиры ${String(Math.min(...tiers) + 1)}–` +
+      `${String(Math.max(...tiers) + 1)}): покупок ${String(after.bodies)} ` +
+      `на ${after.value.toFixed(1)} против ${String(now.bodies)} на ${now.value.toFixed(1)} ` +
+      'в нынешней — разыграть до покупок',
   };
 }
 
@@ -11446,6 +11587,31 @@ export function choiceAdvice(
     const name = info?.name ?? option.cardId;
 
     if (info === null || info.type !== 'MINION') {
+      // Взятое заклинание ложится в РУКУ бесплатным — part46, 23:10:10:
+      // Oil Rig из раскопки встал в руку с `COST=0`, хотя на варианте стояла
+      // цена витрины 3. Значит, и судится вариант ровно теми правилами, что
+      // та же карта в руке (D261): иначе выбор и рука говорили о ней разное.
+      // На выборе Prize Wall part61 (ход 7) The Good Stuff — «+{0}/+{1}
+      // minions in the Tavern this game» — выбор оценивал в 1 очко как
+      // разовое усиление, а рука в 7 как витринный бафф до конца партии
+      // (D176); Evolving Tavern на ходу 15 выбор не оценивал вовсе.
+      if (info !== null && (info.type?.includes('SPELL') ?? false)) {
+        const inHand: HandSpell = {
+          entityId: option.entityId,
+          cardId: option.cardId,
+          zonePos: state.handSpells.length + 1,
+          cost: 0,
+          scriptData: option.scriptData ?? [],
+          unplayable: false,
+          costsHealth: false,
+        };
+        const best = spellRules({ ...state, handSpells: [...state.handSpells, inHand] }, deps, rules)
+          .filter((r) => r.spellCardId === option.cardId)
+          .reduce<Recommendation | null>((a, r) => (a === null || r.score > a.score ? r : a), null);
+        if (best !== null) {
+          return { option, name, value: null, score: best.score, reason: `в руку бесплатно — ${best.reason}` };
+        }
+      }
       // Заклинание: оценка эффекта из текста и тегов варианта.
       const parsed =
         info !== null && (info.type?.includes('SPELL') ?? false)
@@ -11672,6 +11838,7 @@ export function adviseTavern(
     ...activationRules(state, deps, rules, buys),
     darkGiftRule(state, deps, rules),
     spinRule(state, deps, rules, buys),
+    lostCombatFlipRule(state, deps, rules),
     sellRule(state, deps, rules),
     sellForGoldRule(state, deps, rules),
     rerollRule(state, deps, rules),

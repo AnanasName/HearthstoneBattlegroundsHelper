@@ -744,6 +744,20 @@ export interface GameState {
   /** Выигран ли прошлый бой — тег `BACON_WON_LAST_COMBAT`. */
   readonly wonLastCombat: boolean | null;
   /**
+   * Урон, который герой получил в ПРОШЛОМ бою, — тег
+   * `DAMAGE_DEALT_TO_HERO_LAST_TURN` на своём игроке. Ноль — бой не проигран
+   * (выигран, ничья или боя ещё не было): тег сбрасывается в ноль в начале
+   * боя и получает урон в его конце, так что всю таверну держит исход
+   * прошлого боя.
+   *
+   * `wonLastCombat` этого не заменяет: `false` у него и у проигрыша,
+   * и у ничьей, а цена продажи Tortollan Blue Shell («If you lost your last
+   * combat, this minion sells for 5 Gold») различает именно их. Сверено
+   * по логам на всех 37 продажах Blue Shell в 22 фикстурах: продажа за 5 —
+   * ровно при уроне больше нуля, за 1 — при нуле (part34, part46; D263).
+   */
+  readonly lastCombatDamage: number;
+  /**
    * РЕЖИМ партии — строка `GameType=…` канала `DebugPrintGame` сразу после
    * CREATE_GAME (`GT_BATTLEGROUNDS`, `GT_RANKED`, `GT_CASUAL`…).
    *
@@ -954,6 +968,7 @@ export const EMPTY_STATE: GameState = {
   nextOpponentPlayerId: null,
   currentOpponentPlayerId: null,
   wonLastCombat: null,
+  lastCombatDamage: 0,
   gameType: null,
   altTavern: false,
   lastSeenBoards: {},

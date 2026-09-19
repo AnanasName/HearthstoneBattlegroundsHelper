@@ -446,6 +446,10 @@
    "BG35_MagicItem_838",
    "BG35_MagicItem_838t"
   ],
+  "lostCombatSellWords": [
+   "BG24_018",
+   "BG24_018_G"
+  ],
   "magnetDoubleWords": [],
   "magnetExtraTimesWords": [
    "BG36_506",
@@ -700,6 +704,10 @@
   "targetsFriendlyWords": 116,
   "tavernTriggerWords": 704,
   "temporaryBuffWords": 134,
+  "tierUpRefreshWords": [
+   "BG28_812",
+   "BGS_Treasures_006"
+  ],
   "tribeAttackThisGameWords": [
    "BG25_007",
    "BG25_007_G",
@@ -745,6 +753,16 @@
   "tripleRewardCoinWords": [
    "BG27_Anomaly_301",
    "BG34_HERO_002p"
+  ],
+  "unpricedFutureBonusWords": [
+   "BG32_237_Gt",
+   "BG32_237_Gt2",
+   "BG32_237t",
+   "BG32_237t2",
+   "BG32_835_Gt",
+   "BG32_835t",
+   "BGS_Treasures_033",
+   "BGS_Treasures_110"
   ],
   "untargetedSpellWords": 893
  }

@@ -21,6 +21,7 @@ import {
   heroPowerRule,
   heroPowerSpellRule,
   levelUpRule,
+  lostCombatFlipRule,
   lobbyRaces,
   magnetizeTarget,
   minionValue,
@@ -35,6 +36,7 @@ import {
   spellEffect,
   spellRules,
   spinRule,
+  tierUpRefreshRule,
   tribeMates,
   trinketAdvice,
   trinketForecast,
@@ -5090,5 +5092,101 @@ describe('ключевые слова и племя цели у заклинан
     expect(spellEffect(WINDFURY, [4], kwCards)?.targetRace).toBe('BEAST');
     // Усиление без племени в тексте цель не сужает.
     expect(spellEffect('S_BUFF', [2, 2], cards)?.targetRace ?? null).toBeNull();
+  });
+});
+
+// part61 (Tickatus): призы Prize Wall на выборе и в руке (D261, D262),
+// перепродажа Blue Shell после проигранного боя (D263).
+describe('призы Prize Wall и перепродажа Blue Shell (part61)', () => {
+  const p61Cards = createCardIndex([
+    { id: 'LOW_1', name: 'Слабый', type: 'Minion', techLevel: 1, races: [], isBaconPool: true, attack: 1, health: 1 },
+    { id: 'HIGH_2', name: 'Сильный', type: 'Minion', techLevel: 2, races: [], isBaconPool: true, attack: 9, health: 9 },
+    {
+      id: 'SHELL',
+      name: 'Tortollan Blue Shell',
+      type: 'Minion',
+      techLevel: 1,
+      races: [],
+      isBaconPool: true,
+      attack: 3,
+      health: 6,
+      text: 'If you lost your last combat, this minion sells for 5 Gold.',
+    },
+    { id: 'EVO', name: 'Evolving Tavern', type: 'Spell', text: 'Replace all cards in the Tavern with ones of a Tier higher.' },
+    { id: 'CRYSTAL', name: 'Crystallization', type: 'Spell', text: 'Your Tavern spells give an extra +{0}/+{1} this game.' },
+    { id: 'RECRUIT', name: 'New Recruit', type: 'Spell', text: 'The Tavern offers an extra minion with +{0}/+{1} this game.' },
+    { id: 'GOODSTUFF', name: 'The Good Stuff', type: 'Spell', text: 'Give minions in the Tavern +{0}/+{1} this game.' },
+  ]);
+  const p61Deps = { cards: p61Cards };
+  const low = (id: number): Minion => minion(id, { cardId: 'LOW_1', attack: 1, health: 1, maxHealth: 1, techLevel: 1 });
+  const shell = (id: number): Minion => minion(id, { cardId: 'SHELL', attack: 3, health: 6, maxHealth: 6, techLevel: 1 });
+  const evoInHand = { entityId: 90, cardId: 'EVO', zonePos: 1, cost: 0, scriptData: [], unplayable: false, costsHealth: false };
+
+  it('перепродажа: после проигранного боя купить за 3 и продать за 5', () => {
+    const s = state({ techLevel: 1, gold: 3, board: [low(1)], shop: [shell(10)], lastCombatDamage: 5 });
+    const rec = lostCombatFlipRule(s, p61Deps);
+    expect(rec?.action).toBe('spin');
+    expect(rec?.minion?.entityId).toBe(10);
+    expect(rec?.cost).toBe(3);
+    expect(rec?.grantsGold).toBe(5);
+    // План знает, что золота после шага БОЛЬШЕ: 4 − 3 + 5. На четырёх золотых
+    // без перепродажи покупается одно тело, с ней — два, и план начинает
+    // с неё. (Когда лишние два золота сгорают, перепродажа и покупка
+    // равны по шкале цепочки — +6 очков против шести сгоревших.)
+    const high = minion(11, { cardId: 'HIGH_2', attack: 9, health: 9, maxHealth: 9, techLevel: 2 });
+    const plan = spendPlan({ ...s, gold: 4, shop: [shell(10), high, low(12)] }, p61Deps);
+    expect(plan.steps[0]?.recommendation.action).toBe('spin');
+    expect(plan.steps[0]?.stateAfter.gold).toBe(6);
+    expect(plan.steps.map((st) => st.recommendation.minion?.cardId)).toEqual(['SHELL', 'HIGH_2', 'LOW_1']);
+  });
+
+  it('перепродажи нет после ничьей или победы, на полном борде и без золота на покупку', () => {
+    const base = { techLevel: 1, gold: 3, shop: [shell(10)] };
+    expect(lostCombatFlipRule(state({ ...base, board: [low(1)], lastCombatDamage: 0 }), p61Deps)).toBeNull();
+    const full = [1, 2, 3, 4, 5, 6, 7].map(low);
+    expect(lostCombatFlipRule(state({ ...base, board: full, lastCombatDamage: 5 }), p61Deps)).toBeNull();
+    expect(lostCombatFlipRule(state({ ...base, gold: 2, board: [low(1)], lastCombatDamage: 5 }), p61Deps)).toBeNull();
+  });
+
+  it('Evolving Tavern из руки: витрина тиром выше, пока новые тела лучше нынешних', () => {
+    const s = state({ techLevel: 1, gold: 6, board: [low(1)], shop: [low(10), low(11), low(12)], handSpells: [evoInHand] });
+    const rec = tierUpRefreshRule(evoInHand, s, p61Deps);
+    expect(rec?.action).toBe('play');
+    expect(rec?.refreshesShop).toBe(true);
+    expect(rec?.score ?? 0).toBeGreaterThan(0);
+    expect(spellRules(s, p61Deps).some((r) => r.spellCardId === 'EVO')).toBe(true);
+  });
+
+  it('Evolving Tavern молчит, когда покупать нечем', () => {
+    const s = state({ techLevel: 1, gold: 0, board: [low(1)], shop: [low(10)], handSpells: [evoInHand] });
+    expect(tierUpRefreshRule(evoInHand, s, p61Deps)).toBeNull();
+  });
+
+  it('прибавка к будущим картам на партию не читается разовым усилением своего миньона', () => {
+    expect(spellEffect('CRYSTAL', [1, 1], p61Cards)).toBeNull();
+    expect(spellEffect('RECRUIT', [2, 2], p61Cards)).toBeNull();
+  });
+
+  it('вариант-заклинание выбора судится правилами руки: витринный бафф на партию, а не +2 статов', () => {
+    const s = state({
+      techLevel: 1,
+      gold: 6,
+      board: [low(1)],
+      shop: [low(10)],
+      openChoice: {
+        id: 2,
+        sourceCardId: 'SRC',
+        options: [
+          { entityId: 100, cardId: 'CRYSTAL', scriptData: [1, 1] },
+          { entityId: 101, cardId: 'GOODSTUFF', scriptData: [1, 1] },
+          { entityId: 102, cardId: 'RECRUIT', scriptData: [2, 2] },
+        ],
+      },
+    });
+    const advice = choiceAdvice(s, p61Deps);
+    expect(advice[0]?.name).toBe('The Good Stuff');
+    expect(advice[0]?.reason).toContain('до конца партии');
+    expect(advice.find((a) => a.name === 'Crystallization')?.score).toBeNull();
+    expect(advice.find((a) => a.name === 'New Recruit')?.score).toBeNull();
   });
 });

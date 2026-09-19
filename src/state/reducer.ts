@@ -228,6 +228,7 @@ export function createReducer(players: Players): Reducer {
   let nextOpponentPlayerId: number | null = null;
   let currentOpponentPlayerId: number | null = null;
   let wonLastCombat: boolean | null = null;
+  let lastCombatDamage = 0;
   let altTavern = false;
   let gameType: string | null = null;
   let maxTechLevel: number | null = null;
@@ -596,6 +597,9 @@ export function createReducer(players: Players): Reducer {
         return;
       case 'BACON_WON_LAST_COMBAT':
         if (subject.kind === 'self' && n !== null) wonLastCombat = n > 0;
+        return;
+      case 'DAMAGE_DEALT_TO_HERO_LAST_TURN':
+        if (subject.kind === 'self' && n !== null) lastCombatDamage = n;
         return;
       case 'BACON_ALT_TAVERN_IN_PROGRESS':
         // Тег партии, а не игрока: приходит на `GameEntity` блоком TRIGGER
@@ -1485,6 +1489,7 @@ export function createReducer(players: Players): Reducer {
       nextOpponentPlayerId,
       currentOpponentPlayerId,
       wonLastCombat,
+      lastCombatDamage,
       altTavern,
       gameType,
       lastSeenBoards: Object.fromEntries(lastSeenBoards),
