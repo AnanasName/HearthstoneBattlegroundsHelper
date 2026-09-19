@@ -59,13 +59,12 @@
  */
 import { readBattleEpisodes } from '../battle/episodes.js';
 import { createBattleSimulator } from '../battle/simulator.js';
-import { toBattleInfo, type BattleSetup } from '../battle/mapper.js';
-import { withSeededRandom } from '../position/rng.js';
+import type { BattleSetup } from '../battle/mapper.js';
 import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
 import { tavernTurnOf } from '../tavern/rules.js';
 import { EMPTY_GLOBAL_INFO, type GlobalInfo, type Minion } from '../../state/types.js';
 import { boardsOfTurn, loadFieldBoards } from './boards.js';
-import { DEFAULT_FIELD_STRENGTH_OPTIONS } from './strength.js';
+import { DEFAULT_FIELD_STRENGTH_OPTIONS, runFieldStrength } from './strength.js';
 
 const OPTIONS = DEFAULT_FIELD_STRENGTH_OPTIONS;
 
@@ -120,10 +119,11 @@ function main(): void {
       const field = boardsOfTurn(snapshot, tavernTurn, part);
       if (field.length < OPTIONS.minBoards) continue;
 
+      // Тот же счёт, что у рантайма (`runFieldStrength`): на этом держится
+      // подпись «как в рантайме» в отчёте о симметрии ниже.
       const strengthWith = (globalInfo: GlobalInfo): number => {
-        let sum = 0;
-        for (const opponent of field) {
-          const setup: BattleSetup = {
+        const setups = field.map(
+          (opponent): BattleSetup => ({
             turn: episode.turn,
             playerBoard: episode.playerBoard,
             playerHand: episode.playerHand,
@@ -134,14 +134,9 @@ function main(): void {
             globalInfo,
             playerTrinketDbfIds: episode.playerTrinketDbfIds,
             opponentTrinketDbfIds: opponent.trinketDbfIds,
-          };
-          const info = toBattleInfo(setup, OPTIONS.simulations);
-          const result = withSeededRandom(OPTIONS.seed, () =>
-            simulator.run(info, OPTIONS.simulations),
-          );
-          sum += result.wonPercent + result.tiedPercent / 2;
-        }
-        return sum / field.length;
+          }),
+        );
+        return runFieldStrength({ tavernTurn, setups }, { simulator }, null, OPTIONS).percent;
       };
       const strength = strengthWith(episode.globalInfo);
       const differs = JSON.stringify(episode.globalInfo) !== JSON.stringify(EMPTY_GLOBAL_INFO);
@@ -225,14 +220,14 @@ function main(): void {
       `обнулены свои ${brier('symmetric', points).toFixed(4)}`,
   );
   if (touched.length > 0) {
-    const shift = touched.reduce((s, p) => s + p.strength - p.symmetric, 0) / touched.length;
-    const actual = (touched.reduce((s, p) => s + p.actual, 0) / touched.length) * 100;
-    const mean = (key: 'strength' | 'symmetric'): number =>
+    const mean = (key: 'strength' | 'symmetric' | 'actual'): number =>
       touched.reduce((s, p) => s + p[key], 0) / touched.length;
+    const shift = mean('strength') - mean('symmetric');
     console.log(
       `  на затронутых: Brier ${brier('strength', touched).toFixed(4)} против ` +
         `${brier('symmetric', touched).toFixed(4)}; обещано ${mean('strength').toFixed(1)} % против ` +
-        `${mean('symmetric').toFixed(1)} %, фактически ${actual.toFixed(1)} %; сдвиг ${shift.toFixed(2)} п.п.`,
+        `${mean('symmetric').toFixed(1)} %, фактически ${(mean('actual') * 100).toFixed(1)} %; ` +
+        `сдвиг ${shift.toFixed(2)} п.п.`,
     );
     console.log(
       `  корреляция с фактом: как в рантайме ${correlation(strengths, actuals).toFixed(3)} | ` +
