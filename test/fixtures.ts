@@ -1337,3 +1337,37 @@ export function part60Game(): string {
 export function part61Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part61', 'game.log'), 'utf8');
 }
+
+/**
+ * part62 — Sire Denathrius `BG24_HERO_100`, 20.09.2026, 11:32–11:48,
+ * **5-е место**, 10 ходов таверны, билд 251952. Наги и квилбоары вокруг
+ * заклинаний: Fleeing Fugitive («Whenever you cast a spell on this, gain
+ * +N Health») в двух копиях, Lullabot под магниты, кровавые самоцветы
+ * от Razorfen Geomancer и Tusked Camper.
+ *
+ * Своя сессия клиента (11:30:54), ровно одна партия, доиграна до
+ * `FINAL_GAMEOVER`; вырезана `fixture:passport --game=1 --write=part62`
+ * сразу после партии, пока игрок начинал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **КВЕСТЫ силы героя** `BG24_HERO_100p` «Whodunit?» («At the start of
+ *     the game, choose one of two Quests»). Выбор приходит каналом
+ *     `DebugPrintEntityChoices` с `Source=[… cardId=BG24_QuestsPlayerEnch_t]`
+ *     (11:32:56, id=2, `ChoiceType=GENERAL`): «Наполнить котел»
+ *     `BG28_Quest_500` («Cast {0} spells», `QUEST_PROGRESS_TOTAL=12`,
+ *     награда `QUEST_REWARD_DATABASE_ID=97966` Kidnap Sack) против
+ *     «Реконструкции убийства» `BG24_Quest_124` («Have {0} friendly minions
+ *     die», 17, награда 89481 Evil Twin). Взят первый (11:33:21).
+ *     Прогресс — тег `QUEST_PROGRESS` на сущности квеста в зоне `SECRET`,
+ *     1…12; выполнен 11:44:04 (`BACON_QUEST_COMPLETED=1` на герое), после
+ *     чего Kidnap Sack лежит в руке заклинанием за 0.
+ *  2. **Заморозка ради лассо на нулевом золоте** (кадр 11:34, ход 3):
+ *     после подъёма в тир 2 золота 0, в витрине Enchanted Lasso `BG28_512`
+ *     за 2. Игрок заморозил витрину сам, а на ходу 5 купил на пять золота
+ *     лассо и Razorfen Geomancer — два тела. Советник молчал: планка
+ *     требовала с заклинания цену вытесненной покупки (6.75 против 6.93).
+ */
+export function part62Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part62', 'game.log'), 'utf8');
+}
