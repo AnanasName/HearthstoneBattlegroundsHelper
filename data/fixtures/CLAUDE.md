@@ -1057,3 +1057,25 @@ Shell: `BACON_SELL_VALUE` 1 в витрине и 5 в руке после про
 Sylvar, золотой Locked-up Mutineer, на ходу 19 — Brann и Bounties Sky Admiral
 Rogers. Бои: ничья, −3, три выигрыша (ходы 6–10), −5, −5, −15, −15, −15.
 Тест — `test/state/part61.test.ts`.
+`part63` — 20.09, Заводной Механо `BG24_HERO_204_SKIN_E`, **5-е место**,
+11 ходов таверны (12:08–12:27). Своя сессия клиента 12:07:22, ровно одна
+партия, доиграна, билд 251952; вырезана `fixture:passport --game=1
+--write=part63` сразу после партии, кадры игрока — 12:16, 12:18, 12:19
+(файлами не сохранены, разбор шёл срезами `fixture:at`). Демоны-пожиратели
+витрины: Insatiable Ur'zul `BG21_004` 4/6 → 69/75, Flaming Enforcer
+`BG34_500` 4/5 → 49/54, золотой Soul Rewinder 8/34, Devilish Distractor
+из тёмного дара. Фактура: пассивная сила «Усиляция» `BG24_HERO_204p`
+(«After the Tavern is Refreshed, give a random minion in it a random Bonus
+Keyword, twice») — блок `TRIGGER` с сущности id=121 внутри каждого
+обновления, тега `HAS_ACTIVATE_POWER` нет; тринкеты Cursed Crystal
+`BG35_MagicItem_150` («After the Tavern is Refreshed, give its minions
++{0}/+{1} this turn», ход 11) и Bloodfury Shield `BG36_MagicItem_830`
+(ход 17); награда за тройку хода 13 (12:16:39) — Sanguine Refiner /
+Tichondrius / Insatiable Ur'zul, все тира 5; Maw Caster `BG32_340`
+в витрине ходов 15 и 17 при нуле своей нежити; Shifting Tide `BG32_815`
+(`scriptData=[1,1]`) за 0 после клича Ominous Seer при наге на борде.
+На ходу 15 игрок крутил витрину четырежды и кормил Ур'зула через
+Methodical Madness `BG36_880` и розыгрыши демонов. Здоровье: 44 → 41
+к ходу 5 и без потерь до хода 13, затем −9 к ходу 15, −15 к ходу 19,
+−11 к ходу 21, добит на ходу 23.
+Тест — `test/state/part63.test.ts`.

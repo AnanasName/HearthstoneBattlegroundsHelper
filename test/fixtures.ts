@@ -1371,3 +1371,48 @@ export function part61Game(): string {
 export function part62Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part62', 'game.log'), 'utf8');
 }
+
+/**
+ * part63 — Заводной Механо `BG24_HERO_204_SKIN_E`, 20.09.2026, 12:08–12:27,
+ * **5-е место**, 11 ходов таверны, билд 251952. Демоны-пожиратели витрины:
+ * Insatiable Ur'zul вырос с 4/6 до 69/75, Flaming Enforcer — с 4/5 до 49/54.
+ *
+ * Своя сессия клиента (12:07:22), ровно одна партия, доиграна до
+ * `FINAL_GAMEOVER`; вырезана `fixture:passport --game=1 --write=part63`
+ * сразу после партии, пока игрок начинал следующую.
+ *
+ * Фактура:
+ *
+ *  1. **Пассивная сила «Усиляция»** `BG24_HERO_204p` («After the Tavern is
+ *     Refreshed, give a random minion in it a random Bonus Keyword, twice»):
+ *     тега `HAS_ACTIVATE_POWER` у неё нет, блок `TRIGGER` с её сущности
+ *     (id=121) приходит внутри каждого обновления витрины. Слова достаются
+ *     миньонам ВИТРИНЫ и видны в состоянии как обычные признаки — отдельным
+ *     правилом сила не читается (D271).
+ *  2. **Тринкет Cursed Crystal** `BG35_MagicItem_150` («After the Tavern is
+ *     Refreshed, give its minions +{0}/+{1} this turn», взят на ходу 11):
+ *     витрина пухнет с каждым обновлением, и пожиратели едят уже раздутые
+ *     тела. Его блок `TRIGGER` (id=404) идёт в том же обновлении, что и блок
+ *     силы героя.
+ *  3. **Поглощение витрины ТРИГГЕРОМ** (D271): Insatiable Ur'zul `BG21_004`
+ *     («After you play a Demon, consume a random minion in the Tavern to gain
+ *     its stats») и Flaming Enforcer `BG34_500` («At the end of your turn,
+ *     consume the highest-Health minion in the Tavern to gain its stats»).
+ *     Рост Ур'зула по логу: 4 → 9 (12:18:31) → 19 (Methodical Madness,
+ *     12:18:41) → 27 → 38 (розыгрыш Flaming Enforcer, 12:18:52) → 52
+ *     (розыгрыш Ominous Seer, 12:19:06) → 69.
+ *  4. **Награда за тройку** (ход 13, 12:16:39): Sanguine Refiner /
+ *     Tichondrius / Insatiable Ur'zul, все тира 5. Кадр игрока 12:16 —
+ *     жалоба №2: свинобраз и демон стоили одинаково (19.5), хотя демонов
+ *     на борде трое, а свинобраз один.
+ *  5. **Maw Caster** `BG32_340` в витрине хода 15 («Battlecry: Destroy
+ *     a friendly Undead to Discover an Undead») при нуле своей нежити —
+ *     кадр 12:18, жалоба №3.
+ *  6. **Shifting Tide** `BG32_815` («Give a minion +{0}/+{1} twice. If it's
+ *     a Naga, repeat this», `scriptData=[1,1]`) в витрине хода 15 за 0
+ *     после клича Ominous Seer — кадр 12:19, жалоба №4: на борде была нага
+ *     (Ominous Seer), а план целил в Insatiable Ur'zul.
+ */
+export function part63Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part63', 'game.log'), 'utf8');
+}
