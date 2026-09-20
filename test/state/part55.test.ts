@@ -270,8 +270,21 @@ describe('part55: Юдора, раскопки золотых и пираты', 
     expect(plan7).toContain('heroPower');
 
     const plan9 = spendPlan(decisionPoint(9), { cards }).steps.map((s) => s.recommendation);
-    expect(plan9.map((r) => r.action)).toEqual(['heroPower', 'levelUp', 'play', 'buy']);
+    // Проверяется ТРАТА золота, ради которой пункт и записан: четыре шага
+    // подряд и заклинание в конце. С 20.09 план кончается пятым шагом —
+    // бесплатной заморозкой ради прокрутки Patient Scout (D270 убрал из
+    // планки цену вытесненной покупки). Заморозка золота не двигает и
+    // в предел плана не идёт (D250), поэтому сверяется ПРЕФИКС, а не
+    // длина: удержит ли она витрину на пользу — вопрос батареи, и гейт
+    // «в ход подъёма молчать» проверен и отвергнут (он убивает part25).
+    expect(plan9.slice(0, 4).map((r) => r.action)).toEqual([
+      'heroPower',
+      'levelUp',
+      'play',
+      'buy',
+    ]);
     expect(plan9[3]?.spellCardId).toBe('BG34_330');
+    expect(plan9.slice(4).every((r) => r.cost === 0)).toBe(true);
   });
 
   it('план берёт силу, когда золото иначе остаётся: ходы 5 и 9', () => {

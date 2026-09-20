@@ -117,10 +117,21 @@ describe('part29: сила героя с целью, цена в здоровь�
     // 3/3 голое тело — и в бою походник дороже.
     expect(shot?.reason).toContain('в бою он стоит');
 
-    // И это первая строка совета: остальное на нулевом золоте молчит.
+    // Ход открывается этой силой, и на нулевом золоте кроме неё платного
+    // нет. Но БЕСПЛАТНОЕ есть, и с 20.09 его видно: планка заморозки ради
+    // заклинания перестала требовать с него цену вытесненной покупки
+    // (part62, ход 3), и та же витрина с лассо за 2 теперь держится. Это
+    // не спор с жалобой пункта 1, а её продолжение: игрок в этой же точке
+    // нажал силу И заморозил витрину (01:10:13), и оба действия бесплатны,
+    // то есть друг друга не отменяют. Проверяется поэтому не номер строки,
+    // а то, что сила названа и стоит в плане ПЕРВОЙ.
     const advice = adviseTavern(s, { cards });
-    expect(advice?.recommendations[0]?.action).toBe('heroPower');
-    expect(advice?.recommendations[0]?.minion?.cardId).toBe('BG33_886');
+    const power = advice?.recommendations.find((r) => r.action === 'heroPower');
+    expect(power?.minion?.cardId).toBe('BG33_886');
+
+    const plan = spendPlan(s, { cards });
+    expect(plan.steps.map((x) => x.recommendation.action)).toEqual(['heroPower', 'freeze']);
+    expect(plan.steps[0]?.recommendation.minion?.cardId).toBe('BG33_886');
   });
 
   it('пункт 1: без свободного слота и после нажатия совет молчит', () => {

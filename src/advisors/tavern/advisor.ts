@@ -4309,13 +4309,19 @@ function sellSpinValue(
   deps: TavernAdvisorDeps,
   rules: TavernRules,
   spendNow: boolean,
-): { readonly score: number; readonly net: number; readonly tier: number | null } | null {
+): {
+  readonly score: number;
+  /** То же ожидание БЕЗ скидки за цену — планке заморозки нужно голое. */
+  readonly average: number;
+  readonly net: number;
+  readonly tier: number | null;
+} | null {
   const text = deps.cards.info(minion.cardId)?.text ?? '';
   if (text === '' || spinKindOf(text, rules) !== 'sell') return null;
 
   const net = buyCostOf(minion, rules) - rules.sellGold;
   const tiered = namedTierPool(text, state, deps, rules);
-  const { score } = givesMinionValue(
+  const { score, average } = givesMinionValue(
     state,
     deps,
     rules,
@@ -4323,7 +4329,7 @@ function sellSpinValue(
     spendNow,
     tiered ?? state.shop,
   );
-  return { score, net, tier: tiered?.tier ?? null };
+  return { score, average, net, tier: tiered?.tier ?? null };
 }
 
 /**
@@ -5190,15 +5196,34 @@ export function freezeRule(
   // на втором тире не появляется — но по ЦЕНЕ, а не по подъёму (см. планку
   // ниже). Ветка в ход подъёма по-прежнему не отключается.
   //
-  // Планка складывается из двух слагаемых, и оба — ценности КАРТЫ, а не
-  // разности с чем-то другим:
+  // Планка — ОДНА ценность: окупить саму заморозку, потому что витрина
+  // следующего хода будет старой, а не свежей.
   //
-  //  1. заклинание тратит золото ТОГО ЖЕ хода, что и покупка, поэтому обязано
-  //     перебить обычную покупку — «свежую карту своего тира». Разница в цене
-  //     у него уже учтена: `givesMinionValue` переводит её в очки курсом
-  //     `goldPointValue`, в обе стороны;
-  //  2. и сверх того — окупить саму заморозку: витрина следующего хода будет
-  //     старой, а не свежей.
+  // Прежде слагаемых было два, и первым стояла целая «свежая карта своего
+  // тира»: считалось, что заклинание тратит золото ТОГО ЖЕ хода, что
+  // и покупка, а значит обязано покупку перебить. Слагаемое снято 20.09
+  // (part62, ход 3, жалоба игрока «почему не советует заморозить карту,
+  // которая даёт использовать золото следующего хода полностью»), и снято
+  // не по вкусу, а потому что внутри этой ветки покупка НЕ ВЫТЕСНЯЕТСЯ —
+  // это следует из её же гейта. Пусть цена заклинания `c`, цена миньона `m`,
+  // золото хода `G`; гейт по цене оставляет только `c < m`, и тогда
+  // `⌊(G−c)/m⌋` равно либо `⌊G/m⌋`, либо `⌊G/m⌋−1`. Условие `addsExtraBody`
+  // («тел с предложением больше, чем без него») — это `1+⌊(G−c)/m⌋ > ⌊G/m⌋`,
+  // то есть РОВНО первый случай: покупок в обоих будущих поровну. Заклинание
+  // платится золотом, которому без него не на что уйти, и требовать с него
+  // цену покупки значило считать покупку дважды.
+  //
+  // По той же причине снята и прибавка «дешевле покупки на `m−c`»: курс
+  // `goldPointValue` переводит в очки СЭКОНОМЛЕННОЕ золото, а тут ничего
+  // не экономится — тратится сгорающее. Обе стороны теперь голые: слева
+  // ожидание от тела (`average`, без скидки), справа — цена заморозки.
+  //
+  // Что мешало заметить: на part23 (ход 11, тир 4) ветку держит НЕ планка,
+  // а всё тот же `addsExtraBody` — там девять золота, три покупки и с
+  // Recruit a Trainee, и без него. Проверено отладкой 20.09: карта отсеивается
+  // строкой «лишнего тела нет», планки не достигая. Тест той жалобы
+  // (`test/state/part23.test.ts`, «витрина четвёртого тира не морозится ради
+  // тела первого») правку переживает.
   //
   // Прежде первого слагаемого не было вовсе, и заклинание сравнивалось
   // с одной лишь разностью. Числа при этом были РАЗНОЙ НАЧИНКИ: «свежая
@@ -5304,7 +5329,7 @@ export function freezeRule(
       const kept = survivors[i];
       return kept === undefined ? 0 : Math.max(0, freshValue - kept.value);
     }).reduce((sum, x) => sum + x, 0);
-    const bar = freshValue + keptShortfall;
+    const bar = keptShortfall;
     thresholdByPurchases.set(purchases, bar);
     return bar;
   };
@@ -5404,10 +5429,12 @@ export function freezeRule(
             const pool =
               tiered ??
               (stealsFromShop ? valued.slice(purchases).map((v) => v.minion) : state.shop);
-            const { score } = givesMinionValue(state, deps, rules, spell.cost, false, pool);
+            // Голое ожидание от тела, без скидки за цену: сгорающее золото
+            // ничего не экономит (см. разбор планки выше).
+            const { average } = givesMinionValue(state, deps, rules, spell.cost, false, pool);
             const bar = spellThresholdOf(purchases);
-            return score > bar
-              ? [{ spell, score: score - bar, bothOn: turnAffordingBoth(spell.cost) }]
+            return average > bar
+              ? [{ spell, score: average - bar, bothOn: turnAffordingBoth(spell.cost) }]
               : [];
           })
           .sort((a, b) => b.score - a.score)[0];
@@ -5427,6 +5454,17 @@ export function freezeRule(
   // и тот же вопрос: стоит ли витрина того, чтобы держать её ради
   // предложения дешевле покупки. Полный борд её так же выключает —
   // прокручивать некуда.
+  //
+  // Ход ПОДЪЁМА таверны её НЕ выключает, и это проверено попыткой обратного
+  // (20.09). После снятия лишнего слагаемого планки (D270) план part55
+  // (ход 9) дорос пятым шагом «заморозить Patient Scout 1/1» — витрина там
+  // только что поднята до третьего тира, и выглядело это как случай D085
+  // («менять тир витрины на карту старого тира»). Гейт по `justLevelled`
+  // убил ОСНОВНОЙ случай ветки: part25 (ход 3) — тот же ход подъёма, тот же
+  // нулевой остаток, и заморозку River Skipper игрок там сделал сам.
+  // Тир держателя тоже не различает: Skipper — тир 1 при таверне 2,
+  // Patient Scout — тир 2 при таверне 3. Различителя нет, и выдумывать его
+  // вместо замера нельзя; пятый шаг part55 оставлен батарее.
   const spinKeeper =
     state.board.length >= rules.boardSize
       ? undefined
@@ -5444,7 +5482,9 @@ export function freezeRule(
             if (!addsExtraBody(spun.net)) return [];
             // Покупок сверх самой цепочки: её чистая цена уже вычтена.
             const bar = spellThresholdOf(purchasesAfter(spun.net));
-            return spun.score > bar ? [{ minion: v.minion, spun, score: spun.score - bar }] : [];
+            return spun.average > bar
+              ? [{ minion: v.minion, spun, score: spun.average - bar }]
+              : [];
           })
           .sort((a, b) => b.score - a.score)[0];
 
