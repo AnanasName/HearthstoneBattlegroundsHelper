@@ -406,6 +406,21 @@ export interface TavernRules {
   readonly tribeRecipientWords: readonly string[];
 
   /**
+   * Племя, которым карта ПЛАТИТ: «Destroy a friendly Undead to Discover
+   * an Undead» (D272, part63). Тот же вопрос, что у `tribeRecipientWords`,
+   * с другой стороны: там племя получает, здесь — гибнет, и без своих
+   * этого племени текст не срабатывает вовсе.
+   */
+  readonly tribeSacrificeWords: readonly string[];
+
+  /**
+   * Племя, на котором эффект заклинания ПОВТОРЯЕТСЯ (D273, part63):
+   * «Give a minion +{0}/+{1} twice. If it's a Naga, repeat this». Цель
+   * не сужается — удваивается прибавка, и выбор цели считает это числом.
+   */
+  readonly repeatOnRaceWords: readonly string[];
+
+  /**
    * Признаки текста, при которых племя-получатель надбавку за тир СОХРАНЯЕТ
    * даже без носителей: карта окупается не соседями по бою, а таверной
    * или собой. Вместе с ними действуют `tavernTriggerWords` (розыгрыш,
@@ -900,6 +915,40 @@ export interface TavernRules {
   readonly consumeTavernWords: readonly string[];
   /** Золотая версия удваивает съеденное: «gain double its stats». */
   readonly doubleStatsWords: readonly string[];
+
+  /**
+   * Поглощение витрины ТРИГГЕРОМ — тот же эффект, что у активации D034,
+   * но жать его не надо: он срабатывает сам (D271, part63).
+   *
+   * Голова у каждой формы своя, и от неё зависит ЧАСТОТА:
+   *
+   *  * `play` — «After you play a Demon…»: столько раз, сколько карт племени
+   *    игрок разыгрывает за ход таверны (`tribePlaysPerTurn`, та же мерка,
+   *    что у плательщиков D259);
+   *  * `endOfTurn` — «At the end of your turn…»: раз за ход;
+   *  * `eachEndOfTurn` — «…your Demons each consume…»: раз за ход, но едоков
+   *    столько, сколько своих названного племени;
+   *  * `battlecry` — однократно, при розыгрыше; у своего миньона борда клич
+   *    уже отыграл и в ценность удержания не входит.
+   *
+   * Зачем вообще: на part63 вся партия держалась на двух таких текстах
+   * (Insatiable Ur'zul вырос до 69/75, Flaming Enforcer — до 49/54), а
+   * в ценности они стоили ноль — тир и статы, как у ванильного тела.
+   */
+  readonly tavernEaterWords: {
+    readonly play: readonly string[];
+    readonly endOfTurn: readonly string[];
+    readonly eachEndOfTurn: readonly string[];
+    readonly battlecry: readonly string[];
+  };
+
+  /**
+   * Заклинание, которым СВОЙ миньон съедает витрину (D271): «Choose
+   * a friendly Demon. It consumes 2 random Tavern minions to gain their
+   * stats». Плюсов в тексте нет, и до правила такие карты были невидимы
+   * целиком — на part63 (ход 15) ровно ею игрок удвоил Ур'зула.
+   */
+  readonly spellConsumeWords: readonly string[];
 
   /**
    * «Задать статы»: «Activate ({0}): Set another minion's stats to {1}/{2}»
@@ -2010,6 +2059,56 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   ],
   doubleStatsWords: ['\\bdouble\\s+(?:its|their)\\s+stats\\b'],
 
+  // Поглощение витрины ТРИГГЕРОМ, а не активацией (D271, part63). Головы
+  // разные, съедаемое одно: «consume … minion(s) in the Tavern». Группы —
+  // `count` (сколько тел за срабатывание), `highest` (ест самого здорового,
+  // а не случайного), `double` (золотая версия).
+  tavernEaterWords: {
+    // «After you play a Demon, consume a random minion in the Tavern to gain
+    // its stats» (Insatiable Ur'zul `BG21_004`).
+    play: [
+      '\\bafter\\s+you\\s+play\\s+an?\\s+{tribe}\\s*,\\s*consumes?\\s+(?<count>a|an|\\d+)\\s+' +
+        'random\\s+minions?\\s+in\\s+the\\s+tavern\\s+to\\s+gain\\s+(?<double>double\\s+)?' +
+        '(?:its|their)\\s+stats',
+    ],
+    // «At the end of your turn, consume the highest-Health minion in the
+    // Tavern to gain its stats» (Flaming Enforcer `BG34_500`), «…consume
+    // a minion in the Tavern…» (False Implicator `BG29_140`). Дефис
+    // с пробелом — след переноса строки в снапшоте (D198).
+    endOfTurn: [
+      '\\bat\\s+the\\s+end\\s+of\\s+your\\s+turn\\s*,\\s*consumes?\\s+' +
+        '(?:the\\s+(?<highest>highest-\\s*health)|an?)\\s+minion\\s+in\\s+the\\s+tavern\\s+' +
+        'to\\s+gain\\s+(?<double>double\\s+)?its\\s+stats',
+    ],
+    // «At the end of your turn, your Demons each consume a minion in the
+    // Tavern to gain its stats» (Famished Felbat `BG21_005`): едоков столько,
+    // сколько своих названного племени, — как у активации D034.
+    eachEndOfTurn: [
+      '\\bat\\s+the\\s+end\\s+of\\s+your\\s+turn\\s*,\\s*your\\s+{tribe}\\s+each\\s+consumes?\\s+' +
+        'an?\\s+minion\\s+in\\s+the\\s+tavern\\s+to\\s+gain\\s+(?<double>double\\s+)?its\\s+stats',
+    ],
+    // «Battlecry: Consume a random minion in the Tavern to gain its stats»
+    // (Picky Eater `BG24_009`), «Battlecry: Consume 3 minions in the Tavern»
+    // (Peckish Feldrake `BG27_009` — у него обещания статов в тексте нет
+    // вовсе, и требовать его нельзя).
+    battlecry: [
+      '\\bbattlecry:(?:<\\/b>)?\\s*(?:<b>)?consumes?(?:<\\/b>)?\\s+(?<count>a|an|\\d+)\\s+' +
+        '(?:random\\s+)?minions?\\s+in\\s+the\\s+tavern\\b[^.]*?(?<double>double\\s+their\\s+stats)?',
+    ],
+  },
+
+  // ЗАКЛИНАНИЕ, которым свой миньон съедает витрину (D271): «Choose
+  // a friendly Demon. It consumes 2 random Tavern minions to gain their
+  // stats and Bonus Keywords» (Methodical Madness `BG36_880`), «…3 random
+  // minions in the Tavern…» (Corrupted Cupcakes `BG28_607`), «Choose
+  // a friendly minion…» (наклейка Demonblood Gourd). Группа `race` —
+  // племя получателя («minion» племенем не считается и даёт любого своего),
+  // `count` — сколько тел витрины съедается.
+  spellConsumeWords: [
+    '\\bchoose\\s+a\\s+friendly\\s+(?<race>[a-z]+)\\s*\\.?\\s*it\\s+consumes?\\s+' +
+      '(?<count>a|an|\\d+)\\s+(?:random\\s+)?(?:tavern\\s+minions?|minions?\\s+in\\s+the\\s+tavern)\\b',
+  ],
+
   // «Set another minion's stats to {1}/{2}.» (Тираэль). Апостроф в снапшоте
   // бывает и прямой, и типографский, между словами — разметка и переносы
   // (урок part16), поэтому `\s+` и класс апострофов.
@@ -2357,6 +2456,24 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   combatBoundMechanics: ['DEATHRATTLE', 'BACON_RALLY'],
 
   tribeRecipientWords: ['\\byour\\s+(?:other\\s+)?{tribe}\\b', '\\bfriendly\\s+{tribe}\\b'],
+
+  // ЖЕРТВА своего племени (D272, part63): «Destroy a friendly Undead to
+  // Discover an Undead» (Maw Caster `BG32_340`), «Consume a friendly Demon
+  // to gain its stats and 3 Gold» (Soul Devourer `BGS_059`), «Destroy
+  // a friendly Undead to get a plain copy of it» (Disguised Graverobber
+  // `BG28_303`). Пока своих этого племени нет, весь текст карты мёртв —
+  // и надбавка за тир вместе с ним.
+  tribeSacrificeWords: [
+    '\\b(?:destroy|consume|sacrifice)s?\\s+an?\\s+(?:other\\s+)?friendly\\s+{tribe}\\b',
+  ],
+
+  // «If it's a Naga, repeat this» (Shifting Tide `BG32_815`, D273): эффект
+  // на цели названного племени срабатывает ДВАЖДЫ. Слово «repeat»
+  // обязательно — «If it's a Naga, also give it Windfury» (Undersea Mount)
+  // статов не удваивает, это другое обещание.
+  repeatOnRaceWords: [
+    "\\bif\\s+it['’]?s\\s+an?\\s+{tribe}\\s*,\\s*repeat\\s+this\\b",
+  ],
 
   tribePremiumKeepWords: [
     '\\b(?:summon|get|discover)s?\\b',

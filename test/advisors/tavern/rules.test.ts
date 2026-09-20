@@ -1808,6 +1808,7 @@ describe('заклинания руки', () => {
       grantsReborn: false,
       grantsWindfury: false,
       targetRace: null,
+      repeatRace: null,
       untargeted: false,
       // Весь борд — только «Give your minions +X/+Y» (part51).
       boardWide: false,
@@ -1941,6 +1942,7 @@ describe('заклинания руки', () => {
       // это племя того, кому заклинание что-то ДАЁТ: «Give a Beast …».
       // У «Destroy a friendly Undead» такого адресата нет.
       targetRace: null,
+      repeatRace: null,
       untargeted: false,
       boardWide: false,
       boardCount: null,

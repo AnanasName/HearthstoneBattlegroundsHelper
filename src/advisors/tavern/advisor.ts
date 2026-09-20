@@ -441,6 +441,12 @@ export interface ValueBreakdown {
    * УДЕРЖАНИЕ: остаётся и в `ownValue`.
    */
   readonly playEngine: number;
+  /**
+   * Поглощение витрины ТРИГГЕРОМ (D271): статы, которые кандидат съест
+   * из витрины за ход таверны. Про УДЕРЖАНИЕ, как `playEngine`, — кроме
+   * клича, который отыгрывает один раз при розыгрыше.
+   */
+  readonly tavernEater: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1431,6 +1437,21 @@ function payoffTribesOf(cardId: string, cards: CardIndex, rules: TavernRules): r
   return memoByCard(PAYOFF_TRIBES_CACHE, cardId, cards, rules, () => {
     const text = cards.info(cardId)?.text ?? '';
     if (text === '') return [];
+
+    // ЖЕРТВА своего племени (D272, part63): «Battlecry: Destroy a friendly
+    // Undead to Discover an Undead» — без своей нежити клич не сработает
+    // вовсе, и защита «клич с добычей» тут неверна: добыча и есть то, что
+    // заперто жертвой. Поэтому такие племена возвращаются РАНЬШЕ проверки
+    // `kept` — иначе её слова («battlecry», «discover») гасили бы правило.
+    const sacrificed = Object.entries(rules.tribeTextWords)
+      .filter(([, word]) =>
+        rules.tribeSacrificeWords.some((w) =>
+          new RegExp(w.replace('{tribe}', `(?:${word})`), 'i').test(text),
+        ),
+      )
+      .map(([race]) => race);
+    if (sacrificed.length > 0) return sacrificed;
+
     const tribes = Object.entries(rules.tribeTextWords)
       .filter(([, word]) =>
         rules.tribeRecipientWords.some((w) =>
@@ -1567,6 +1588,10 @@ export function minionValue(
   // Сам кандидат — такой плательщик: число розыгрышей его племени за ход
   // таверны делает из текста цену удержания (D259, по образцу D184).
   const playEngine = playEngineValue(candidate, state, cards, rules);
+
+  // Поглощение витрины триггером (D271): тело растёт на статы съеденного,
+  // и все три множителя читаются — голова, витрина, журнал розыгрышей.
+  const tavernEater = tavernEaterValue(candidate, state, cards, rules);
 
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
@@ -1767,6 +1792,7 @@ export function minionValue(
     playPayoff,
     playPayers: playPay?.payers ?? [],
     playEngine,
+    tavernEater,
     total:
       tech +
       stats +
@@ -1788,7 +1814,8 @@ export function minionValue(
       battlecryPayoff +
       discoverPayoff +
       playPayoff +
-      playEngine,
+      playEngine +
+      tavernEater,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -2701,6 +2728,193 @@ function playPayoffNote(points: number, payers: readonly string[]): string {
 /** Причина к совету: сам кандидат платит за розыгрыши своего племени. */
 function playEngineNote(points: number): string {
   return `платит за розыгрыш своего племени — ${points.toFixed(1)} за ход`;
+}
+
+/**
+ * Поглощение витрины ТРИГГЕРОМ (D271): что съедает миньон и как часто.
+ * `null` — текст не про это. Ответ про карту, поэтому кэшируется по ней.
+ */
+interface TavernEaterText {
+  readonly trigger: 'play' | 'endOfTurn' | 'eachEndOfTurn' | 'battlecry';
+  /** Племя: у `play` — чей розыгрыш кормит, у `eachEndOfTurn` — кто ест. */
+  readonly race: string | null;
+  /** Сколько тел витрины за одно срабатывание (у `eachEndOfTurn` — по едоку). */
+  readonly meals: number;
+  /** Ест самого здорового, а не случайного. */
+  readonly highest: boolean;
+  /** Золотая версия: статы съеденного вдвое. */
+  readonly double: boolean;
+}
+
+const TAVERN_EATER_CACHE = new WeakMap<
+  TavernRules,
+  WeakMap<CardIndex, Map<string, TavernEaterText | null>>
+>();
+
+const EATER_MEAL_WORDS: Readonly<Record<string, number>> = { a: 1, an: 1 };
+
+function tavernEaterTextOf(
+  cardId: string,
+  cards: CardIndex,
+  rules: TavernRules,
+): TavernEaterText | null {
+  return memoByCard(TAVERN_EATER_CACHE, cardId, cards, rules, (): TavernEaterText | null => {
+    const text = cards.info(cardId)?.text ?? '';
+    if (!/\bconsume/i.test(text)) return null;
+
+    const read = (
+      trigger: TavernEaterText['trigger'],
+      pattern: string,
+      race: string | null,
+    ): TavernEaterText | null => {
+      const g = new RegExp(pattern, 'i').exec(text)?.groups;
+      if (g === undefined) return null;
+      const count = g['count'];
+      const meals =
+        count === undefined ? 1 : (EATER_MEAL_WORDS[count.toLowerCase()] ?? Number(count));
+      if (!Number.isFinite(meals) || meals <= 0) return null;
+      return {
+        trigger,
+        race,
+        meals,
+        highest: g['highest'] !== undefined,
+        double:
+          g['double'] !== undefined ||
+          rules.doubleStatsWords.some((w) => new RegExp(w, 'i').test(text)),
+      };
+    };
+
+    // Головы с племенем — по каждому племени таблицы, как у плательщиков.
+    for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+      for (const pattern of rules.tavernEaterWords.play) {
+        const found = read('play', pattern.replace('{tribe}', `(?:${tribe})`), race);
+        if (found !== null) return found;
+      }
+      for (const pattern of rules.tavernEaterWords.eachEndOfTurn) {
+        const found = read('eachEndOfTurn', pattern.replace('{tribe}', `(?:${tribe})`), race);
+        if (found !== null) return found;
+      }
+    }
+    for (const pattern of rules.tavernEaterWords.endOfTurn) {
+      const found = read('endOfTurn', pattern, null);
+      if (found !== null) return found;
+    }
+    for (const pattern of rules.tavernEaterWords.battlecry) {
+      const found = read('battlecry', pattern, null);
+      if (found !== null) return found;
+    }
+    return null;
+  });
+}
+
+/**
+ * Во что обходится ВИТРИНА пожирателю — в статах, по курсу `perStatPoint`.
+ *
+ * Оценка НИЖНЯЯ и от состояния, а не от коэффициента: съедаемое берётся
+ * из нынешней витрины (средний миньон у случайного выбора, самый здоровый
+ * у «highest-Health»), частота — из журнала своих розыгрышей (D259)
+ * или «раз за ход». Горизонт один ход таверны, как у `playEngineValue`:
+ * продажа отнимает все будущие срабатывания.
+ *
+ * Пустая витрина честно даёт ноль — съедаемого числа нет (D034).
+ */
+function tavernEaterValue(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const spec = tavernEaterTextOf(candidate.cardId, cards, rules);
+  if (spec === null || state.shop.length === 0) return 0;
+
+  // Клич отыгрывает ОДИН раз, при розыгрыше: у своего миньона борда он
+  // уже позади, и ценность удержания им не платят (как у `battlecryPayoff`).
+  const onBoard = state.board.some((m) => m.entityId === candidate.entityId);
+  if (spec.trigger === 'battlecry' && onBoard) return 0;
+
+  const rate =
+    spec.trigger === 'play' && spec.race !== null
+      ? tribePlaysPerTurn(state, spec.race, cards)
+      : 1;
+  if (rate <= 0) return 0;
+
+  const eaters =
+    spec.trigger === 'eachEndOfTurn' && spec.race !== null
+      ? boardMatesOfTribes(
+          [spec.race],
+          [...state.board.filter((m) => m.entityId !== candidate.entityId), candidate],
+          cards,
+        )
+      : spec.meals;
+  // Съесть можно только то, что в витрине есть (D034).
+  const meals = Math.min(eaters, state.shop.length);
+  if (meals <= 0) return 0;
+
+  const statsOf = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+  const top = highestHealthIn(state.shop);
+  const meal = spec.highest
+    ? (top === null ? 0 : statsOf(top))
+    : state.shop.reduce((sum, m) => sum + statsOf(m), 0) / state.shop.length;
+
+  return meals * meal * (spec.double ? 2 : 1) * rate * rules.value.perStatPoint;
+}
+
+/** Причина к совету: сколько статов кандидат съест из витрины. */
+function tavernEaterNote(points: number): string {
+  return `ест витрину — ${points.toFixed(1)} за ход таверны`;
+}
+
+/**
+ * Заклинание, которым СВОЙ миньон съедает витрину (D271): сколько статов
+ * и кому. `null` — текст не про это, витрина пуста или получателя нет.
+ *
+ * «Choose a friendly Demon. It consumes 2 random Tavern minions to gain
+ * their stats and Bonus Keywords» (Methodical Madness `BG36_880`),
+ * «…3 random minions in the Tavern…» (Corrupted Cupcakes `BG28_607`),
+ * «Choose a friendly minion…» (наклейка Demonblood Gourd) — там, где
+ * племя не названо, получателем годится любой свой.
+ *
+ * Получатель — КРУПНЕЙШИЙ свой подходящий: съеденное остаётся на нём
+ * навсегда, и то же правило выбирает цель у обычного усиления (D142).
+ */
+function spellConsumeGain(
+  text: string,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { readonly target: Minion; readonly stats: number } | null {
+  if (text === '' || state.shop.length === 0 || state.board.length === 0) return null;
+  for (const pattern of rules.spellConsumeWords) {
+    const g = new RegExp(pattern, 'i').exec(text)?.groups;
+    if (g === undefined) continue;
+    const count = g['count'];
+    const meals = count === undefined ? 1 : (EATER_MEAL_WORDS[count.toLowerCase()] ?? Number(count));
+    if (!Number.isFinite(meals) || meals <= 0) return null;
+
+    const race = raceOfWord(g['race'] ?? '', rules);
+    const pool =
+      race === null
+        ? state.board
+        : state.board.filter((m) => {
+            const theirs = racesOf(m, deps.cards);
+            return theirs.includes(race) || theirs.includes(RACE_ALL);
+          });
+    const target = pool.reduce<Minion | null>(
+      (best, m) =>
+        best === null || (m.attack ?? 0) + (m.health ?? 0) > (best.attack ?? 0) + (best.health ?? 0)
+          ? m
+          : best,
+      null,
+    );
+    if (target === null) return null;
+
+    const perCard =
+      state.shop.reduce((sum, m) => sum + (m.attack ?? 0) + (m.health ?? 0), 0) / state.shop.length;
+    const times = rules.doubleStatsWords.some((w) => new RegExp(w, 'i').test(text)) ? 2 : 1;
+    // Съесть можно только то, что в витрине есть (D034).
+    return { target, stats: Math.min(meals, state.shop.length) * perCard * times };
+  }
+  return null;
 }
 
 /**
@@ -3832,6 +4046,7 @@ export function buyRules(
       if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
       if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
       if (value.playEngine > 0) notes.push(playEngineNote(value.playEngine));
+      if (value.tavernEater > 0) notes.push(tavernEaterNote(value.tavernEater));
       if (value.heroPowerBuyLeft !== null && value.heroPowerBuyReward !== null) {
         notes.push(
           value.heroPowerBuyLeft === 0
@@ -8248,6 +8463,13 @@ export interface SpellEffect {
    */
   readonly targetRace: string | null;
   /**
+   * Племя, на котором эффект ПОВТОРЯЕТСЯ: «Give a minion +{0}/+{1} twice.
+   * If it's a Naga, repeat this» (Shifting Tide `BG32_815`, D273). В отличие
+   * от `targetRace` цель не сужается — меняется РАЗМЕР прибавки, и потому
+   * выбор цели обязан считать её первым числом, а не последним.
+   */
+  readonly repeatRace: string | null;
+  /**
    * Цель НЕ выбирается: игра распределяет эффект сама («of each type»,
    * «random», «left-most»). Совет с «→ на кого-то» показывал бы выбор,
    * которого у игрока нет (part15, ход 19: Misplaced Tea Set).
@@ -9530,6 +9752,8 @@ function computeSpellEffect(
 
   // Племя ЦЕЛИ — «Give a Beast …», «Give a friendly Elemental …».
   const targetRace = targetRaceOf(text, rules);
+  // Племя, на котором эффект ПОВТОРЯЕТСЯ (D273): «If it's a Naga, repeat this».
+  const repeatRace = repeatRaceOf(text, rules);
 
   // Статы ложатся на витрину, а не на наш борд, — Them Apples (part30).
   const buffsShop = rules.buffsShopWords.some((w) => new RegExp(w, 'i').test(text));
@@ -9623,6 +9847,7 @@ function computeSpellEffect(
     grantsReborn,
     grantsWindfury,
     targetRace,
+    repeatRace,
     untargeted,
     boardWide,
     boardCount,
@@ -9667,6 +9892,31 @@ function targetRaceOf(text: string, rules: TavernRules): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Племя, на котором эффект заклинания ПОВТОРЯЕТСЯ (D273, part63).
+ *
+ * «Give a minion +{0}/+{1} twice. If it's a Naga, repeat this» — на наге
+ * прибавка вдвое, и это не оттенок: при `scriptData=[1,1]` разница между
+ * +2/+2 и +4/+4 — вся ценность карты. Слово «repeat» обязательно: «If it's
+ * a Naga, also give it Windfury» (Undersea Mount) статов не удваивает.
+ */
+function repeatRaceOf(text: string, rules: TavernRules): string | null {
+  for (const [race, pattern] of Object.entries(rules.tribeTextWords)) {
+    for (const word of rules.repeatOnRaceWords) {
+      if (new RegExp(word.replace('{tribe}', `(?:${pattern})`), 'i').test(text)) return race;
+    }
+  }
+  return null;
+}
+
+/** Эффект НА ЭТОЙ ЦЕЛИ: удвоенный, если цель того племени (D273). */
+function repeatedOn(effect: SpellEffect, target: Minion | null, cards: CardIndex): SpellEffect {
+  if (effect.repeatRace === null || target === null) return effect;
+  const races = racesOf(target, cards);
+  if (!races.includes(effect.repeatRace) && !races.includes(RACE_ALL)) return effect;
+  return { ...effect, stats: effect.stats * 2, temporaryStats: effect.temporaryStats * 2 };
 }
 
 function shopBuffRaceOf(text: string, rules: TavernRules): string | null {
@@ -10030,6 +10280,23 @@ function spellTargetOn(
     }
   }
 
+  // ПЛЕМЯ ПОВТОРА (D273, part63): «Give a minion +{0}/+{1} twice. If it's
+  // a Naga, repeat this» — на наге прибавка вдвое. Это число, а не оттенок,
+  // и потому оно сужает пул раньше предпочтений формы: на кадре 12:19 план
+  // клал +2/+2 на Insatiable Ur'zul 52/57 при наге Ominous Seer на борде,
+  // где то же заклинание дало бы +4/+4.
+  if (effect.repeatRace !== null) {
+    const race = effect.repeatRace;
+    const mates = pool.filter((m) => {
+      const theirs = racesOf(m, cards);
+      return theirs.includes(race) || theirs.includes(RACE_ALL);
+    });
+    if (mates.length > 0 && mates.length < pool.length) {
+      pool = mates;
+      notes.push(`на ${race} эффект повторяется — прибавка вдвое`);
+    }
+  }
+
   if (effect.grantsTaunt) {
     const bodies = pool.filter((m) => !isEffectEngine(m, cards, rules));
     if (bodies.length > 0 && bodies.length < pool.length) {
@@ -10166,6 +10433,7 @@ export function buffTarget(
     destroyRace: null,
     transforms: false,
     grantsTaunt,
+    repeatRace: null,
     tauntToggles: false,
     grantsReborn: false,
     grantsWindfury: false,
@@ -10499,9 +10767,12 @@ export function spellRules(
     if (spell.cost > state.gold || state.board.length === 0) return [];
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
     const onBoard = effectOnBoard(effect, state.board, rules, deps.cards);
-    const boosted = onBoard.effect;
-    const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
-    if (aimed === null) return [];
+    const aimedAt = spellTargetOn(onBoard.effect, state, deps, rules, spell.cardId);
+    if (aimedAt === null) return [];
+    // Повтор по племени цели (D273): прибавка на наге вдвое, и считать её
+    // надо уже с выбранной целью — до неё размер эффекта не определён.
+    const boosted = repeatedOn(onBoard.effect, aimedAt.target, deps.cards);
+    const aimed = aimedAt;
     // Гибель своего судится разменом целиком (part59, Butchering).
     const trade = destroyTrade(
       boosted,
@@ -10843,6 +11114,36 @@ export function shopSpellRules(
       ];
     }
 
+    // ПОГЛОЩЕНИЕ ВИТРИНЫ заклинанием (D271): «Choose a friendly Demon.
+    // It consumes 2 random Tavern minions to gain their stats and Bonus
+    // Keywords» (Methodical Madness `BG36_880`). Плюсов в тексте нет —
+    // разбор эффекта давал ноль, и карта была невидима целиком, хотя
+    // на part63 (ход 15) ровно она удвоила Ур'зула. Съедаемое читается
+    // витриной той же меркой, что у тел-пожирателей.
+    const eaten = spellConsumeGain(info?.text ?? '', state, deps, rules);
+    if (eaten !== null) {
+      // Цена в очки НЕ вычитается — как у соседних заклинаний-усилений:
+      // золото считает план, а список ранжирует действия (D151).
+      const score = eaten.stats * rules.value.perStatPoint;
+      if (score <= 0) return [];
+      return [
+        {
+          action: 'buy' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          targetMinion: eaten.target,
+          score,
+          cost: goldCost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${name} за ${price} — съедает витрину: ` +
+            `+${String(Math.round(eaten.stats))} статов на ` +
+            `${deps.cards.info(eaten.target.cardId)?.name ?? eaten.target.cardId}`,
+        },
+      ];
+    }
+
     const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
     if (effect === null) return [];
 
@@ -11037,11 +11338,15 @@ export function shopSpellRules(
     }
 
     if (state.board.length === 0) return [];
+
     // Статы на весь борд и ветвь по борду — одной функцией на все места (part51).
     const onBoard = effectOnBoard(effect, state.board, rules, deps.cards);
-    const boosted = onBoard.effect;
-    const aimed = spellTargetOn(boosted, state, deps, rules, spell.cardId);
-    if (aimed === null) return [];
+    const aimedAt = spellTargetOn(onBoard.effect, state, deps, rules, spell.cardId);
+    if (aimedAt === null) return [];
+    // Повтор по племени цели (D273): прибавка на наге вдвое, и считать её
+    // надо уже с выбранной целью — до неё размер эффекта не определён.
+    const boosted = repeatedOn(onBoard.effect, aimedAt.target, deps.cards);
+    const aimed = aimedAt;
     // Гибель своего судится разменом целиком (part59, Butchering).
     const trade = destroyTrade(
       boosted,

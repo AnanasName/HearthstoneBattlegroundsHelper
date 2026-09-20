@@ -138,7 +138,19 @@ describe('part18: продажа в план, раннее обновление,
     expect(anglerValue.textMechMates).toBeGreaterThanOrEqual(2);
     expect(anglerValue.total).toBeGreaterThan(minionValue(demon, turn17, { cards }).total);
 
-    const topBuy = adviseTavern(turn17, { cards })?.recommendations.find((r) => r.action === 'buy');
-    expect(topBuy?.minion?.cardId).toBe('BG23_004');
+    // Наверху списка покупок с D271 стоит Flaming Enforcer `BG34_500`
+    // («At the end of your turn, consume the highest-Health minion in the
+    // Tavern to gain its stats», 18.5 = тир 8 + статы 4.5 + 6.0 за витрину):
+    // пожиратель ест эту витрину на 12 статов за ход. Пункт 3 — про то, что
+    // нага ВЫШЕ ДЕМОНА (17.5 против 16.0), и это проверено выше; здесь
+    // остаётся, что покупку наги советник называет.
+    const buys = adviseTavern(turn17, { cards })?.recommendations.filter(
+      (r) => r.action === 'buy' && r.minion !== null,
+    );
+    expect(buys?.map((r) => r.minion?.cardId)).toContain('BG23_004');
+    const anglerAt = buys?.findIndex((r) => r.minion?.cardId === 'BG23_004') ?? -1;
+    const demonAt = buys?.findIndex((r) => r.minion?.cardId === 'BG32_873') ?? -1;
+    expect(anglerAt).toBeGreaterThanOrEqual(0);
+    expect(anglerAt).toBeLessThan(demonAt);
   });
 });

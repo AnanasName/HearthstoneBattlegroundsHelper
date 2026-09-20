@@ -971,6 +971,7 @@ describe('вид оверлея', () => {
       playPayoff: 0,
       playPayers: [],
       playEngine: 0,
+      tavernEater: 0,
       tribeMates: 0,
       textTribeMates: 0,
       textMechMates: 0,

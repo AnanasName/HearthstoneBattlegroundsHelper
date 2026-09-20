@@ -624,6 +624,9 @@
    "TB_BaconShop_HERO_22_Buddy",
    "TB_BaconShop_HERO_22_Buddy_G"
   ],
+  "repeatOnRaceWords": [
+   "BG32_815"
+  ],
   "retriggerBattlecryWords": [
    "BG26_355",
    "BG26_355_G",
@@ -670,6 +673,14 @@
    "BG33_870",
    "BG33_870_G"
   ],
+  "spellConsumeWords": [
+   "BG23_357",
+   "BG23_357_G",
+   "BG28_607",
+   "BG30_MagicItem_429",
+   "BG30_MagicItem_429t",
+   "BG36_880"
+  ],
   "spellMagnetGainWords": 150,
   "spellMagnetPermanentWords": [
    "BG23_009",
@@ -702,6 +713,26 @@
    "BG36_921_G"
   ],
   "targetsFriendlyWords": 116,
+  "tavernEaterWords.play": [
+   "BG21_004",
+   "BG21_004_G"
+  ],
+  "tavernEaterWords.endOfTurn": [
+   "BG29_140",
+   "BG29_140_G",
+   "BG34_500",
+   "BG34_500_G"
+  ],
+  "tavernEaterWords.eachEndOfTurn": [
+   "BG21_005",
+   "BG21_005_G"
+  ],
+  "tavernEaterWords.battlecry": [
+   "BG24_009",
+   "BG24_009_G",
+   "BG27_009",
+   "BG27_009_G"
+  ],
   "tavernTriggerWords": 704,
   "temporaryBuffWords": 134,
   "tierUpRefreshWords": [
@@ -732,6 +763,19 @@
   ],
   "tribePremiumKeepWords": 1849,
   "tribeRecipientWords": 364,
+  "tribeSacrificeWords": [
+   "BG28_303",
+   "BG28_303_G",
+   "BG28_604",
+   "BG32_340",
+   "BG32_340_G",
+   "BG35_MagicItem_306",
+   "BG35_MagicItem_306t",
+   "BG35_MagicItem_733",
+   "BG35_MagicItem_733t",
+   "BGS_059",
+   "TB_BaconShop_HP_702t"
+  ],
   "tribeTextWords.MURLOC": 88,
   "tribeTextWords.DEMON": 83,
   "tribeTextWords.MECH": 92,

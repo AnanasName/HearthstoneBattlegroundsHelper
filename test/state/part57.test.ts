@@ -258,10 +258,16 @@ describe('part57: Мурлок Холмс, угадывание соперник
     expect(line).toContain('АКТИВИРОВАТЬ Living Prison');
     expect(line).toContain('затем КУПИТЬ Snare Trapper');
 
+    // Шаг ищется по карте, а не по номеру: с D271 (поглощение витрины)
+    // ценность пула подросла — на борде стоит Flaming Enforcer, — и в плане
+    // перед активацией встал тёмный дар. Набор шагов и золото те же, а суть
+    // пункта 3 в другом: активация и покупка — ОДИН шаг, и прибавка доезжает
+    // до следующего.
     const plan = spendPlan(point, { cards });
-    expect(plan.steps[0]?.recommendation.minion?.cardId).toBe('BG36_180');
+    const prisonStep = plan.steps.find((s) => s.recommendation.minion?.cardId === 'BG36_180');
+    expect(prisonStep).toBeDefined();
     // Прибавка доехала до следующего шага: тело считается уже усиленным.
-    const after = plan.steps[0]?.stateAfter.board.find((m) => m.cardId === 'BG36_180');
+    const after = prisonStep?.stateAfter.board.find((m) => m.cardId === 'BG36_180');
     expect([after?.attack, after?.health]).toEqual([61, 70]);
     expect(spendPlanLine(plan, cards)).toContain('затем КУПИТЬ Snare Trapper');
   });
