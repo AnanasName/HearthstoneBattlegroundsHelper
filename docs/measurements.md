@@ -5,51 +5,51 @@
 (не в git). В записях о партиях числа не переписываются: там стоит
 вердикт и ссылка сюда.
 
-**Последний полный прогон:** 2026-09-19 20:55, коммит 03a1c5c, зерно 1, партий 52 (part4–part55).
-**Сравнивается с:** 2026-09-17 11:54, коммит d86507e, зерно 1, партий 52 (part4–part55).
+**Последний полный прогон:** 2026-09-20 10:36, коммит 7ca6f8a, зерно 1, партий 52 (part4–part55).
+**Сравнивается с:** 2026-09-19 20:55, коммит 03a1c5c, зерно 1, партий 52 (part4–part55).
 **Полосы шума нет:** `npm run battery -- --seeds=5` посчитает её один раз на коде.
 
-## validate:tavern · 46 мин
+## validate:tavern · 38 мин
 
 | метрика | было | стало | Δ | шум (SD) | |
 |---|---:|---:|---:|---:|---|
-| turns | 516 | 517 | 1 | — | изменилось |
-| agreementPct | 75.2 | 75.4 | 0.2 | — | изменилось |
-| costPp | 3.21 | 3.14 | -0.07 | — | изменилось |
-| decisiveTurns | 180 | 178 | -2 | — | изменилось |
-| decisiveAgreementPct | 51.1 | 52.2 | 1.1 | — | изменилось |
-| decisiveCostPp | 9.03 | 8.94 | -0.09 | — | изменилось |
+| turns | 517 | 517 | 0 | — | без изменений |
+| agreementPct | 75.4 | 75.4 | 0 | — | без изменений |
+| costPp | 3.14 | 3.14 | 0 | — | без изменений |
+| decisiveTurns | 178 | 178 | 0 | — | без изменений |
+| decisiveAgreementPct | 52.2 | 52.2 | 0 | — | без изменений |
+| decisiveCostPp | 8.94 | 8.94 | 0 | — | без изменений |
 | inSampleTurns | 217 | 217 | 0 | — | без изменений |
-| inSampleAgreementPct | 76 | 75.6 | -0.4 | — | изменилось |
-| inSampleCostPp | 3.02 | 3.06 | 0.04 | — | изменилось |
-| outOfSampleTurns | 299 | 300 | 1 | — | изменилось |
-| outOfSampleAgreementPct | 74.6 | 75.3 | 0.7 | — | изменилось |
-| outOfSampleCostPp | 3.34 | 3.2 | -0.14 | — | изменилось |
+| inSampleAgreementPct | 75.6 | 75.6 | 0 | — | без изменений |
+| inSampleCostPp | 3.06 | 3.06 | 0 | — | без изменений |
+| outOfSampleTurns | 300 | 300 | 0 | — | без изменений |
+| outOfSampleAgreementPct | 75.3 | 75.3 | 0 | — | без изменений |
+| outOfSampleCostPp | 3.2 | 3.2 | 0 | — | без изменений |
 | skippedNoBattle | 9 | 9 | 0 | — | без изменений |
-| skippedNoChoice | 137 | 138 | 1 | — | изменилось |
+| skippedNoChoice | 138 | 138 | 0 | — | без изменений |
 
-## validate:spend · 69 мин
+## validate:spend · 36 мин
 
 | метрика | было | стало | Δ | шум (SD) | |
 |---|---:|---:|---:|---:|---|
-| turns | 122 | 121 | -1 | — | изменилось |
-| agreementPct | 65.6 | 66.1 | 0.5 | — | изменилось |
-| costPp | 16.2 | 16.22 | 0.02 | — | изменилось |
-| decisiveTurns | 77 | 75 | -2 | — | изменилось |
-| sameShapeTurns | 81 | 75 | -6 | — | изменилось |
-| sameShapeAgreementPct | 74.1 | 76 | 1.9 | — | изменилось |
-| sameShapeCostPp | 6.79 | 6.47 | -0.32 | — | изменилось |
-| sameShapeDecisiveTurns | 42 | 38 | -4 | — | изменилось |
+| turns | 121 | 121 | 0 | — | без изменений |
+| agreementPct | 66.1 | 66.1 | 0 | — | без изменений |
+| costPp | 16.22 | 16.22 | 0 | — | без изменений |
+| decisiveTurns | 75 | 75 | 0 | — | без изменений |
+| sameShapeTurns | 75 | 75 | 0 | — | без изменений |
+| sameShapeAgreementPct | 76 | 76 | 0 | — | без изменений |
+| sameShapeCostPp | 6.47 | 6.47 | 0 | — | без изменений |
+| sameShapeDecisiveTurns | 38 | 38 | 0 | — | без изменений |
 | goldLeftPlan | 0.02 | 0.02 | 0 | — | без изменений |
-| goldLeftBest | 2.16 | 2.14 | -0.02 | — | изменилось |
-| inSampleTurns | 36 | 37 | 1 | — | изменилось |
-| inSampleAgreementPct | 72.2 | 75.7 | 3.5 | — | изменилось |
-| outOfSampleTurns | 45 | 38 | -7 | — | изменилось |
-| outOfSampleAgreementPct | 75.6 | 76.3 | 0.7 | — | изменилось |
+| goldLeftBest | 2.14 | 2.14 | 0 | — | без изменений |
+| inSampleTurns | 37 | 37 | 0 | — | без изменений |
+| inSampleAgreementPct | 75.7 | 75.7 | 0 | — | без изменений |
+| outOfSampleTurns | 38 | 38 | 0 | — | без изменений |
+| outOfSampleAgreementPct | 76.3 | 76.3 | 0 | — | без изменений |
 | skippedNoBattle | 9 | 9 | 0 | — | без изменений |
-| skippedNoChoice | 531 | 534 | 3 | — | изменилось |
+| skippedNoChoice | 534 | 534 | 0 | — | без изменений |
 
-## calibrate · 39 мин
+## calibrate · 19 мин
 
 | метрика | было | стало | Δ | шум (SD) | |
 |---|---:|---:|---:|---:|---|
