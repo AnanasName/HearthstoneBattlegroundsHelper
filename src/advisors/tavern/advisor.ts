@@ -3765,9 +3765,25 @@ export function levelUpRule(
 
   // Расширение витрины — отдельная ценность подъёма: на чётных тирах
   // миньонов в ней становится больше (замерено по фикстурам, 3/4/4/5/5).
+  //
+  // РАЗМЕР при этом называется от живой витрины, а не от таблицы: у героя,
+  // чья сила отнимает у таверны миньона («The Tavern offers one fewer
+  // minion», Синдрагоса, part70), таблица врёт на единицу на каждом тире —
+  // 2 вместо 3 на первом, 3 вместо 4 на втором. В состоянии витрина уже
+  // лежит фактической, и обещать по таблице значит обещать чужое число.
+  // Сам факт расширения таблицей считается по-прежнему: сдвиг у обоих
+  // тиров один и тот же, и в разности он сокращается.
+  //
+  // Пустая витрина сдвига не даёт: она означает не «таверна отняла всё»,
+  // а кадр, где витрины ещё нет (или собранное вручную состояние теста).
   const widens =
     (rules.shopSizeByTier[target] ?? 0) > (rules.shopSizeByTier[state.techLevel] ?? 0);
-  const widerShop = widens ? `, витрина расширится до ${String(rules.shopSizeByTier[target])}` : '';
+  const shopOffset =
+    state.shop.length === 0
+      ? 0
+      : state.shop.length - (rules.shopSizeByTier[state.techLevel] ?? state.shop.length);
+  const targetShop = (rules.shopSizeByTier[target] ?? 0) + shopOffset;
+  const widerShop = widens ? `, витрина расширится до ${String(targetShop)}` : '';
 
   let score = behind * rules.levellingUrgencyPerTier;
   // Своя ценность подъёма — та, с которой он идёт в развилку плана: одно
@@ -5546,6 +5562,29 @@ function worthFullBoardSlot(
 }
 
 /**
+ * Морозит ли таверна витрину САМА в конце каждого хода.
+ *
+ * Ответ берётся из текста силы героя, и другого источника у него нет.
+ * Тег в логе есть — блок TRIGGER на сущности силы ставит `FROZEN=1`
+ * каждому оставшемуся миньону витрины, 11 раз на 11 ходов таверны
+ * (part70, `TriggerKeyword=2882`), — но тем же блоком, на смене хода,
+ * приходит `FROZEN=0`. До точки решения заморозка не доживает, и признак
+ * `frozen` там ноль на всех 11 точках, хотя витрина хода 9 дословно
+ * равна витрине хода 7, где куплено не было ничего.
+ */
+function shopFreezesItself(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): boolean {
+  const cardId = state.hero?.heroPowerCardId ?? null;
+  if (cardId === null) return false;
+  const text = deps.cards.info(cardId)?.text ?? '';
+  if (text === '') return false;
+  return rules.heroPowerAutoFreezeWords.some((w) => new RegExp(w, 'i').test(text));
+}
+
+/**
  * Правило заморозки.
  *
  * Незамороженная витрина обновляется в начале хода БЕСПЛАТНО. Значит,
@@ -5563,6 +5602,12 @@ export function freezeRule(
 ): Recommendation | null {
   if (state.shop.length === 0) return null;
   if (state.shop.every((m) => m.frozen)) return null;
+  // Таверна, которая морозится сама в конце каждого хода (Синдрагоса,
+  // «Stay Frosty», part70): морозить руками нечего, совет был бы пустым
+  // шагом в плане. Сторож строкой выше этого не ловит — игра ставит
+  // `FROZEN` на смене хода и тут же снимает, так что в точке решения
+  // признак ноль на всех 11 точках партии.
+  if (shopFreezesItself(state, deps, rules)) return null;
 
   const affordable = bodiesAffordable(state, state.gold, rules);
 

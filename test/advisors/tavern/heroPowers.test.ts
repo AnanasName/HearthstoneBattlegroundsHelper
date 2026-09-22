@@ -78,6 +78,7 @@ describe('покрытие сил героя правилами советник
     if (matches(id, R.heroPowerBuyRewardWords)) on.push('buy');
     if (matches(id, R.heroPowerGoldWords)) on.push('gold');
     if (matches(id, R.heroPowerDigWords)) on.push('dig');
+    if (matches(id, R.heroPowerAutoFreezeWords)) on.push('autofreeze');
     return on;
   };
 
@@ -125,12 +126,19 @@ describe('покрытие сил героя правилами советник
     // «Dig for a Golden minion! (4 Digs left.)» — Юдора (part55): награда
     // приходит каждым четвёртым нажатием, слово «dig» в пуле одно.
     expect(count('dig')).toBe(1);
+    // «The Tavern … Freezes at the end of each turn» — Синдрагоса (part70).
+    // Канал ОТМЕНЯЮЩИЙ, а не дающий совет: он выключает правило заморозки.
+    // Слово Freeze в пуле у двух сил, но вторая («After the Tavern is
+    // Refreshed, copy its highest-Tier minion and Freeze them both») морозит
+    // два конкретных тела по событию, и их игра помечает тегом сама.
+    expect(count('autofreeze')).toBe(1);
   });
 
-  it('из 177 сил пула советник не берёт ничего у 120', () => {
+  it('из 177 сил пула советник не берёт ничего у 119', () => {
     const mute = pool.filter((id) => channelsOf(id).length === 0);
     // 121 → 120: раскопка Юдоры (part55).
-    expect(mute).toHaveLength(120);
+    // 120 → 119: автозаморозка витрины Синдрагосы (part70).
+    expect(mute).toHaveLength(119);
 
     // Число большое, и прятать его незачем: сила героя определяет стиль
     // партии, а мы читаем меньше трети пула. Что из этого стоит вносить —
@@ -163,6 +171,10 @@ describe('покрытие сил героя правилами советник
     expect(channelsOf('TB_BaconShop_HP_074')).toEqual(['dig']);
     expect(channelsOf('TB_BaconShop_HP_066')).toEqual([]);
     expect(channelsOf('TB_BaconShop_HP_087')).toEqual([]);
+    // Синдрагоса (part70). Из трёх обещаний силы текстом читается ровно
+    // одно — заморозка; цена покупки и размер витрины приходят живыми,
+    // тегом и самой витриной, и шаблона им не нужно.
+    expect(channelsOf('TB_BaconShop_HP_014')).toEqual(['autofreeze']);
 
     // А это — сила самой частой партии датасета (три раза), и она
     // показывает, почему счёт по тексту ВЕРХНИЙ: «Discover a minion with

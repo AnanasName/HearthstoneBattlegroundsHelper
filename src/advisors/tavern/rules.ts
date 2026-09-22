@@ -1083,6 +1083,29 @@ export interface TavernRules {
   readonly freeHeroPowerValue: number;
 
   /**
+   * Признак «таверна морозится САМА в конце каждого хода».
+   *
+   * Случай part70 (Синдрагоса, `TB_BaconShop_HP_014` «Stay Frosty»:
+   * «Minions cost (2). The Tavern offers one fewer minion and Freezes
+   * at the end of each turn.»). Заморозка у такого героя — не действие,
+   * а фон: морозить руками нечего, и совет «ЗАМОРОЗИТЬ» оказывается
+   * пустым ходом в плане (part70, ход 1).
+   *
+   * Сторож правила заморозки — `state.shop.every((m) => m.frozen)` —
+   * на этом не срабатывает: признака `frozen` парсер не видит ни на одной
+   * из 11 точек решения партии, хотя витрина хода 9 дословно равна
+   * витрине хода 7. То есть игра эту заморозку не помечает тегом на
+   * миньонах вовсе, и единственный её источник — текст силы.
+   *
+   * Шаблон узкий по замыслу: из 177 сил пула он ловит ровно одну.
+   * Соседнюю силу со словом Freeze («After the Tavern is Refreshed, copy
+   * its highest-Tier minion and Freeze them both») он не ловит и не должен
+   * — там морозятся два конкретных тела по событию, и ИХ игра помечает
+   * тегом, который мы и так читаем.
+   */
+  readonly heroPowerAutoFreezeWords: readonly string[];
+
+  /**
    * Признаки «сила даёт заклинание таверны» — и ценность такого заклинания
    * в очках.
    *
@@ -2283,6 +2306,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
 
   heroPowerRefreshWords: ['refresh[^.]*tavern'],
   freeHeroPowerValue: 2,
+
+  // «…and <b><b>Freeze</b>s</b> at the end of each turn» — разметка стоит
+  // посреди фразы, поэтому между словами `[^.]*`, а не пробел.
+  heroPowerAutoFreezeWords: ['freeze[^.]*at the end of (?:each|every) turn'],
 
   heroPowerSpellWords: ['(?:get|add)[^.]*tavern spell'],
   // «Roll a 6-sided die.\nGain that much Gold.» — грани группой, между

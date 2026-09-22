@@ -352,6 +352,9 @@
    "BG34_Giant_596",
    "BG34_Giant_596_G"
   ],
+  "heroPowerAutoFreezeWords": [
+   "TB_BaconShop_HP_014"
+  ],
   "heroPowerBuyDiscountWords": [
    "TB_BaconShop_HP_072"
   ],
