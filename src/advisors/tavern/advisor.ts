@@ -1,4 +1,4 @@
-import { RACE_ALL, type CardIndex, type CardInfo } from '../../data/cards.js';
+import { RACE_ALL, withLogRaces, type CardIndex, type CardInfo } from '../../data/cards.js';
 import { baseHeroCardId, sharedBgStats, type BgStats } from '../../data/bgStats.js';
 import type { ChoiceOption, GameState, HandSpell, Minion, TrinketOffer } from '../../state/types.js';
 import { DEFAULT_TAVERN_RULES, targetTier, tavernTurnOf, type TavernRules } from './rules.js';
@@ -367,6 +367,18 @@ export interface Recommendation {
    * на остаток один).
    */
   readonly refreshSpend?: number;
+  /**
+   * Зачем ДЕРЖИМ витрину — причина заморозки, короткой строкой.
+   *
+   * Отдельным полем, а не только словами в reason, по тому же доводу, что
+   * цель обновления (`searchGoal`, part37): оверлей показывает строку
+   * действия, а reason не показывает вовсе. Голое «ЗАМОРОЗИТЬ Scarlet Skull»
+   * при нуле золота и витрине из двух карт читается как прихоть, и игрок
+   * так его и прочёл (part64, кадр 14:57) — притом что причина была названа
+   * («своих по племени 2»), просто не доехала до экрана. Третий случай
+   * одного и того же урока.
+   */
+  readonly holdReason?: string | null;
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -5724,6 +5736,7 @@ export function freezeRule(
       cost: 0,
       requiresSlot: false,
       sellFirst: null,
+      holdReason: 'два тела вместо одного',
       reason:
         `${spellName} за ${String(keeper.spell.cost)} даёт миньона, а золота ` +
         `${String(state.gold)} на него не хватает; ${when} ` +
@@ -5742,6 +5755,7 @@ export function freezeRule(
       cost: 0,
       requiresSlot: false,
       sellFirst: null,
+      holdReason: 'цепочка «купить-разыграть-продать»',
       reason:
         `${name} отдаёт обещанное продажей, а золота ${String(state.gold)} ` +
         `на покупку не хватает; со следующего хода это цепочка ` +
@@ -5778,6 +5792,7 @@ export function freezeRule(
     cost: 0,
     requiresSlot: false,
     sellFirst: null,
+    holdReason: why,
     reason:
       `${name} — ${why}, а золота ${String(state.gold)} хватает лишь на ` +
       `${String(affordable)} покупок; свежая витрина такого не обещает`,
@@ -12277,10 +12292,15 @@ export function playPlan(
  */
 export function adviseTavern(
   input: GameState,
-  deps: TavernAdvisorDeps,
+  rawDeps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): TavernAdvice | null {
   if (input.phase !== 'tavern') return null;
+  // Племена, которых снапшот не знает, берутся из лога — иначе целое племя
+  // патча идёт бесплеменным (D275). Обёртка ставится здесь, на самом входе:
+  // ниже `deps.cards` читают все правила разом, и каждому по отдельности
+  // знать про это незачем.
+  const deps = { ...rawDeps, cards: withLogRaces(rawDeps.cards, input.logRaces) };
   // Тринкеты судятся на открытом предложении, всё остальное — на золоте,
   // которое останется после выбора (`afterTrinketPick`).
   const trinkets = trinketAdvice(input, deps, rules);

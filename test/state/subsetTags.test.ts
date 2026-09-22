@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { loadCardIndex } from '../../src/data/cards.js';
+import { loadCardIndex, raceOfLogTag } from '../../src/data/cards.js';
 import { raceOfSubsetTag } from '../../src/state/types.js';
 import { FIXTURES_DIR } from '../fixtures.js';
 
@@ -22,6 +22,8 @@ import { FIXTURES_DIR } from '../fixtures.js';
  */
 describe('теги BACON_SUBSET_* всех фикстур называют племена снапшота', () => {
   const names = new Set<string>();
+  /** Имена из тега `CARDRACE` — второй источник племени (D275). */
+  const logRaces = new Set<string>();
 
   beforeAll(async () => {
     const files = readdirSync(FIXTURES_DIR)
@@ -37,20 +39,32 @@ describe('теги BACON_SUBSET_* всех фикстур называют пл�
       for await (const chunk of createReadStream(file, { encoding: 'latin1', highWaterMark: 1 << 22 })) {
         const text = tail + String(chunk);
         for (const m of text.matchAll(/BACON_SUBSET_([A-Z]+)/g)) names.add(m[1] ?? '');
+        for (const m of text.matchAll(/tag=CARDRACE value=([A-Z_]+)/g)) logRaces.add(m[1] ?? '');
         tail = text.slice(-40);
       }
     }
   }, 300_000);
 
-  it('каждое имя приводится к племени, которое снапшот знает', () => {
+  it('каждое имя приводится к племени, которое советник знает', () => {
     const cards = loadCardIndex();
-    const known = new Set<string>();
+    const fromSnapshot = new Set<string>();
     for (const tier of [1, 2, 3, 4, 5, 6, 7]) {
-      for (const info of cards.poolOfTier(tier)) for (const race of info.races) known.add(race);
+      for (const info of cards.poolOfTier(tier)) for (const race of info.races) fromSnapshot.add(race);
     }
+    // Источников племени два, и сторожу важны оба: тег тринкета обязан
+    // разрешаться хоть одним из них (D275). Снапшота одного уже мало —
+    // `ABERRATION` в нём нет ни у одной карты.
+    const known = new Set([...fromSnapshot, ...[...logRaces].map(raceOfLogTag)]);
+
     // Оба известных расхождения в фикстурах есть — иначе тест ничего не значит.
     expect(names).toContain('QUILLBOAR');
     expect(names).toContain('ELEMENTALS');
+    // И третье, ради которого появился второй источник: племя, которого
+    // снапшот не знает, а лог называет.
+    expect(names).toContain('ABERRATION');
+    expect(fromSnapshot.has('ABERRATION')).toBe(false);
+    expect(known.has('ABERRATION')).toBe(true);
+
     for (const name of names) expect(known, `BACON_SUBSET_${name}`).toContain(raceOfSubsetTag(name));
   });
 });

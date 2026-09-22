@@ -898,6 +898,16 @@ export interface GameState {
    */
   readonly seenShopCardIds: readonly string[];
   /**
+   * Племя карты, НАЗВАННОЕ логом, — тег `CARDRACE` на её сущности.
+   *
+   * Запасной источник племени для карт, которых снапшот не знает: новое
+   * племя патча приходит в игру раньше, чем в HearthstoneJSON. Слияние —
+   * `withLogRaces`, и снапшот в нём сильнее всегда (D275). Здесь лежит сырьё
+   * ровно в том виде, в каком его пишет игра: имена её словаря
+   * (`MECHANICAL`, а не `MECH`), по одному племени на карту.
+   */
+  readonly logRaces: Readonly<Record<string, string>>;
+  /**
    * Место в таблице лобби — тег `PLAYER_LEADERBOARD_PLACE` на своём герое.
    *
    * Живёт всю партию как ТЕКУЩЕЕ место (part1, сегмент 1: 3-е посреди игры),
@@ -985,6 +995,7 @@ export const EMPTY_STATE: GameState = {
   heroChoice: null,
   trinketsByPlayer: {},
   seenShopCardIds: [],
+  logRaces: {},
   finalPlace: null,
   buildNumber: null,
   playerBattleTag: null,

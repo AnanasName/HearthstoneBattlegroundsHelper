@@ -123,6 +123,10 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // то есть покупка следующего хода, и без этих слов возражение игрока
   // «купить всё равно не на что» верно по всему, что он видит (part37).
   const goal = r.searchGoal == null ? '' : ` — ищем ${r.searchGoal}`;
+  // Причина ЗАМОРОЗКИ — там же и по тому же доводу, что цель обновления.
+  // «ЗАМОРОЗИТЬ Scarlet Skull» при нуле золота игрок прочёл как прихоть
+  // (part64), хотя правило держало карту ради двух своих по племени.
+  const hold = r.holdReason == null ? '' : ` — ${r.holdReason}`;
   // Витринный бафф «своего типа» спрашивает племя сразу после покупки,
   // и назвать его надо в самой строке: усиление получит ВИТРИНА, а не наш
   // миньон, поэтому «→ на» тут было бы враньём (part43, Eonar's Favor).
@@ -140,7 +144,7 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // и без этих слов план противоречил бы списку на глазах у игрока — тот
   // самый класс подачи, из-за которого пропадал скрытый шаг усиления.
   const burning = r.blockedByHp === true ? ' — иначе золото сгорает' : '';
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${thenBuy}${victim}${magnet}${target}${pair}${goal}${pick}${discount}${burning}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${thenBuy}${victim}${magnet}${target}${pair}${goal}${hold}${pick}${discount}${burning}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

@@ -1,3 +1,4 @@
+import { withLogRaces } from '../../data/cards.js';
 import type { GameState, Minion } from '../../state/types.js';
 import {
   adviseTavern,
@@ -905,10 +906,14 @@ export interface SpendPlanOptions {
  */
 export function spendPlan(
   input: GameState,
-  deps: TavernAdvisorDeps,
+  rawDeps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
   options: SpendPlanOptions = {},
 ): SpendPlan {
+  // Та же обёртка, что на входе советника (D275): план зовёт правила
+  // напрямую, мимо `adviseTavern`, и без неё половина шагов считала бы
+  // племя, а половина — нет.
+  const deps = { ...rawDeps, cards: withLogRaces(rawDeps.cards, input.logRaces) };
   // Точка решения с открытым предложением тринкетов: тратится то, что
   // останется после выбора (`afterTrinketPick`, долг part55).
   const state = afterTrinketPick(input, trinketAdvice(input, deps, rules));

@@ -446,6 +446,32 @@ export function createReducer(players: Players): Reducer {
    * носит борд противника, а там бывают токены вне пула — фаза обязательна.
    */
   const seenShopCardIds = new Set<string>();
+
+  /**
+   * Племя, которое лог называет САМ, — тег `CARDRACE` на сущности карты.
+   *
+   * Запасной источник для снапшота, а не замена ему: D071 отверг этот тег
+   * для СОСТАВА партии и был прав по своей причине — у двуплеменной карты
+   * он показывает одно племя. Замер на part64 (126 карт с тегом): 94 совпали
+   * со снапшотом полностью, 6 разошлись — и все шесть ровно того вида, что
+   * назвал D071 (Рука-протез MECH/UNDEAD, лог говорит MECHANICAL; Timecap'n
+   * Hooktail, Firescale Hoarder, Flaming Enforcer, Gearfin). Оставшиеся 26 —
+   * те, где снапшот МОЛЧИТ, и все двадцать шесть оказались ABERRATION.
+   *
+   * Отсюда и правило слияния (`withLogRaces`): снапшот сильнее всегда, тег
+   * говорит только там, где снапшот не знает ничего. Двуплеменные при этом
+   * не страдают — у них снапшот не молчит, — а новое племя патча перестаёт
+   * быть слепотой в тот же день, когда приходит в игру.
+   *
+   * Тег СТРОКОВЫЙ, поэтому в `tags` (числовую карту) он не попадает и
+   * копится здесь отдельно.
+   */
+  const logRaces = new Map<string, string>();
+  const noteCardRace = (e: Entity, value: string): void => {
+    if (e.cardId === '' || value === '') return;
+    logRaces.set(e.cardId, value);
+  };
+
   const noteShopMinion = (e: Entity): void => {
     if (phase !== 'tavern' || e.cardId === '') return;
     if (e.cardType !== 'MINION' || e.zone !== 'PLAY') return;
@@ -495,6 +521,9 @@ export function createReducer(players: Players): Reducer {
     }
 
     switch (tag) {
+      case 'CARDRACE':
+        noteCardRace(e, value);
+        return;
       case 'ZONE':
         e.zone = value;
         noteShopMinion(e);
@@ -1581,6 +1610,9 @@ export function createReducer(players: Players): Reducer {
       // Порядок фиксирован: множество недетерминированно только в порядке
       // обхода, а состояние обязано быть воспроизводимым до байта.
       seenShopCardIds: [...seenShopCardIds].sort(),
+      // Порядок фиксирован по той же причине, что у витрины: снимок обязан
+      // быть воспроизводимым до байта.
+      logRaces: Object.fromEntries([...logRaces].sort(([a], [b]) => a.localeCompare(b))),
       finalPlace,
       buildNumber,
       playerBattleTag: players.selfName,

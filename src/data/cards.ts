@@ -303,3 +303,93 @@ export function loadCardIndex(path: string = CARDS_PATH): CardIndex {
   const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
   return createCardIndex(Array.isArray(parsed) ? parsed : []);
 }
+
+/**
+ * Как ЛОГ называет племя в теге `CARDRACE` — против имени снапшота.
+ *
+ * Тот же класс расхождения, что у `SUBSET_TAG_RACES`, и словарь у игры
+ * снова свой: в `CARDRACE` мехи зовутся `MECHANICAL`, тогда как снапшот
+ * знает `MECH`. Остальные девять имён партии part64 совпали дословно.
+ */
+const LOG_RACE_NAMES: Readonly<Record<string, string>> = {
+  MECHANICAL: 'MECH',
+};
+
+/** Племя снапшота по имени из тега `CARDRACE`. */
+export function raceOfLogTag(tag: string): string {
+  return LOG_RACE_NAMES[tag] ?? tag;
+}
+
+/**
+ * Индекс, дополненный племенами, которые НАЗВАЛ ЛОГ (`GameState.logRaces`).
+ *
+ * Зачем: новое племя приходит в игру раньше, чем в снапшот. Аберрации жили
+ * в партиях с part60, а `races` у всех двадцати шести их карт пусты и
+ * посейчас — HearthstoneJSON их не проставил. Для советника это не падение,
+ * а тихий ноль: «своих по племени» не считалось, состав партии (`lobbyRaces`)
+ * аберрацию не видел, и 36% карт витрины part64 шли как бесплеменные.
+ *
+ * Правило слияния ровно одно: **снапшот сильнее всегда**, тег говорит
+ * только там, где снапшот молчит. Этим сохранена причина, по которой D071
+ * отверг `CARDRACE` для состава партии, — у двуплеменной карты тег называет
+ * одно племя, и подмени он снапшот, «Рука-протез» потеряла бы UNDEAD.
+ * Замер на part64: из 126 карт с тегом снапшот сильнее у 100 (94 совпали,
+ * 6 двуплеменных), и тег добавляет 26 — все до одной ABERRATION (D275).
+ *
+ * Возвращается ОБЁРТКА, а не новый индекс: `poolOfTier`, `byName` и прочее
+ * отдают те же объекты снапшота, и переcборка ради одного поля стоила бы
+ * полной копии 5612 карт на каждое чтение состояния.
+ */
+export function withLogRaces(cards: CardIndex, logRaces: Readonly<Record<string, string>>): CardIndex {
+  // Обёртку просят на КАЖДОМ шаге плана (spendPlan зовёт adviseTavern
+  // в цепочке), поэтому она кэшируется по обоим аргументам сразу: ответ
+  // зависит и от индекса, и от таблицы лога, и ключ обязан покрывать оба
+  // (D154). Оба — объекты, поэтому кэш слабый и течь не может.
+  const forIndex = LOG_RACE_CACHE.get(cards) ?? new WeakMap<object, CardIndex>();
+  LOG_RACE_CACHE.set(cards, forIndex);
+  const hit = forIndex.get(logRaces);
+  if (hit !== undefined) return hit;
+  const made = buildLogRaceIndex(cards, logRaces);
+  forIndex.set(logRaces, made);
+  return made;
+}
+
+const LOG_RACE_CACHE = new WeakMap<CardIndex, WeakMap<object, CardIndex>>();
+
+function buildLogRaceIndex(cards: CardIndex, logRaces: Readonly<Record<string, string>>): CardIndex {
+  const learned = new Map<string, readonly string[]>();
+  for (const [cardId, raw] of Object.entries(logRaces)) {
+    const race = raceOfLogTag(raw);
+    // `ALL` из лога НЕ берём. Это не племя, а джокер «свой любому», и
+    // последствия у него широкие: одна такая карта на борде добавляет
+    // сородича КАЖДОМУ кандидату. Лог вешает его и на карты, которые
+    // амальгамами не выглядят: `BG_LOE_077` Бранн («Your Battlecries
+    // trigger twice») и `BG35_883` Balinda Stonehearth («Your spells that
+    // target friendly minions cast twice») — ни у одной в тексте нет ни
+    // слова про племена, и снапшот у обеих молчит. Без этой оговорки
+    // part51 переоценивала ВСЕХ кандидатов хода 21 ровно на сородича
+    // (Felfire Conjurer 27.0 → 28.5, Ashen Corruptor 30.5 → 32.0) —
+    // вердикт тот же, но числа поехали без фактуры за спиной.
+    //
+    // Настоящим амальгамам это не мешает: у них `ALL` стоит в СНАПШОТЕ
+    // (87 карт, среди них Gatekeeper Amalgam и Nightmare Par-tea Guest),
+    // а снапшот здесь сильнее. Вопрос «правда ли Бранн считается всеми
+    // племенами» остаётся открытым и ждёт фактуры, а не догадки.
+    if (race === RACE_ALL) continue;
+    learned.set(cardId, [race]);
+  }
+  if (learned.size === 0) return cards;
+
+  const patched = new Map<string, CardInfo | null>();
+  const info = (cardId: string): CardInfo | null => {
+    const known = patched.get(cardId);
+    if (known !== undefined) return known;
+    const base = cards.info(cardId);
+    const extra = learned.get(cardId);
+    // Снапшот сильнее: непустой список племён обёртка не трогает вовсе.
+    const out = base === null || base.races.length > 0 || extra === undefined ? base : { ...base, races: extra };
+    patched.set(cardId, out);
+    return out;
+  };
+  return { ...cards, info };
+}
