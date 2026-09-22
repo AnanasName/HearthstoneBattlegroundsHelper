@@ -465,10 +465,31 @@ export function createReducer(players: Players): Reducer {
    *
    * Тег СТРОКОВЫЙ, поэтому в `tags` (числовую карту) он не попадает и
    * копится здесь отдельно.
+   *
+   * ## Только из БЛОКА ТЕГОВ карты, и это не мелочь
+   *
+   * Ключ здесь — КАРТА, а племя бывает ПРИОБРЕТЁННЫМ: тёмный дар и тринкеты
+   * дают его конкретной СУЩНОСТИ, и приходит оно отдельным `TAG_CHANGE`
+   * (part51, 17:17:27: `TAG_CHANGE Entity=7940 tag=CARDRACE value=ALL`
+   * плюс `MINION_TYPE_MASK=1` на Бранне `BG_LOE_077`, следом энчант
+   * `BG36_MidGameEffect_000t22e` с `ATTACHED=7940`). Записать такое
+   * по карте значило бы раздать приобретение ВСЕМ копиям — и своим,
+   * и чужим, и будущим. Механику подтвердил игрок: в базовом виде Бранн
+   * племени не имеет, но получить его даром или тринкетом можно.
+   *
+   * Поэтому запоминается только то, что пришло вместе с самой картой,
+   * — и первое значение не переписывается: `SHOW_ENTITY` раскрывает карту
+   * с ТЕКУЩИМИ тегами, то есть у повторного раскрытия приобретённое племя
+   * уже в блоке.
+   *
+   * Само приобретение здесь НЕ читается вовсе — это отдельная фактура
+   * (счёт по фикстурам — в журнале), и молчать о ней честнее, чем
+   * приписывать её карте.
    */
   const logRaces = new Map<string, string>();
   const noteCardRace = (e: Entity, value: string): void => {
     if (e.cardId === '' || value === '') return;
+    if (logRaces.has(e.cardId)) return;
     logRaces.set(e.cardId, value);
   };
 
@@ -507,7 +528,12 @@ export function createReducer(players: Players): Reducer {
     return created;
   };
 
-  const applyToEntity = (e: Entity, tag: string, value: string): void => {
+  /**
+   * @param fromCardBlock строка пришла из БЛОКА ТЕГОВ сущности
+   * (`FULL_ENTITY`/`SHOW_ENTITY`/`CHANGE_ENTITY`), а не отдельным
+   * `TAG_CHANGE`. Различие важно только племени, см. `noteCardRace`.
+   */
+  const applyToEntity = (e: Entity, tag: string, value: string, fromCardBlock = false): void => {
     const n = numeric(value);
 
     // Кэш группировки энчантов зависит только от типа, носителя и зоны.
@@ -522,7 +548,7 @@ export function createReducer(players: Players): Reducer {
 
     switch (tag) {
       case 'CARDRACE':
-        noteCardRace(e, value);
+        if (fromCardBlock) noteCardRace(e, value);
         return;
       case 'ZONE':
         e.zone = value;
@@ -1033,7 +1059,7 @@ export function createReducer(players: Players): Reducer {
       const [, tag, value] = tagLine;
       if (tag === undefined || value === undefined) return;
       if (current !== null) {
-        applyToEntity(current, tag, value);
+        applyToEntity(current, tag, value, true);
         applyGlobal(
           tag,
           value,

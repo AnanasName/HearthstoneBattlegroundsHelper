@@ -1440,3 +1440,30 @@ export function part63Game(): string {
 export function part64Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part64', 'game.log'), 'utf8');
 }
+
+/**
+ * Партия 65 — 22.09.2026, 3-е место, билд 251952, 13 ходов таверны.
+ * ВТОРАЯ партия той же сессии игры, что и part64: один лог Hearthstone,
+ * два `CREATE_GAME`, вырезана по строкам 551274–943914 (15:26:43–15:51:55).
+ *
+ * Демонический снежный ком: Wrath Weaver `BGS_004`, купленный первым же
+ * ходом за 2 золотых, к 12-му ходу таверны вырос до золотого 203/203.
+ *
+ * Партия пришла с жалобой игрока по кадру 15:31:55 (ход 9, ход таверны 5):
+ * «предлагает выбрать целью карту, которая не может быть целью». Совет
+ * говорил `АКТИВИРОВАТЬ Brain Rotter 3/8 → на Wrath Weaver 6/8`, а Brain
+ * Rotter `BG36_099` — «Activate ({2}): Discard a card to give your
+ * **Deity** +{0}/+{1}», и получатель у него один и назван: БОЖЕСТВО.
+ *
+ * Божество — механика этого билда и на столе его нет вовсе. В логе это
+ * скрытая сущность `BG_OldGod` («Secret Deity [DNT]», CARDTYPE=SPELL)
+ * в зоне SECRET с тегом `BACON_DEITY_SIGIL`; её статы лежат тегами
+ * `BACON_OLD_GOD_ATTACK`/`BACON_OLD_GOD_HEALTH` на СУЩНОСТИ ИГРОКА
+ * (строки 2691–2692, всю партию 1/1), счётчик пробуждения — на самом
+ * сигиле (`TAG_SCRIPT_DATA_NUM_1=3`, `QUEST_PROGRESS_TOTAL=3`, строки
+ * 2501–2528), а тело выходит на стол только в бою: у соперника
+ * `cardId=BGFYM_011` («И'Шарадж») в зоне PLAY. См. D276.
+ */
+export function part65Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part65', 'game.log'), 'utf8');
+}

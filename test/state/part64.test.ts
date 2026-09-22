@@ -9,7 +9,7 @@ import type { GameState } from '../../src/state/types.js';
 import { recommendationLine } from '../../src/ui/format.js';
 import { frameAt, parseClock, sliceLogByClock } from '../../src/ui/logSlice.js';
 import { createBreather } from '../breather.js';
-import { part64Game } from '../fixtures.js';
+import { part51Game, part64Game } from '../fixtures.js';
 
 /**
  * part64 — Миллифисент Манашторм (22.09.2026), 1-е место.
@@ -65,6 +65,25 @@ describe('part64: Миллифисент — аберрации, которых 
     expect(merged.info('BG34_500')?.races).toEqual(['DEMON', 'ELEMENTAL']);
     expect(merged.info('BG36_764')?.races).toEqual(['MURLOC', 'MECH']);
   });
+
+  it('ПРИОБРЕТЁННОЕ племя карте не приписывается', () => {
+    // Племя бывает выданным по ходу партии — тёмным даром или тринкетом,
+    // на конкретную СУЩНОСТЬ (подтверждено игроком 22.09). В логе оно
+    // приходит отдельным `TAG_CHANGE`, а не в блоке тегов карты, и ключ
+    // здесь — КАРТА: записать такое значило бы раздать приобретение всем
+    // копиям, своим и чужим. В part64 приобретений нет ни одного, поэтому
+    // проверка держится на part51, где Бранн получил `ALL` даром.
+    const text = part51Game();
+    const reducer = createReducer(readPlayers(text));
+    for (const event of readPowerEvents(text)) reducer.step(event);
+    const state = reducer.snapshot();
+
+    // Приобретение в логе есть — иначе тест ничего не значит.
+    expect(/TAG_CHANGE Entity=\d+ tag=CARDRACE value=ALL/.test(text)).toBe(true);
+    // А в таблице карт его нет, и слияние Бранну племени не даёт.
+    expect(state.logRaces['BG_LOE_077']).toBeUndefined();
+    expect(withLogRaces(cards, state.logRaces).info('BG_LOE_077')?.races).toEqual([]);
+  }, 600_000);
 
   it('словарь лога приводится к словарю снапшота: MECHANICAL → MECH', () => {
     const merged = withLogRaces(cards, { BG36_999test: 'MECHANICAL' });
