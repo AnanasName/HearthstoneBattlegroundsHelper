@@ -153,6 +153,26 @@ export interface OverlayTempo {
    * ноль и «бесплатно» вместо неё не подставляются.
    */
   readonly upgrade: { readonly cost: number; readonly target: number } | null;
+  /**
+   * Чем ход, потраченный на подъём, рискует, — теми же числами блока силы.
+   * `null` — подъём не по карману, чисел силы нет или тир уже предельный.
+   *
+   * Сообщение игрока 22.09 дословно: «не всегда понимаю, могу ли перейти
+   * на 6 безопасно, поэтому остаюсь на 5». На part68 он просидел на пятом
+   * тире ходы таверны 11–13, тогда как подъём стоял ПЕРВЫМ советом.
+   *
+   * Числа для ответа на экране уже были — и доля боёв, и цена поражения,
+   * и свой запас, — но лежали в другом блоке и ни к какому решению
+   * не относились. Строка их не пересчитывает и не добавляет своих:
+   * она называет допущение («если подняться и не покупать») и повторяет
+   * готовые числа `OverlayStrength` там, где выбор и делается.
+   *
+   * Вердикта тут нет и быть не может — по тому же основанию, по которому
+   * его нет в самом блоке силы: «усиливаться или улучшать таверну»
+   * ближайшим боем структурно не решается. Поэтому ни «безопасно»,
+   * ни «опасно» строка не говорит: она говорит, чем платят.
+   */
+  readonly risk: string | null;
   /** Ярлык блока: оговорка о происхождении кривой живёт в подписи. */
   readonly label: string;
 }
@@ -447,6 +467,10 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   // сейчас на экране нет.
   const modal = (input.tavern?.trinkets.length ?? 0) > 0 || (input.tavern?.choice.length ?? 0) > 0;
 
+  // Сила считается ДО темпа: строка риска к подъёму берёт её готовые числа,
+  // а не считает свои (`upgradeRisk`).
+  const strength = strengthView(input);
+
   return {
     active: true,
     header: situationLine(state),
@@ -455,11 +479,11 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
     actions,
     position: positionView(input, cards),
     plan: modal ? null : planView(input, cards),
-    tempo: modal ? null : tempoView(input),
+    tempo: modal ? null : tempoView(input, strength),
     // Сила стола за модалкой ОСТАЁТСЯ, как и прогноз места: она про борд
     // и ход целиком, а не про золото и витрину, которых за модальным
     // экраном нет. Выбор тринкета её не устаревает.
-    strength: strengthView(input),
+    strength,
     forecast: forecastView(input),
     // Пока открыт модальный экран, стол игре не принадлежит: карты витрины
     // и борда за ним, и кольцо на них показывало бы в никуда. А вот сам
@@ -967,7 +991,11 @@ function planView(input: ViewInput, cards: CardIndex): OverlayPlan | null {
  * Вне таверны блока нет: советовать подъём в бою не о чем, и советник там
  * ничего не считает.
  */
-function tempoView(input: ViewInput, rules: TavernRules = DEFAULT_TAVERN_RULES): OverlayTempo | null {
+function tempoView(
+  input: ViewInput,
+  strength: OverlayStrength | null,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): OverlayTempo | null {
   const advice = input.tavern;
   if (advice === null) return null;
   const { state } = input;
@@ -1010,6 +1038,7 @@ function tempoView(input: ViewInput, rules: TavernRules = DEFAULT_TAVERN_RULES):
     curveTier,
     note,
     upgrade,
+    risk: upgradeRisk(state, strength),
     // Ярлык говорит ДВЕ вещи, и первая из них — «это не совет».
     //
     // Жалоба игрока по part43 дословно: «что означает надпись про темп? она
@@ -1020,6 +1049,37 @@ function tempoView(input: ViewInput, rules: TavernRules = DEFAULT_TAVERN_RULES):
     // «прогноз, не совет» (`OverlayForecast`).
     label: 'темп — не совет · кривая сообщества, не замер',
   };
+}
+
+/**
+ * Строка риска к подъёму: чем платит ход, потраченный на тир.
+ *
+ * Показывается там и только там, где вопрос вообще стоит: цена подъёма
+ * видна в логе, золота на неё хватает, и числа силы посчитаны. Ни одного
+ * своего числа строка не заводит — берёт готовые из `OverlayStrength`,
+ * иначе то же правило было бы определено дважды и разъехалось бы молча.
+ *
+ * Почему числа силы отвечают именно на этот вопрос: они посчитаны
+ * на борде КАК ЕСТЬ, до покупок этого хода («если бой случится прямо
+ * сейчас»), а подъём — это и есть ход, потраченный не на стол. Цена
+ * поражения приходит уже отфильтрованной порогом наблюдений, и `null`
+ * там значит «замерено по горстке боёв» — тогда её место занимает
+ * свой запас здоровья, а не выдуманное число.
+ */
+function upgradeRisk(state: GameState, strength: OverlayStrength | null): string | null {
+  if (strength === null) return null;
+  const cost = state.tavernUpgradeCost;
+  if (cost === null || state.gold < cost) return null;
+  if (state.maxTechLevel !== null && state.techLevel >= state.maxTechLevel) return null;
+
+  // «Если подняться и не покупать» — это ровно то допущение, при котором
+  // посчитана доля боёв (D192: число отвечает «если бой случится прямо
+  // сейчас»). Сказать «подъём стол не усилит» было бы сильнее правды:
+  // сдача после подъёма ещё может кого-то купить.
+  const head = `если подняться и не покупать: ${String(Math.round(strength.percent))} % боёв`;
+  return strength.loss === null
+    ? `${head}, у вас ${String(strength.hp)} hp`
+    : `${head}, поражение ~${String(Math.round(strength.loss.hp))} hp при ваших ${String(strength.hp)}`;
 }
 
 /**

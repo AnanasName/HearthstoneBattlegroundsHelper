@@ -633,6 +633,9 @@
           : '';
         target.appendChild(line(`ход таверны ${tempo.tavernTurn}${upgrade}`));
         if (tempo.note) target.appendChild(line(tempo.note));
+        // Чем платит ход, потраченный на тир: те же числа блока силы,
+        // приведённые к решению («могу ли перейти безопасно», part68).
+        if (tempo.risk) target.appendChild(line(tempo.risk));
       }
 
       function strengthBlock(target, strength) {

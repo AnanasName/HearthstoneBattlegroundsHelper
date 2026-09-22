@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { FieldStrength } from '../../src/advisors/strength/strength.js';
+import type { TavernAdvice } from '../../src/advisors/tavern/advisor.js';
 import { buildView, type ViewInput } from '../../src/overlay/view.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { EMPTY_STATE, type GameState } from '../../src/state/types.js';
@@ -144,6 +145,79 @@ describe('блок силы стола', () => {
     );
 
     expect(view.strength).not.toBeNull();
+  });
+});
+
+/**
+ * Строка риска к подъёму таверны (part68).
+ *
+ * Сообщение игрока дословно: «не всегда понимаю, могу ли перейти на 6
+ * безопасно, поэтому остаюсь на 5». Числа для ответа на экране были —
+ * и доля боёв, и цена поражения, — но лежали в блоке силы и ни к какому
+ * решению не относились. Строка их не пересчитывает: она называет
+ * структурный факт и повторяет готовые числа там, где выбор и делается.
+ */
+describe('риск подъёма в блоке темпа', () => {
+  const advice: TavernAdvice = {
+    gold: 9,
+    targetTier: 5,
+    shopValues: [],
+    trinkets: [],
+    choice: [],
+    playPlan: [],
+    heroChoice: [],
+    trinketForecast: null,
+    recommendations: [],
+  };
+  const upgradable: GameState = { ...state, gold: 9, tavernUpgradeCost: 7, tavernUpgradeTarget: 5 };
+
+  it('называет цену хода и повторяет числа силы, не заводя своих', () => {
+    const view = buildView(input({ state: upgradable, tavern: advice }), cards);
+
+    expect(view.tempo?.risk).toBe('если подняться и не покупать: 62 % боёв, поражение ~8 hp при ваших 28');
+    // Те же числа, что в блоке силы: второго определения нет.
+    expect(view.strength?.percent).toBeCloseTo(62.4, 5);
+  });
+
+  it('вердикта не выносит: ни «безопасно», ни «опасно»', () => {
+    const view = buildView(input({ state: upgradable, tavern: advice }), cards);
+
+    expect(view.tempo?.risk).not.toContain('безопас');
+    expect(view.tempo?.risk).not.toContain('опасн');
+    expect(view.tempo?.label).toContain('не совет');
+  });
+
+  it('без надёжной цены поражения печатает свой запас, а не выдуманное число', () => {
+    const thin = { ...strength, damageOnLoss: 15.5, damageLosses: 4 };
+    const view = buildView(input({ state: upgradable, tavern: advice, strength: thin }), cards);
+
+    expect(view.tempo?.risk).toBe('если подняться и не покупать: 62 % боёв, у вас 28 hp');
+  });
+
+  it('молчит, когда подъём не по карману или чисел силы нет', () => {
+    const poor = buildView(input({ state: { ...upgradable, gold: 3 }, tavern: advice }), cards);
+    expect(poor.tempo?.risk).toBeNull();
+
+    const noStrength = buildView(
+      input({ state: upgradable, tavern: advice, strength: undefined }),
+      cards,
+    );
+    expect(noStrength.tempo?.risk).toBeNull();
+
+    // Цены подъёма в логе нет — вопроса «переходить ли» тоже нет.
+    const noButton = buildView(
+      input({ state: { ...upgradable, tavernUpgradeCost: null }, tavern: advice }),
+      cards,
+    );
+    expect(noButton.tempo?.risk).toBeNull();
+  });
+
+  it('на предельном тире молчит: подниматься некуда', () => {
+    const capped = buildView(
+      input({ state: { ...upgradable, maxTechLevel: 4 }, tavern: advice }),
+      cards,
+    );
+    expect(capped.tempo?.risk).toBeNull();
   });
 });
 
