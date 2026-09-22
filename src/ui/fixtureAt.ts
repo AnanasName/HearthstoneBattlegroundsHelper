@@ -161,6 +161,10 @@ function main(): number {
   if (plan.steps.length >= 2) console.log(`  ${spendPlanLine(plan, cards)}`);
   advice.recommendations.slice(0, 5).forEach((r, i) => {
     console.log(`  ${String(i + 1)}. ${recommendationLine(r, cards)}  (${r.score.toFixed(1)})`);
+    // Обоснование печатается всегда: вопрос «почему мне это советуют»
+    // приходит от игрока по кадру, а в оверлее reason не виден (part37,
+    // part64). Диагностике прятать его незачем.
+    console.log(`     ← ${r.reason}`);
   });
   return 0;
 }

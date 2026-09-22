@@ -152,4 +152,7 @@ npm run spike:arena                 чей ход лучше по ближайш
 npm run spike:strength              калибрована ли «сила стола» (сверка с фактическими боями)
 npm run field:fit                   пересобрать эталонное поле бордов в data/field/
 npm run capture                     архивация растущего Power.log
+npm run fixture:passport            паспорта партий в логе; --frame, --game/--write
+npm run fixture:at -- partN ЧЧ:ММ   кадр игрока по часам: состояние, действия, советы с обоснованиями
+npm run review -- partN [--turn=N]  разбор партии: совет против поступка на каждой точке решения
 ```
