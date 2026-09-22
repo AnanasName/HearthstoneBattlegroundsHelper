@@ -146,7 +146,9 @@ function advice(patch: Partial<PositionAdvice> = {}): PositionAdvice {
   } as PositionAdvice;
 }
 
-function estimate(): PositionAdvice['current']['estimate'] {
+function estimate(
+  patch: Partial<PositionAdvice['current']['estimate']> = {},
+): PositionAdvice['current']['estimate'] {
   return {
     sims: 1000,
     won: 540,
@@ -156,6 +158,7 @@ function estimate(): PositionAdvice['current']['estimate'] {
     lostLethal: 0,
     damageWon: 0,
     damageLost: 0,
+    ...patch,
   };
 }
 
@@ -1095,6 +1098,34 @@ describe('вид оверлея', () => {
     expect(view.position?.tone).toBe('good');
     expect(view.position?.text).toContain('+6.2 п.п.');
     expect(view.position?.text).not.toContain('устарела');
+  });
+
+  it('о смерти в этом бою НЕ говорит, даже когда счёт её видит', () => {
+    // Сторож замера, а не описание поведения: число смерти против ОДНОГО
+    // соперника замерено (`spike:lethal`, 22.09) и в корзине «≥ 50 %»
+    // переоценивает — 86.7 % обещано против 61.7 % фактических на 47 боях.
+    // Против поля оно калибровано и потому стоит в блоке силы. Прежде чем
+    // вносить его сюда, нужен замер, а не намерение.
+    const deadly = advice({
+      report: {
+        top: [],
+        current: {
+          key: 'b',
+          board: board([101, 102]),
+          estimate: estimate({ lostLethal: 123 }),
+          score: 0.5,
+        },
+        evaluated: 120,
+        simulations: 40_000,
+        elapsedMs: 3200,
+        space: { size: 2, total: 2, distinct: 2 },
+      },
+    } as unknown as Partial<PositionAdvice>);
+
+    const view = buildView(input({ position: { kind: 'advice', advice: deadly, target: single() } }), cards);
+
+    expect(view.position?.text).toContain('54% побед');
+    expect(view.position?.text).not.toContain('смерть');
   });
 
   it('совет по устаревшей картинке помечается', () => {

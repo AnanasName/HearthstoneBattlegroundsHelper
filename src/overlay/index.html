@@ -689,6 +689,14 @@
               : `${source} · у вас ${strength.hp} hp`,
           ),
         );
+
+        // Третья строка — и только когда есть что сказать. Смерть приходит
+        // уже отфильтрованной порогом (`death === null` — «этот бой вас
+        // не убивает»), поэтому условия про проценты здесь нет: разметка
+        // по-прежнему ничего не решает.
+        if (strength.death !== null && strength.death !== undefined) {
+          target.appendChild(line(`смерть в ${Math.round(strength.death)} % этих боёв`));
+        }
       }
 
       function forecastBlock(target, forecast) {

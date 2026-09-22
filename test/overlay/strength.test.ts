@@ -46,6 +46,9 @@ const state: GameState = {
 
 const strength: FieldStrength = {
   percent: 62.4,
+  // Смертей нет — это положение по умолчанию в тестах блока: полный запас
+  // здоровья, и вопрос «доживу ли» не стоит. Ставят её те тесты, где стоит.
+  deathPercent: 0,
   boards: 41,
   tavernTurn: 6,
   damageOnLoss: 7.5,
@@ -123,6 +126,23 @@ describe('блок силы стола', () => {
     expect(view.strength?.percent).toBeCloseTo(62.4, 5);
   });
 
+  it('печатает смерть, когда она есть, и молчит, когда её нет', () => {
+    // Молчание здесь — тоже ответ: пока строки нет, ближайший бой игрока
+    // не убивает. «Смерть в 0 %» заняла бы строку и не сказала бы ничего.
+    expect(buildView(input(), cards).strength?.death).toBeNull();
+
+    const deadly = buildView(input({ strength: { ...strength, deathPercent: 23.5 } }), cards);
+    expect(deadly.strength?.death).toBeCloseTo(23.5, 5);
+  });
+
+  it('смерть ниже процента не печатает: она округлилась бы в ноль', () => {
+    const view = buildView(input({ strength: { ...strength, deathPercent: 0.7 } }), cards);
+
+    expect(view.strength?.death).toBeNull();
+    // Само число силы при этом на месте: порог смерти к нему отношения не имеет.
+    expect(view.strength?.percent).toBeCloseTo(62.4, 5);
+  });
+
   it('переживает модальный экран, как и прогноз места', () => {
     // Блок про борд и ход целиком, а не про золото и витрину, которых
     // за модалкой нет: выбор тринкета его не устаревает.
@@ -177,6 +197,31 @@ describe('риск подъёма в блоке темпа', () => {
     expect(view.tempo?.risk).toBe('если подняться и не покупать: 62 % боёв, поражение ~8 hp при ваших 28');
     // Те же числа, что в блоке силы: второго определения нет.
     expect(view.strength?.percent).toBeCloseTo(62.4, 5);
+  });
+
+  it('вместо средней цены поражения называет смерть, когда та есть', () => {
+    // Игрок спросил дословно: «не всегда понимаю, могу ли перейти на 6
+    // безопасно». Среднее по поражениям на это не отвечает — отвечает доля
+    // боёв, в которых он не доживает до следующего хода.
+    const view = buildView(
+      input({ state: upgradable, tavern: advice, strength: { ...strength, deathPercent: 18.2 } }),
+      cards,
+    );
+
+    expect(view.tempo?.risk).toBe('если подняться и не покупать: 62 % боёв, смерть в 18 % при ваших 28 hp');
+    // Цена поражения не исчезла из продукта — она осталась в блоке силы.
+    expect(view.strength?.loss).toEqual({ hp: 7.5, losses: 23 });
+  });
+
+  it('называет смерть и там, где средняя цена поражения молчит по узкой выборке', () => {
+    // Это главное следствие: таблица цены поражения на поздних ходах
+    // посчитана по горстке боёв и прячется — ровно там, где вопрос о смерти
+    // и стоит. Смерть считается на том же прогоне, что доля боёв, и потому
+    // есть всегда, когда есть сама доля.
+    const thin = { ...strength, damageOnLoss: 15.5, damageLosses: 4, deathPercent: 41.0 };
+    const view = buildView(input({ state: upgradable, tavern: advice, strength: thin }), cards);
+
+    expect(view.tempo?.risk).toBe('если подняться и не покупать: 62 % боёв, смерть в 41 % при ваших 28 hp');
   });
 
   it('вердикта не выносит: ни «безопасно», ни «опасно»', () => {
@@ -240,5 +285,16 @@ describe('строка силы стола в терминале', () => {
 
     expect(line).toContain('у вас 28 hp');
     expect(line).not.toContain('поражение здесь стоит');
+  });
+
+  it('смерть дописывает хвостом, а не вместо цены: в терминале строка не обрезается', () => {
+    const line = strengthLine({ ...strength, deathPercent: 18.2 }, 28);
+
+    expect(line).toContain('поражение здесь стоит ~8 hp');
+    expect(line).toContain('смерть в 18 %');
+  });
+
+  it('без смертей о смерти не говорит вовсе', () => {
+    expect(strengthLine(strength, 28)).not.toContain('смерть');
   });
 });

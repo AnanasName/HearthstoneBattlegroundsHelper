@@ -18,6 +18,7 @@ import {
   ACTION_LABEL,
   buyCheckLine,
   choiceLine,
+  MIN_DEATH_TO_SHOW,
   minionLabel,
   noOpponentReason,
   opponentStale,
@@ -291,6 +292,19 @@ export interface OverlayStrength {
    * на двадцати очках — разные положения.
    */
   readonly loss: { readonly hp: number; readonly losses: number } | null;
+  /**
+   * В скольких процентах боёв поля игрок УМИРАЕТ, или `null` — молчим.
+   *
+   * Отвечает на вопрос, на который цена поражения ответить не может:
+   * та — среднее по поражениям, а смерть решает правый хвост урона.
+   * Считается на том же прогоне, что и доля побед, и потому знает
+   * и борд, и запас здоровья (`FieldStrength.deathPercent`).
+   *
+   * `null` ставится ниже порога `MIN_DEATH_TO_SHOW`: «смерть в 0 %» —
+   * это шум в блоке, где каждая строка вытесняет расстановку (D164).
+   * Молчание здесь значит «этот бой вас не убивает», и значит именно это.
+   */
+  readonly death: number | null;
   /** Своё здоровье с бронёй. */
   readonly hp: number;
   /** Подпись блока — та же роль, что `label` у темпа и прогноза. */
@@ -1077,6 +1091,20 @@ function upgradeRisk(state: GameState, strength: OverlayStrength | null): string
   // сейчас»). Сказать «подъём стол не усилит» было бы сильнее правды:
   // сдача после подъёма ещё может кого-то купить.
   const head = `если подняться и не покупать: ${String(Math.round(strength.percent))} % боёв`;
+  // Смерть ВЫТЕСНЯЕТ среднюю цену поражения, а не дописывается к ней, и это
+  // не экономия длины (хотя строка и не растёт). Игрок спросил дословно:
+  // «не всегда понимаю, могу ли перейти на 6 безопасно» — то есть про то,
+  // доживёт ли он до следующего хода, а на это среднее не отвечает. Цена
+  // поражения остаётся в блоке силы, где стоит вся картина.
+  //
+  // И вторая разница, техническая: средняя цена приходит из таблицы по ходам
+  // и на самых поздних ходах МОЛЧИТ по числу наблюдений (в нынешнем снапшоте
+  // поля — с 16-го хода таверны, где за ней стоит один бой). Смерть же
+  // считается на том же прогоне, что доля боёв, и потому есть всегда, когда
+  // есть сама доля.
+  if (strength.death !== null) {
+    return `${head}, смерть в ${String(Math.round(strength.death))} % при ваших ${String(strength.hp)} hp`;
+  }
   return strength.loss === null
     ? `${head}, у вас ${String(strength.hp)} hp`
     : `${head}, поражение ~${String(Math.round(strength.loss.hp))} hp при ваших ${String(strength.hp)}`;
@@ -1120,6 +1148,7 @@ function strengthView(input: ViewInput): OverlayStrength | null {
       strength.damageOnLoss === null || strength.damageLosses < MIN_LOSSES_TO_SHOW
         ? null
         : { hp: strength.damageOnLoss, losses: strength.damageLosses },
+    death: strength.deathPercent < MIN_DEATH_TO_SHOW ? null : strength.deathPercent,
     hp,
     // Ярлык — то же слово, что у темпа и прогноза: это не совет. Больше
     // в нём ничего нет намеренно — что за проценты, сказано в самой строке
