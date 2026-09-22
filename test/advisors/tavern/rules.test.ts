@@ -3789,6 +3789,160 @@ describe('синергия с механикой из текста (part15, Titu
     });
   });
 
+  describe('ПОКУПКА удвоителя: что он удвоит (part68, D280)', () => {
+    // Пул теста: восемь карт тиров 1..5, из них РОВНО ОДНА несёт клич
+    // с добычей и ОДНА — хрип с добычей. Доли считаются от этого пула,
+    // поэтому числа в тесте выводятся, а не вписываются.
+    const doublerCards = createCardIndex([
+      {
+        id: 'BRANN',
+        name: 'Бранн',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        mechanics: ['AURA'],
+        text: 'Your <b>Battlecries</b> trigger twice.',
+      },
+      {
+        id: 'TITUS',
+        name: 'Тит',
+        type: 'Minion',
+        techLevel: 5,
+        races: [],
+        isBaconPool: true,
+        mechanics: ['AURA'],
+        text: 'Your <b>Deathrattles</b> trigger an extra time.',
+      },
+      {
+        id: 'BC_GET',
+        name: 'Кличевой добытчик',
+        type: 'Minion',
+        techLevel: 3,
+        races: ['ELEMENTAL'],
+        isBaconPool: true,
+        mechanics: ['BATTLECRY'],
+        text: '<b>Battlecry:</b> Get a random Elemental.',
+      },
+      {
+        id: 'BC_STATS',
+        name: 'Кличевой без добычи',
+        type: 'Minion',
+        techLevel: 3,
+        races: ['ELEMENTAL'],
+        isBaconPool: true,
+        mechanics: ['BATTLECRY'],
+        text: '<b>Battlecry:</b> Give your minions +2/+2.',
+      },
+      {
+        id: 'DR_GET',
+        name: 'Хрип с добычей',
+        type: 'Minion',
+        techLevel: 3,
+        races: ['UNDEAD'],
+        isBaconPool: true,
+        mechanics: ['DEATHRATTLE'],
+        text: '<b>Deathrattle:</b> Get a random Undead.',
+      },
+      { id: 'D_LUMP', name: 'Тело', type: 'Minion', techLevel: 1, races: [], isBaconPool: true },
+      { id: 'D_LUMP2', name: 'Второе тело', type: 'Minion', techLevel: 2, races: [], isBaconPool: true },
+      { id: 'D_LUMP3', name: 'Третье тело', type: 'Minion', techLevel: 4, races: [], isBaconPool: true },
+    ]);
+    const doublerDeps = { cards: doublerCards };
+    const rules = DEFAULT_TAVERN_RULES;
+    const brann = minion(9, { cardId: 'BRANN', attack: 2, health: 4, techLevel: 5 });
+    const titus = minion(9, { cardId: 'TITUS', attack: 4, health: 4, techLevel: 5 });
+    // Тир 5 и ход таверны состояния — те же, что у кадра part68.
+    const at = (patch: Partial<GameState> = {}): GameState =>
+      state({ turn: 19, techLevel: 5, ...patch });
+    const buys = (turn: number): number => {
+      const table = rules.remainingTavernBuys;
+      return table[Math.min(tavernTurnOf(turn), table.length) - 1] ?? 0;
+    };
+    // В пуле теста один кличевой добытчик из восьми карт тиров 1..5.
+    const bcShare = 1 / 8;
+    const drShare = 1 / 8;
+
+    it('удвоитель кличей платят РУКА и будущие покупки, а не борд', () => {
+      // Носитель в руке: клич впереди, он будет разыгран и удвоен.
+      const inHand = minionValue(
+        brann,
+        at({ hand: [minion(1, { cardId: 'BC_GET', attack: 3, health: 3 })] }),
+        doublerDeps,
+      );
+      expect(inHand.doublerCarriers).toBe(1);
+      expect(inHand.doublerFuture).toBeCloseTo(buys(19) * bcShare, 5);
+      expect(inHand.doublerBuy).toBeCloseTo(
+        (1 + buys(19) * bcShare) * rules.heroPowerSpellValue,
+        5,
+      );
+
+      // Тот же носитель на БОРДЕ: клич позади (та же граница, что у D278),
+      // остаётся только ожидание от будущих покупок.
+      const onBoard = minionValue(
+        brann,
+        at({ board: [minion(1, { cardId: 'BC_GET', attack: 3, health: 3 })] }),
+        doublerDeps,
+      );
+      expect(onBoard.doublerCarriers).toBe(0);
+      expect(onBoard.doublerFuture).toBeCloseTo(buys(19) * bcShare, 5);
+
+      // Пустой борд и пустая рука Бранну не приговор (D218): будущее платит.
+      expect(minionValue(brann, at(), doublerDeps).doublerBuy).toBeGreaterThan(0);
+    });
+
+    it('клич без добычи не носитель: цены у удвоения статов нет (D046)', () => {
+      const stats = minionValue(
+        brann,
+        at({ hand: [minion(1, { cardId: 'BC_STATS', attack: 3, health: 3 })] }),
+        doublerDeps,
+      );
+      expect(stats.doublerCarriers).toBe(0);
+    });
+
+    it('удвоитель ХРИПОВ платит борд, и будущего слагаемого у него нет (D218)', () => {
+      const withCarrier = minionValue(
+        titus,
+        at({ board: [minion(1, { cardId: 'DR_GET', attack: 3, health: 3 })] }),
+        doublerDeps,
+      );
+      expect(withCarrier.doublerCarriers).toBe(1);
+      expect(withCarrier.doublerFuture).toBe(0);
+      expect(withCarrier.doublerBuy).toBeCloseTo(rules.heroPowerSpellValue, 5);
+      expect(drShare).toBeGreaterThan(0);
+
+      // Без носителей хрип не срабатывает вовсе — и слагаемое пусто.
+      const bare = minionValue(titus, at({ board: [minion(1, { cardId: 'D_LUMP' })] }), doublerDeps);
+      expect(bare.doublerBuy).toBe(0);
+    });
+
+    it('второй удвоитель той же механики не платит: кратности не складываются (D224)', () => {
+      const already = at({
+        board: [
+          minion(1, { cardId: 'BRANN', attack: 2, health: 4 }),
+          minion(2, { cardId: 'BC_GET', attack: 3, health: 3 }),
+          minion(4, { cardId: 'DR_GET', attack: 3, health: 3 }),
+        ],
+        hand: [minion(3, { cardId: 'BC_GET', attack: 3, health: 3 })],
+      });
+      // Бранн на борде уже есть — второй не удвоит ничего сверх него.
+      expect(minionValue(brann, already, doublerDeps).doublerBuy).toBe(0);
+      // А удвоитель ДРУГОЙ механики рядом с Бранном считается своим счётом:
+      // хрип с добычей на борде платит Титу, и чужой удвоитель ему не помеха.
+      const titusValue = minionValue(titus, already, doublerDeps);
+      expect(titusValue.doublerCarriers).toBe(1);
+      expect(titusValue.doublerBuy).toBeCloseTo(rules.heroPowerSpellValue, 5);
+    });
+
+    it('обычной карте слагаемое не начисляется вовсе', () => {
+      const lump = minion(9, { cardId: 'D_LUMP', attack: 1, health: 1 });
+      const value = minionValue(lump, at({ hand: [minion(1, { cardId: 'BC_GET' })] }), doublerDeps);
+      expect(value.doublerBuy).toBe(0);
+      expect(value.doublerCarriers).toBe(0);
+      expect(value.doublerFuture).toBe(0);
+    });
+  });
+
   describe('клич кормит плательщика борда (part54, D224)', () => {
     const payoffCards = createCardIndex([
       {

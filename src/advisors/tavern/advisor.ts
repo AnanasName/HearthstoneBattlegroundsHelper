@@ -405,6 +405,12 @@ export interface ValueBreakdown {
   readonly spellMagnet: number;
   /** Удвоитель механики на борде: лишняя принесённая карта по курсу. */
   readonly doubler: number;
+  /** Покупка САМОГО удвоителя: что он удвоит — в руке, на борде и впереди. */
+  readonly doublerBuy: number;
+  /** Известные носители под удвоение: рука у кличей, борд у хрипов. */
+  readonly doublerCarriers: number;
+  /** Ожидаемые носители среди будущих покупок (только удвоитель кличей). */
+  readonly doublerFuture: number;
   /** Синергия с СИЛОЙ ГЕРОЯ: её текст называет племя кандидата или продажу. */
   readonly heroPower: number;
   /**
@@ -823,6 +829,138 @@ const DOUBLED_MECHANICS_CACHE = new WeakMap<
   TavernRules,
   WeakMap<CardIndex, Map<string, readonly string[]>>
 >();
+
+/**
+ * Несёт ли миньон триггер, который удвоитель удваивает И который ПРИНОСИТ
+ * карту, — то есть носитель, чьё удвоение имеет цену (D046).
+ */
+function carriesDoubledBringer(
+  m: Minion,
+  mechanics: readonly string[],
+  cards: CardIndex,
+  rules: TavernRules,
+): boolean {
+  const info = cards.info(m.cardId);
+  if (info === null) return false;
+  const own = new Set(info.mechanics);
+  if (!mechanics.some((mech) => own.has(mech))) return false;
+  const text = info.text ?? '';
+  return text !== '' && rules.triggerGetWords.some((word) => new RegExp(word, 'i').test(text));
+}
+
+/**
+ * Доля пула тиров 1..`techLevel`, чей триггер названной механики ПРИНОСИТ
+ * карту, — то есть с какой вероятностью следующая покупка окажется
+ * носителем под удвоение.
+ *
+ * Это читаемый факт справочника, а не коэффициент: те же `poolOfTier`,
+ * которыми считается средняя ценность пула. Замер 22.09 по снапшоту
+ * (`BG`-пул, тиры 1..5, 370 карт): клич с добычей — 5.9%, хрип — 8.1%,
+ * конец хода — 2.4%. Считается один раз на пару (справочник, правила)
+ * и тир: без кэша 409 карт разбирались бы регуляркой на каждого кандидата.
+ */
+function poolBringerShare(
+  mechanics: readonly string[],
+  techLevel: number,
+  cards: CardIndex,
+  rules: TavernRules,
+): number {
+  const byRules = POOL_BRINGER_CACHE.get(rules) ?? new WeakMap<CardIndex, Map<string, number>>();
+  POOL_BRINGER_CACHE.set(rules, byRules);
+  const byCards = byRules.get(cards) ?? new Map<string, number>();
+  byRules.set(cards, byCards);
+  const key = `${[...mechanics].sort().join('+')}@${String(techLevel)}`;
+  const cached = byCards.get(key);
+  if (cached !== undefined) return cached;
+
+  let all = 0;
+  let bringers = 0;
+  for (let tier = 1; tier <= techLevel; tier++) {
+    for (const info of cards.poolOfTier(tier)) {
+      all++;
+      const own = new Set(info.mechanics);
+      if (!mechanics.some((mech) => own.has(mech))) continue;
+      const text = info.text ?? '';
+      if (text !== '' && rules.triggerGetWords.some((word) => new RegExp(word, 'i').test(text))) {
+        bringers++;
+      }
+    }
+  }
+  const share = all === 0 ? 0 : bringers / all;
+  byCards.set(key, share);
+  return share;
+}
+
+const POOL_BRINGER_CACHE = new WeakMap<TavernRules, WeakMap<CardIndex, Map<string, number>>>();
+
+/**
+ * Чего стоит КУПИТЬ удвоителя — зеркало слагаемого `doubler`, которое
+ * платит кандидату за удвоитель, УЖЕ стоящий на борде.
+ *
+ * Связь читалась ровно в одну сторону, и это стоило part68 (ход таверны 10):
+ * Brann Bronzebeard `BG_LOE_077` получил 14.5 очка и одиннадцатое место,
+ * а игрок купил его и сделал движком партии. Курс здесь тот же самый
+ * (`heroPowerSpellValue` за одну лишнюю принесённую карту, D046), и цены
+ * удвоению статов и аур по-прежнему нет — выдумывать её мы не будем.
+ *
+ * ## Кто платит, зависит от механики, и это уже решено (D218)
+ *
+ * «Хрип срабатывает смертью носителя в бою: нет носителей — нет эффекта.
+ * Клич Бранна срабатывает РОЗЫГРЫШЕМ, то есть окупается теми, кого мы ЕЩЁ
+ * купим, и пустой борд ему не приговор». Отсюда две зоны:
+ *
+ * - **Удвоитель КЛИЧЕЙ** (Бранн): платят карты РУКИ, которые ещё предстоит
+ *   разыграть, и будущие покупки. У миньона борда клич позади — он не платит
+ *   ничего, та же граница, что у `battlecryEater` (D278).
+ * - **Удвоитель ХРИПОВ и КОНЦА ХОДА** (Titus Rivendare, Drakkari Enchanter):
+ *   платят носители НА БОРДЕ, их триггеры срабатывают, пока те стоят.
+ *   Будущего слагаемого у них нет вовсе — ровно по D218.
+ *
+ * ## Почему потолка борда здесь нет
+ *
+ * Витринный бафф упирается в семь мест (`shopBuffValue`): статы доезжают
+ * телами, а тел больше семи не бывает. Здесь доезжает СРАБАТЫВАНИЕ:
+ * купленный, разыгранный и проданный миньон свой клич отыграл, и место
+ * на борде ему для этого не нужно. Поэтому число будущих покупок берётся
+ * из `remainingTavernBuys` целиком.
+ *
+ * ## Чего слагаемое НЕ знает
+ *
+ * Золотой Бранн `TB_BaconUps_045` («trigger three times») удвоителем
+ * не считается вовсе: шаблон `mechanicDoublerWords` знает «twice»
+ * и «an extra time», а «three times» читает только `battlecryTimesWords`
+ * в канале плательщиков. Разрыв прежний, этой правкой не тронут.
+ */
+function doublerBuyValue(
+  candidate: Minion,
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+): { readonly points: number; readonly known: number; readonly future: number } {
+  const none = { points: 0, known: 0, future: 0 };
+  const mechanics = doubledMechanicsOf(candidate.cardId, cards, rules);
+  if (mechanics.length === 0) return none;
+
+  // Свой же удвоитель на борде второй раз механику не удваивает: кратности
+  // не складываются (D224), и платить кандидату за уже купленное нечем.
+  const already = state.board.some(
+    (m) =>
+      m.entityId !== candidate.entityId &&
+      doubledMechanicsOf(m.cardId, cards, rules).some((mech) => mechanics.includes(mech)),
+  );
+  if (already) return none;
+
+  const byPlay = mechanics.includes('BATTLECRY');
+  const zone = byPlay ? state.hand : state.board;
+  const known = zone.filter(
+    (m) => m.entityId !== candidate.entityId && carriesDoubledBringer(m, mechanics, cards, rules),
+  ).length;
+  const future = byPlay
+    ? remainingBuys(state, rules) * poolBringerShare(mechanics, state.techLevel, cards, rules)
+    : 0;
+
+  return { points: (known + future) * rules.heroPowerSpellValue, known, future };
+}
 
 /** Сколько своих миньонов принадлежит хотя бы одному из племён. */
 function boardMatesOfTribes(
@@ -1711,6 +1849,9 @@ export function minionValue(
     text !== '' && rules.triggerGetWords.some((word) => new RegExp(word, 'i').test(text));
   const doubler = doubles.length > 0 && brings ? rules.heroPowerSpellValue : 0;
 
+  // Обратная сторона той же связи: покупается САМ удвоитель (part68, D280).
+  const doublerBuy = doublerBuyValue(candidate, state, cards, rules);
+
   // Сила героя — такой же читаемый текст, как текст миньона борда, и связи
   // из неё читаются теми же таблицами. Прежде ценность покупки смотрела
   // только на борд и на саму карту, и герой не влиял ни на что (part22,
@@ -1801,6 +1942,9 @@ export function minionValue(
     namedCard,
     spellMagnet,
     doubler,
+    doublerBuy: doublerBuy.points,
+    doublerCarriers: doublerBuy.known,
+    doublerFuture: doublerBuy.future,
     heroPower,
     activation,
     heroPowerPlay,
@@ -1831,6 +1975,7 @@ export function minionValue(
       namedCard +
       spellMagnet +
       doubler +
+      doublerBuy.points +
       heroPower +
       activation +
       heroPowerPlay +
@@ -2748,6 +2893,22 @@ export function withPlayPayoff(
 /** Причина к совету: кто платит за этот розыгрыш. */
 function playPayoffNote(points: number, payers: readonly string[]): string {
   return `розыгрыш кормит: ${payers.join(', ')} (${points.toFixed(1)})`;
+}
+
+/**
+ * Причина к совету: покупается удвоитель, и названо, ЧТО он удвоит, —
+ * известные носители и ожидание от будущих покупок (D280).
+ *
+ * Ожидание печатается с одним знаком: «ещё 0.9 среди будущих покупок»
+ * честнее целого числа, которого нет, и сразу видно, что это оценка,
+ * а не факт борда.
+ */
+function doublerBuyNote(value: ValueBreakdown): string {
+  const parts = [
+    value.doublerCarriers > 0 ? `своих носителей ${String(value.doublerCarriers)}` : '',
+    value.doublerFuture > 0 ? `ещё ${value.doublerFuture.toFixed(1)} среди будущих покупок` : '',
+  ].filter((x) => x !== '');
+  return `удвоит триггер с добычей: ${parts.join(', ')} (${value.doublerBuy.toFixed(1)})`;
 }
 
 /** Причина к совету: сам кандидат платит за розыгрыши своего племени. */
@@ -4114,6 +4275,7 @@ export function buyRules(
         notes.push(`связана по имени: своих ${String(value.namedCardMates)}`);
       }
       if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
+      if (value.doublerBuy > 0) notes.push(doublerBuyNote(value));
       if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
       if (value.playEngine > 0) notes.push(playEngineNote(value.playEngine));
       if (value.tavernEater > 0) notes.push(tavernEaterNote(value.tavernEater));
@@ -12300,6 +12462,7 @@ export function choiceAdvice(
       notes.push(`племя из текста: своих ${String(value.textTribeMates)}`);
     }
     if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
+    if (value.doublerBuy > 0) notes.push(doublerBuyNote(value));
     if (info.magnetic) notes.push('магнитный');
 
     return {

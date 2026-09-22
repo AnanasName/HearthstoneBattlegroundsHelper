@@ -1,9 +1,14 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { adviseTavern, rerollRule } from '../../src/advisors/tavern/advisor.js';
+import {
+  adviseTavern,
+  battlecryPayoffOf,
+  minionValue,
+  rerollRule,
+} from '../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES, tavernTurnOf } from '../../src/advisors/tavern/rules.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
-import type { GameState } from '../../src/state/types.js';
+import type { GameState, Minion } from '../../src/state/types.js';
 import { frameAt, parseClock, sliceLogByClock } from '../../src/ui/logSlice.js';
 import { part68Game } from '../fixtures.js';
 
@@ -78,5 +83,79 @@ describe('part68: обновление при золоте, которого н�
     const seen = [...state.seenShopCardIds];
     expect(seen.length).toBeGreaterThan(100);
     expect(seen.filter((id) => cards.info(id) === null)).toEqual([]);
+  });
+});
+
+/**
+ * Кадр 21:32:25 — ход 19, 10-й ход таверны, точка решения (золото не тронуто).
+ *
+ * В витрине Brann Bronzebeard `BG_LOE_077` 2/4 за 3. До правки он стоил 14.5
+ * очка и стоял ОДИННАДЦАТЫМ в списке — тело 2/4 плюс рядовая связь; игрок
+ * купил его этим же ходом и сделал движком партии (545/681 к 15-му ходу).
+ *
+ * Фактура кадра объясняет, почему узкое чтение «носители в руке» здесь
+ * не спасало: в руке шесть карт, и НИ ОДНА не кличевая (Ballers — «When you
+ * sell this», Flaming Enforcer — конец хода, Waveling — хрип), плательщиков
+ * за клич на борде нет вовсе. Бранна окупают будущие покупки — ровно то,
+ * что сказано в D218: «клич Бранна срабатывает РОЗЫГРЫШЕМ, то есть
+ * окупается теми, кого мы ЕЩЁ купим, и пустой борд ему не приговор».
+ */
+describe('part68: покупка удвоителя кличей на 10-м ходу таверны', () => {
+  let cards: CardIndex;
+  let state: GameState;
+  let brann: Minion;
+
+  beforeAll(() => {
+    cards = loadCardIndex();
+    const clock = parseClock('21:32:25');
+    expect(clock).not.toBeNull();
+    const slice = sliceLogByClock(part68Game(), clock!);
+    expect(slice?.inGame).toBe(true);
+    state = frameAt(slice!).state;
+    const found = state.shop.find((m) => m.cardId === 'BG_LOE_077');
+    expect(found).toBeDefined();
+    brann = found!;
+  }, 600_000);
+
+  it('кадр воспроизводится: ход таверны 10, тир 5, Бранн в витрине за 3', () => {
+    expect(state.turn).toBe(19);
+    expect(tavernTurnOf(state.turn)).toBe(10);
+    expect(state.techLevel).toBe(5);
+    expect(brann.buyCost).toBe(3);
+    expect(cards.info(brann.cardId)?.text).toContain('Battlecries');
+  });
+
+  it('носителей под удвоение на кадре нет: ни кличей в руке, ни плательщиков', () => {
+    expect(state.hand).toHaveLength(6);
+    const battlecries = state.hand.filter((m) =>
+      (cards.info(m.cardId)?.mechanics ?? []).includes('BATTLECRY'),
+    );
+    expect(battlecries).toEqual([]);
+    expect(battlecryPayoffOf(state.board, cards)).toBeNull();
+  });
+
+  it('цену Бранну даёт БУДУЩЕЕ: ожидание от покупок, а не борд', () => {
+    const value = minionValue(brann, state, { cards }, DEFAULT_TAVERN_RULES);
+    expect(value.doublerCarriers).toBe(0);
+    expect(value.doublerFuture).toBeGreaterThan(0);
+    expect(value.doublerBuy).toBeCloseTo(
+      value.doublerFuture * DEFAULT_TAVERN_RULES.heroPowerSpellValue,
+      5,
+    );
+    // Прежнее число — тело плюс связь по механике из текста.
+    const bare = value.total - value.doublerBuy;
+    expect(bare).toBeCloseTo(14.5, 5);
+  });
+
+  it('совет поднимает Бранна над Elite Navigator и называет причину', () => {
+    const advice = adviseTavern(state, { cards });
+    expect(advice).not.toBeNull();
+    const buys = advice!.recommendations.filter((r) => r.action === 'buy');
+    const brannBuy = buys.find((r) => r.minion?.cardId === 'BG_LOE_077');
+    const navigator = buys.find((r) => r.minion?.cardId === 'BG32_231');
+    expect(brannBuy).toBeDefined();
+    expect(brannBuy?.reason).toContain('удвоит триггер с добычей');
+    expect(brannBuy?.reason).toContain('среди будущих покупок');
+    if (navigator !== undefined) expect(brannBuy!.score).toBeGreaterThan(navigator.score);
   });
 });
