@@ -1079,3 +1079,43 @@ Methodical Madness `BG36_880` и розыгрыши демонов. Здоров
 к ходу 5 и без потерь до хода 13, затем −9 к ходу 15, −15 к ходу 19,
 −11 к ходу 21, добит на ходу 23.
 Тест — `test/state/part63.test.ts`.
+`part64` — 22.09, Миллифисент Манашторм `TB_BaconShop_HERO_17`, **1-е
+место**, 15 ходов таверны (14:54–15:24). Своя сессия клиента 14:53:22, ровно
+одна партия, доиграна, билд 251952; вырезана `fixture:passport --game=1
+--write=part64` сразу после партии, кадр игрока — 14:57 (файлом не сохранён,
+разбор шёл срезом `fixture:at`). Партия — механический снежный ком
+на Drone Duplicator `BG36_506` («Activate: The next Magnetization to this
+minion this turn happens an extra time»): 14/13 на ходу 15 → 497/587
+на ходу 29, вокруг него Scrap Scraper (золотой, 123/131), Rescue Bot
+и Clunker Junker. Сила героя Tinker `TB_BaconShop_HERO_17p` нажималась
+каждый ход таверны с 7-го.
+
+Главная фактура — **ПЛЕМЯ АБЕРРАЦИЙ** (D275): тег `tag=CARDRACE
+value=ABERRATION`, 500 строк за партию, при пустом `races` у всех этих карт
+в снапшоте. Карт с тегом `CARDRACE` — 126: 94 совпали со снапшотом, 6
+двуплеменных разошлись (`BG_DEEP_015` Рука-протез, `BG27_005` Timecap'n
+Hooktail, `BG32_820` Firescale Hoarder, `BG34_500` Flaming Enforcer,
+`BG36_764` Gearfin — лог называет одно племя из двух), 26 — аберрации,
+которых снапшот не знает: `BG36_098` Zoatroid, `BG36_099` Brain Rotter,
+`BG36_100` Wandering Willbreaker, `BG36_101` Unwilling Slacker, `BG36_102`
+De-volition-ist, `BG36_103` N'raqi Sapper, `BG36_104` Dark Puppeteer,
+`BG36_106` Cutthroat K'Thir, `BG36_108` Vicious Mindslasher, `BG36_109`
+The Shadow of Doubt, `BG36_110` Joyous, `BG36_112` Fetid Corroder,
+`BG36_113` Drifting Sacrifice, `BG36_114` Parasitic Fleshling, `BG36_115`
+Nightmare Corroder (+ `_G`), `BG36_116` Underrot Spawn, `BG36_300` N'raqi
+Frostcaller, `BG36_308` Faceless Operative, `BG36_311` Abyssal Envoy,
+`BG36_312` Mindbending Recruiter, `BG36_318` Faceless Converter, `BG36_320`
+Mysterious K'Thir, `BGFYM_002t` Aberrant Tentacle, `BGFYM_005` Harbinger
+Aph'lass, `BGFYM_011` Y'Shaarj. Миньонов витрины без племени в снапшоте —
+41 из 113 (36%).
+
+Кадр 14:57 (ход 5, тир 2, золото 0 из 5, борд Eternal Knight 4/2 | Underrot
+Spawn 2/2 | Harmless Bonehead 1/1, витрина Decoy Conjurer 3/4 | Scarlet Skull
+2/1) — вопрос игрока «почему предлагает заморозить»: совет верен (двое своих
+UNDEAD, витрина тира 2 вмещает 4 при занятых 2 — слотов заморозка не стоит),
+но причина не доезжала до экрана. Отсюда поле `holdReason`.
+
+Тринкеты: Shrine of Evolution (ход 11) и Assembler Portrait (ход 17).
+Подъёмы таверны игрока — на ходах таверны 2, 5, 6, 10, 13; советник на 4-м
+и 11-м звал раньше, игрок пошёл иначе и выиграл (разбор — в журнале).
+Тест — `test/state/part64.test.ts`.
