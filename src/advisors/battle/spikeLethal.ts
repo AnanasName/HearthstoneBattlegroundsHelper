@@ -54,6 +54,16 @@
  *    и это тот сдвиг, который на низком запасе переносит бой из «умираю»
  *    в «выживаю».
  *
+ * **Оговорка, дописанная ПОСЛЕ прогона 22.09.** Вердикт был написан один
+ * на обе меры («выполнено ВСЁ»), и это ошибка составления: на экран числа
+ * идут независимо друг от друга, и негодность одного не делает негодным
+ * другое. Поэтому вердикт теперь печатается ПО КАЖДОЙ мере, а общий остаётся
+ * рядом. Пороги не двигались — их правка после данных была бы подгонкой;
+ * двинулась только разрезка, и то в сторону, объявленную в самой шапке
+ * («две меры, потому что на экран идут два разных числа»). Первый прогон:
+ * поле — калибровано (худшее расхождение 4.2 п.п. на 663 боях), один
+ * фактический соперник — НЕТ (25.0 п.п. в корзине «≥ 50 %»).
+ *
  * **Проверка самой правды, тоже до прогона.** Смерть в партии одна и
  * последняя, поэтому найденных смертей должно быть примерно столько же,
  * сколько партий (все, кроме занявших первое место), и стоять они должны
@@ -284,17 +294,28 @@ function summarize(points: readonly Point[], parts: readonly number[], seed: num
       `смещение ${damageBias >= 0 ? '+' : ''}${damageBias.toFixed(2)} hp (порог 2), MAE ${damageMae.toFixed(2)}`,
   );
 
-  const passed =
-    direct.worst <= 15 &&
-    direct.monotone &&
-    Math.abs(damageBias) <= 2 &&
-    (fieldCalibration === null || (fieldCalibration.worst <= 15 && fieldCalibration.monotone));
+  // Пороги те же, что объявлены в шапке; новое здесь только одно — вердикт
+  // печатается ПО КАЖДОЙ мере отдельно, и это дописано ПОСЛЕ прогона 22.09.
+  // Причина в шапке, в оговорке к «Годности»: числа на экране независимы,
+  // и один вердикт на обе меры был ошибкой составления. Пороги при этом
+  // не двигались — двинуть их после данных было бы уже подгонкой.
+  const damageOk = Math.abs(damageBias) <= 2;
+  const directPassed = direct.worst <= 15 && direct.monotone && damageOk;
+  const fieldPassed =
+    fieldCalibration !== null && fieldCalibration.worst <= 15 && fieldCalibration.monotone && damageOk;
+  const passed = directPassed && (fieldCalibration === null || fieldPassed);
+
+  const verdict = (name: string, ok: boolean): string =>
+    `  ${name}: ${ok ? 'калибрована — печатать как есть' : 'НЕ калибрована — числом печатать нельзя'}`;
 
   console.log('');
+  console.log('ВЕРДИКТ по каждой мере:');
+  console.log(verdict('против фактического соперника', directPassed));
+  if (fieldCalibration !== null) console.log(verdict('против поля хода         ', fieldPassed));
   console.log(
     passed
-      ? 'ВЕРДИКТ: калибрована — процент смерти можно печатать как есть'
-      : 'ВЕРДИКТ: НЕ калибрована — числом печатать нельзя',
+      ? 'ВЕРДИКТ ОБЩИЙ: калибрована — процент смерти можно печатать как есть'
+      : 'ВЕРДИКТ ОБЩИЙ: НЕ калибрована — числом печатать нельзя',
   );
 
   emitResult({
@@ -312,6 +333,8 @@ function summarize(points: readonly Point[], parts: readonly number[], seed: num
       fieldMonotone: fieldCalibration === null ? null : fieldCalibration.monotone ? 1 : 0,
       damageBiasHp: round(damageBias, 2),
       damageMaeHp: round(damageMae, 2),
+      directPassed: directPassed ? 1 : 0,
+      fieldPassed: fieldCalibration === null ? null : fieldPassed ? 1 : 0,
       passed: passed ? 1 : 0,
     },
   });
