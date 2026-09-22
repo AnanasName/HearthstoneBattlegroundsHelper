@@ -1526,3 +1526,32 @@ export function part67Game(): string {
 export function part68Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part68', 'game.log'), 'utf8');
 }
+
+/**
+ * part69 — 22.09.2026, Rustlin' Rokara, 3-е место, билд 251952,
+ * 13 ходов таверны (23:03–23:29). Борд — ЖУЧИНЫЙ движок на зверях:
+ * два Ravaging Scorpid `BG36_209` («After a friendly minion attacks,
+ * your Beetles have +2/+3 this game. Deathrattle: Summon a Beetle»),
+ * Turquoise Skitterer `BG31_809` («Deathrattle: Your Beetles have +2/+3
+ * this game. Summon a Beetle»), Cage Gnawer `BG36_211` («Whenever
+ * a friendly Beast attacks, give your Beasts +X/+Y») и Banana Slamma
+ * `BG26_802` («After you summon a Beast in combat, double its Attack»).
+ * Счётчик надбавки жукам `BG31_808pe` дорос до 20/19.
+ *
+ * Партия пришла с двумя жалобами игрока на ОДИН и тот же промах —
+ * выбор жертвы на полном борде:
+ *
+ *  * кадр 23:20 (ход 19): «предлагает продать зверя, который удваивает
+ *    статы внутри боя» — Banana Slamma 13/10;
+ *  * кадр 23:22 (ход 21): «рекомендует продать полезного жука» —
+ *    Turquoise Skitterer 14/10 (перерожд).
+ *
+ * Доказательство того, что шкала меряет ТЕЛО, а не карту, — в самой
+ * партии: на ходу 23 Тираэль (`BG36_356`, «Set another minion's stats
+ * to 50/50») поставил Banana Slamma статы 50/50, и та же карта с тем же
+ * текстом переехала с ПЕРВОГО места в очереди на продажу (28.5) на
+ * ПОСЛЕДНЕЕ (58.0). Текст на это не повлиял никак.
+ */
+export function part69Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part69', 'game.log'), 'utf8');
+}

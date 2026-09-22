@@ -3926,6 +3926,37 @@ function isAuraOverOthers(m: Minion, cards: CardIndex, rules: TavernRules): bool
 }
 
 /**
+ * Эффект на ЧУЖИХ по ТРИГГЕРУ — та же порода карт, что аура на чужих, но
+ * без механики `AURA` в снапшоте (part69).
+ *
+ * `isAuraOverOthers` спрашивает снапшот, а снапшот метит `AURA` только
+ * постоянно висящий эффект. Когда тот же по смыслу эффект срабатывает
+ * по событию, метка другая — `TRIGGER_VISUAL` у Banana Slamma `BG26_802`
+ * и Cage Gnawer `BG36_211`, `DEATHRATTLE` у Turquoise Skitterer `BG31_809`,
+ * — а довод part19 не меняется ни на слово: тело у такой карты случайно,
+ * и продавать её по числу, про которое сами знаем, что оно не про неё,
+ * — ошибка.
+ *
+ * Фактура — part69, ход 21: борд из двух сотен статов, и первыми двумя
+ * в очереди на продажу стояли Banana Slamma 13/10 (28.5) и Turquoise
+ * Skitterer 9/7 (28.0) — два узла жучиного движка, на котором партия
+ * и держалась. Что шкала мерит именно тело, доказано той же партией:
+ * на ходу 23 Тираэль поставил Banana Slamma статы 50/50, и та же карта
+ * с тем же текстом стала в очереди ПОСЛЕДНЕЙ (58.0).
+ *
+ * Носители АКТИВАЦИИ и здесь не трогаются: их продажу разбирает замер
+ * part44, и отдельного слова в тексте им не нужно — «Activate» получателя
+ * во множественном числе не называет.
+ */
+function isTriggerOverOthers(m: Minion, cards: CardIndex, rules: TavernRules): boolean {
+  const info = cards.info(m.cardId);
+  const text = info?.text ?? '';
+  if (text === '') return false;
+  if (rules.selfAuraWords.some((w) => new RegExp(w, 'i').test(text))) return false;
+  return rules.otherRecipientWords.some((w) => new RegExp(w, 'i').test(text));
+}
+
+/**
  * Слабейший свой — кандидат на продажу, когда борд полон.
  *
  * Ауры на чужих в жертвы не идут, пока есть хоть одно обычное тело (part19,
@@ -3936,9 +3967,15 @@ function isAuraOverOthers(m: Minion, cards: CardIndex, rules: TavernRules): bool
  * с кличем-поглощением). Продавать по числу, про которое сами знаем, что
  * оно не про эту карту, — это не осторожность, а ошибка.
  *
+ * Эффект на чужих по ТРИГГЕРУ (`isTriggerOverOthers`, part69) исключается
+ * по тому же доводу: снапшот метит `AURA` только постоянный эффект, а по
+ * событию тот же смысл приходит под `TRIGGER_VISUAL` и `DEATHRATTLE`.
+ *
  * Если весь борд из таких аур, выбор честно возвращается к слабейшему
  * из них: место под покупку взять всё равно откуда-то надо. Тот же приём,
- * что у цели провокации с миньонами-движками (part15).
+ * что у цели провокации с миньонами-движками (part15). Этот возврат —
+ * и защита от случая part44: сузить кандидатов до «продать Kalecgos ради
+ * Hired Mount» фильтр не может, потому что пустой пул отменяет сам себя.
  *
  * Носителей АКТИВАЦИИ этот фильтр НЕ трогает, и это решено замером,
  * а не рассуждением: запрет их продавать был написан по part44 и на
@@ -3953,7 +3990,10 @@ export function weakestOwn(
   rules: TavernRules,
 ): { minion: Minion; value: number } | null {
   if (state.board.length === 0) return null;
-  const bodies = state.board.filter((m) => !isAuraOverOthers(m, deps.cards, rules));
+  const bodies = state.board.filter(
+    (m) =>
+      !isAuraOverOthers(m, deps.cards, rules) && !isTriggerOverOthers(m, deps.cards, rules),
+  );
   const pool = bodies.length > 0 ? bodies : state.board;
   return pool
     .map((m) => ({ minion: m, value: ownValue(m, state, deps, rules) }))
