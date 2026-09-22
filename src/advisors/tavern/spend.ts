@@ -5,6 +5,7 @@ import {
   afterTrinketPick,
   battlecryPayoffOf,
   battlecryPayoffPoints,
+  buyCostOf,
   fullBoardBurnNote,
   isStandIn,
   isTripledGolden,
@@ -938,8 +939,17 @@ export function spendPlan(
   // борд игрока давал 46 % против 10 % у подъёма. Условие узкое намеренно:
   // развилка на ЛЮБОМ таком подъёме уводила план от игрока в 47 точках
   // из 53 (подъём вторым ходом таверны — стандарт, и игроки его делают).
+  //
+  // Третье условие входа (D284, part70 ход 3) — подъём съел ВСЁ золото хода,
+  // а то же золото забирает витрину ЦЕЛИКОМ. Довод игрока: цена подъёма
+  // падает на 1 за ход, а золота прибывает на 1, — значит отложить подъём
+  // на ход стоит ноль, и купленное в промежутке чистая прибыль.
+  //
+  // «Целиком» — граница, выбранная КОРПУСОМ, а не рассуждением, и подробности
+  // у самой функции: напрашивавшееся «дело в дешёвых телах» замер отверг.
   const fullLevelWhenLate = levelSpendsAllWhenLate(state, greedy, rules);
-  if (burningGold(greedy) <= 0 && !fullLevelWhenLate) return greedy;
+  const fullLevelOnWholeShop = levelSpendsAllOnWholeShop(state, greedy, rules);
+  if (burningGold(greedy) <= 0 && !fullLevelWhenLate && !fullLevelOnWholeShop) return greedy;
 
   // Цепочка с подъёмом судится развилкой только тогда, когда у подъёма есть
   // СВОЯ ценность (`standaloneScore`): без неё сумма очков считала бы лучшую
@@ -1247,6 +1257,57 @@ function levelSpendsAllWhenLate(state: GameState, greedy: SpendPlan, rules: Tave
     realLevel &&
     greedy.steps.every((s) => s.recommendation.action === 'levelUp' || s.goldAfter >= s.goldBefore)
   );
+}
+
+/**
+ * Настоящий подъём — единственная трата жадной цепочки, а то же золото
+ * забирает ВСЮ витрину, не меньше двух тел и без сдачи (долг part70).
+ *
+ * Довод игрока (part70, ход 3): цена подъёма падает на 1 за ход, а золота
+ * прибывает на 1, — значит отложить подъём на ход не стоит ничего, и
+ * купленное в промежутке чистая прибыль. Через ход обе линии на том же
+ * тире, но у отложившего на борде на тело больше и не сгорело ничего.
+ *
+ * **Границу «ВСЯ витрина» выбрал корпус, а не рассуждение.** Первая версия
+ * правила просила только «два тела без сдачи» — и на 664 точках сдвинула
+ * ровно одну, part38 ход 7, в сторону ОТ человека: там тир 2, золото 6,
+ * подъём за 6 и витрина по 2 за штуку, то есть арифметика та же, а игрок
+ * всё равно поднялся. Значит дело не в дешевизне тел (цены там [2,2,2,2],
+ * как у Синдрагосы) — в part38 шесть золотых берут ДВА тела из четырёх,
+ * а в part70 четыре берут ВСЮ витрину, оба тела из двух.
+ *
+ * Так правило и звучит: довод подъёма — «витрина следующего тира лучше
+ * этой», и он весь про то, что на этой остаётся невзятое. Когда золото
+ * хода забирает витрину целиком, оставлять на ней нечего, и подъём,
+ * дешевеющий ровно с той же скоростью, с какой копится золото, спокойно
+ * ждёт хода.
+ */
+function levelSpendsAllOnWholeShop(
+  state: GameState,
+  greedy: SpendPlan,
+  rules: TavernRules,
+): boolean {
+  const realLevel = greedy.steps.some(
+    (s) =>
+      s.recommendation.action === 'levelUp' &&
+      s.recommendation.blockedByHp !== true &&
+      s.recommendation.standaloneScore !== undefined,
+  );
+  if (!realLevel) return false;
+  // Остальные шаги цепочки — бесплатные: иначе это не «подъём съел всё».
+  if (!greedy.steps.every((s) => s.recommendation.action === 'levelUp' || s.goldAfter >= s.goldBefore)) {
+    return false;
+  }
+
+  const prices = state.shop.map((m) => buyCostOf(m, rules)).sort((a, b) => a - b);
+  let left = state.gold;
+  let bought = 0;
+  for (const price of prices) {
+    if (price > left) break;
+    left -= price;
+    bought += 1;
+  }
+  return bought >= 2 && left === 0 && bought === state.shop.length;
 }
 
 /** Золото, не пристроенное к делу: остаток плюс ушедшее в подъём-хвост (D214). */

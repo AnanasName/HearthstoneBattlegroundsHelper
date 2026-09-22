@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { freezeRule, levelUpRule } from '../../src/advisors/tavern/advisor.js';
+import { adviseTavern, freezeRule, levelUpRule } from '../../src/advisors/tavern/advisor.js';
 import { DEFAULT_TAVERN_RULES } from '../../src/advisors/tavern/rules.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
 import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
@@ -121,6 +121,58 @@ describe('part70: Синдрагоса — что советник берёт и
     for (const turn of turns) {
       expect(freezeRule(turn.state, deps(), DEFAULT_TAVERN_RULES)).toBeNull();
     }
+  });
+
+  /**
+   * Вторая жалоба игрока: «на 2 ходе ты предложил улучшить таверну, но
+   * я сделал ход лучше с покупкой двух существ, ведь на следующий ход
+   * у меня будет 5 золота и не факт, что я смогу их потратить».
+   *
+   * Он прав арифметикой. Подъём стоит 4 из 4, то есть весь ход; назавтра
+   * он стоит уже 3 при пяти золотых — «подъём плюс покупка» тратит в ноль,
+   * тогда как линия советника даёт на том же ходу две покупки и сгоревшую
+   * монету. Через ход обе линии на тире 2, но у игрока на борде на тело
+   * больше.
+   *
+   * Правило (D284) просит ВСЮ витрину, и эту границу выбрал корпус:
+   * версия «просто два тела без сдачи» сдвигала part38 (ход 7) в сторону
+   * ОТ человека, а там цены такие же дешёвые — [2,2,2,2], — но берутся
+   * два тела из четырёх, а здесь оба из двух.
+   */
+  it('ход 3: план — купить всю витрину, а не поднять таверну', () => {
+    const { state } = at(3);
+    expect(state.techLevel).toBe(1);
+    expect(state.gold).toBe(4);
+    expect(state.tavernUpgradeCost).toBe(4);
+    expect(state.shop.map((m) => m.buyCost)).toEqual([2, 2]);
+
+    const plan = spendPlan(state, deps(), DEFAULT_TAVERN_RULES);
+    expect(plan.steps.map((s) => s.recommendation.action)).toEqual(['buy', 'buy']);
+    expect(plan.goldLeft).toBe(0);
+
+    // Список при этом не меняется: он ранжирует ОТДЕЛЬНЫЕ действия, и там
+    // подъём честно стоит выше лучшей покупки (D043). Расходятся они
+    // намеренно, и план — это то, что игрок делает ходом.
+    const advice = adviseTavern(state, deps(), DEFAULT_TAVERN_RULES);
+    expect(advice?.recommendations[0]?.action).toBe('levelUp');
+  });
+
+  /**
+   * Граница правила, снятая с корпуса: на ходу 5 витрина тоже по 2, но
+   * подъём стоит 3 из 5 — то есть золото хода он НЕ съедает, и развилка
+   * тут ни при чём. Игрок на этом ходу поднялся, и план поднимается тоже.
+   */
+  it('ход 5: подъём не съедает ход целиком — план поднимается, как и игрок', () => {
+    const { state } = at(5);
+    expect(state.gold).toBe(5);
+    expect(state.tavernUpgradeCost).toBe(3);
+
+    const plan = spendPlan(state, deps(), DEFAULT_TAVERN_RULES);
+    expect(plan.steps[0]?.recommendation.action).toBe('levelUp');
+
+    const last = turns.at(-1)?.state;
+    const turn5 = last?.actions.filter((a) => a.turn === 5) ?? [];
+    expect(turn5.some((a) => a.type === 'levelUp')).toBe(true);
   });
 
   /**
