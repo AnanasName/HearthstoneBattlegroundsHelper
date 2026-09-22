@@ -273,7 +273,14 @@ describe('part59: Крысиный король, сила-Discover и банан
     const plan = spendPlan(decisionPoint(19), { cards });
     const tail = plan.steps.find((s) => s.recommendation.action === 'levelUp');
     expect(tail?.recommendation.blockedByHp).toBe(true);
-    expect(plan.goldLeft).toBeLessThanOrEqual(1);
+    // Хвост плана — подъём за 8, после него сгорает 2. Прежде последнее
+    // золото уходило в обновление за 1, и остаток был 1; с D279 такое
+    // обновление молчит — после него на руках остаётся ровно 1 золото,
+    // а покупка за 1 есть лишь в 32% витрин (на шестом тире — в 15%).
+    // Порог считает ОСТАТОК ПОСЛЕ обновления, поэтому правило снимает
+    // не только бесплатный реролл на единственном золоте (part68), но
+    // и платный, оставляющий единицу.
+    expect(plan.goldLeft).toBeLessThanOrEqual(2);
   });
 
   /**
