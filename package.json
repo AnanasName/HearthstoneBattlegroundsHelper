@@ -62,6 +62,7 @@
     "spike:taunttarget": "tsx src/advisors/tavern/spikeTauntTarget.ts",
     "spike:undead": "tsx src/advisors/battle/spikeUndead.ts",
     "spike:plandiff": "tsx src/advisors/tavern/spikePlanDiff.ts",
+    "spike:workers": "tsx src/advisors/position/spikeWorkers.ts",
     "review": "tsx src/ui/review.ts",
     "spike:lethal": "tsx src/advisors/battle/spikeLethal.ts"
   },
