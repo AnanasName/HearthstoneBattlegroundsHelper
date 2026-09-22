@@ -951,6 +951,15 @@ export interface TavernRules {
   readonly spellConsumeWords: readonly string[];
 
   /**
+   * ГОЛОВА клича у того же текста (D278): «Battlecry: Choose a friendly
+   * Demon. It consumes a minion in the Tavern to gain its stats» (Mind Muck
+   * `BG23_357`, тир 2). Тело фразы разбирает `spellConsumeWords` — здесь
+   * только голова, и нужна она, чтобы отличить ОДНОКРАТНЫЙ клич от триггера:
+   * счёт у них один, а частота разная.
+   */
+  readonly battlecryConsumeWords: readonly string[];
+
+  /**
    * «Задать статы»: «Activate ({0}): Set another minion's stats to {1}/{2}»
    * (Тираэль `BG36_356`, тир 6, активация за 1 — статы 50/50).
    *
@@ -2127,6 +2136,17 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   spellConsumeWords: [
     '\\bchoose\\s+a\\s+friendly\\s+(?<race>[a-z]+)\\s*\\.?\\s*it\\s+consumes?\\s+' +
       '(?<count>a|an|\\d+)\\s+(?:random\\s+)?(?:tavern\\s+minions?|minions?\\s+in\\s+the\\s+tavern)\\b',
+  ],
+
+  // ТОТ ЖЕ текст под головой КЛИЧА (D278): «<b>Battlecry:</b> Choose
+  // a friendly Demon. It consumes a minion in the Tavern to gain its stats»
+  // (Mind Muck `BG23_357`, тир 2; золотой — «double its stats»). Голова
+  // обязана стоять ВПЛОТНУЮ к телу: «Battlecry: Get a card. …» с поглощением
+  // во второй фразе — уже не клич-пожиратель, а две разные механики.
+  // Разметка `</b>`/`<b>` между словами — та же, что у `tavernEaterWords`.
+  battlecryConsumeWords: [
+    '\\bbattlecry:(?:<\\/b>)?\\s*(?:<b>)?\\s*choose\\s+a\\s+friendly\\s+[a-z]+\\s*\\.?\\s*' +
+      'it\\s+consumes?\\b',
   ],
 
   // «Set another minion's stats to {1}/{2}.» (Тираэль). Апостроф в снапшоте

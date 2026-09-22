@@ -459,6 +459,12 @@ export interface ValueBreakdown {
    * клича, который отыгрывает один раз при розыгрыше.
    */
   readonly tavernEater: number;
+  /**
+   * Поглощение витрины КЛИЧОМ, кормящим ДРУГОГО своего (D278): статы,
+   * которые уедут на цель при розыгрыше. Про РОЗЫГРЫШ, а не про удержание:
+   * у миньона, уже стоящего на борде, клич позади и слагаемое — ноль.
+   */
+  readonly battlecryEater: number;
   /** Сколько своих того же племени уже на борде. */
   readonly tribeMates: number;
   /** Сколько своих миньонов племён, названных в тексте карты. */
@@ -1486,9 +1492,10 @@ const PAYOFF_TRIBES_CACHE = new WeakMap<
 export function minionValue(
   candidate: Minion,
   state: GameState,
-  { cards }: TavernAdvisorDeps,
+  deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): ValueBreakdown {
+  const { cards } = deps;
   const w = rules.value;
   const info = cards.info(candidate.cardId);
 
@@ -1604,6 +1611,10 @@ export function minionValue(
   // Поглощение витрины триггером (D271): тело растёт на статы съеденного,
   // и все три множителя читаются — голова, витрина, журнал розыгрышей.
   const tavernEater = tavernEaterValue(candidate, state, cards, rules);
+
+  // Тот же текст КЛИЧОМ, кормящим другого своего (D278): статы уедут
+  // не на кандидата, а на цель, но борду достаются одни и те же.
+  const battlecryEater = battlecryConsumeValue(candidate, state, deps, rules);
 
   // Племя, названное словами в тексте, — та же связь с композицией, что
   // у тринкетов. Без неё Kangor's Apprentice (без племени, «…your first
@@ -1805,6 +1816,7 @@ export function minionValue(
     playPayers: playPay?.payers ?? [],
     playEngine,
     tavernEater,
+    battlecryEater,
     total:
       tech +
       stats +
@@ -1827,7 +1839,8 @@ export function minionValue(
       discoverPayoff +
       playPayoff +
       playEngine +
-      tavernEater,
+      tavernEater +
+      battlecryEater,
     tribeMates: mates,
     textTribeMates: textMates,
     textMechMates,
@@ -2877,6 +2890,14 @@ function tavernEaterNote(points: number): string {
 }
 
 /**
+ * Причина к совету у КЛИЧА-пожирателя (D278): однократно и на другого,
+ * поэтому «за розыгрыш», а не «за ход таверны».
+ */
+function battlecryEaterNote(points: number): string {
+  return `клич кормит витриной своего — ${points.toFixed(1)} за розыгрыш`;
+}
+
+/**
  * Заклинание, которым СВОЙ миньон съедает витрину (D271): сколько статов
  * и кому. `null` — текст не про это, витрина пуста или получателя нет.
  *
@@ -2927,6 +2948,43 @@ function spellConsumeGain(
     return { target, stats: Math.min(meals, state.shop.length) * perCard * times };
   }
   return null;
+}
+
+/**
+ * Что принесёт КЛИЧ кандидата, кормящий витриной ДРУГОГО своего (D278).
+ *
+ * Третья поверхность одного текста: у триггера она своя (`tavernEaterValue`,
+ * D271), у заклинания — своя (`spellConsumeGain` в правилах витрины и руки,
+ * D277), а клич миньона до сих пор считался голым телом. Mind Muck
+ * `BG23_357` — тир 2, и на part65 (ход 21) он лежал в витрине 6/5 при шести
+ * своих демонах, крупнейший из которых 175/175.
+ *
+ * Счёт, цель и потолок — те же и той же функцией: съедаемое из ЖИВОЙ витрины
+ * (D034), получатель — крупнейший свой названного племени (D142), цена
+ * в очки не вычитается, её считает план (D151).
+ *
+ * Отличие от триггера ровно одно — ЧАСТОТА. Клич отыгрывает ОДИН раз, при
+ * розыгрыше, поэтому множителя за ход таверны здесь нет, а у своего миньона
+ * борда клич уже позади и слагаемое — ноль (та же граница, что у клича
+ * в `tavernEaterValue`).
+ *
+ * Оценка НИЖНЯЯ дважды: витрина считается целой, хотя покупка кандидата
+ * уберёт из неё одно тело, и цель ищется среди нынешнего борда, хотя клич
+ * может накормить и сам кандидат, если подходит по племени. Без своих
+ * названного племени правило честно молчит — кормить некого (D272).
+ */
+function battlecryConsumeValue(
+  candidate: Minion,
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): number {
+  const text = deps.cards.info(candidate.cardId)?.text ?? '';
+  if (!rules.battlecryConsumeWords.some((w) => new RegExp(w, 'i').test(text))) return 0;
+  if (state.board.some((m) => m.entityId === candidate.entityId)) return 0;
+  const eaten = spellConsumeGain(text, state, deps, rules);
+  if (eaten === null) return 0;
+  return eaten.stats * rules.value.perStatPoint;
 }
 
 /**
@@ -4059,6 +4117,7 @@ export function buyRules(
       if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
       if (value.playEngine > 0) notes.push(playEngineNote(value.playEngine));
       if (value.tavernEater > 0) notes.push(tavernEaterNote(value.tavernEater));
+      if (value.battlecryEater > 0) notes.push(battlecryEaterNote(value.battlecryEater));
       if (value.heroPowerBuyLeft !== null && value.heroPowerBuyReward !== null) {
         notes.push(
           value.heroPowerBuyLeft === 0

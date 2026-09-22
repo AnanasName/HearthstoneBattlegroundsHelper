@@ -5,6 +5,10 @@
    "BG35_814",
    "BG35_814_G"
   ],
+  "battlecryConsumeWords": [
+   "BG23_357",
+   "BG23_357_G"
+  ],
   "battlecryGetCountWords": 278,
   "battlecryGetWords": 108,
   "battlecryPayoffWords": [

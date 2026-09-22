@@ -2,9 +2,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { adviseTavern, minionValue } from '../../src/advisors/tavern/advisor.js';
 import { spendPlan } from '../../src/advisors/tavern/spend.js';
+import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import type { GameState, Minion } from '../../src/state/types.js';
 import { frameAt, parseClock, sliceLogByClock } from '../../src/ui/logSlice.js';
+import { createBreather } from '../breather.js';
 import { part65Game } from '../fixtures.js';
 
 /**
@@ -124,5 +126,54 @@ describe('part65: пожиратели витрины из руки', () => {
     expect(madness).toBeDefined();
     expect(cupcakes!.score).toBeGreaterThan(madness!.score);
     expect(cupcakes!.cost).toBe(0);
+  });
+});
+
+/**
+ * ТРЕТЬЯ поверхность того же текста (D278) — КЛИЧ миньона.
+ *
+ * D271 завёл поглощение витрины триггером, D277 — заклинанием из руки,
+ * а Mind Muck `BG23_357` («Battlecry: Choose a friendly Demon. It consumes
+ * a minion in the Tavern to gain its stats», тир 2) до сих пор считался
+ * голым телом 6/5. В этой партии он лежал в витрине на ходах 21 и 23 —
+ * при шести и семи своих демонах, — и ровно те же статы, что советник
+ * считает у заклинания, у миньона стоили ноль.
+ *
+ * Отличие от триггера — ЧАСТОТА: клич отыгрывает однажды, при розыгрыше,
+ * поэтому множителя за ход таверны нет. Отрицательная сторона правила
+ * (кормить некого) закреплена на part62.
+ */
+describe('part65: клич, кормящий витриной своего демона (D278)', () => {
+  let cards: CardIndex;
+  let turns: TavernTurn[];
+
+  beforeAll(async () => {
+    cards = loadCardIndex();
+    turns = await readTavernTurnsAsync(part65Game(), createBreather());
+  }, 600_000);
+
+  it('ход 21: Mind Muck в витрине получает очки за поглощение, и они не от триггера', () => {
+    const state = turns.find((t) => t.turn === 21)?.state;
+    expect(state).toBeDefined();
+    const muck = state!.shop.find((m) => m.cardId === 'BG23_357');
+    expect(muck).toBeDefined();
+
+    const value = minionValue(muck!, state!, { cards });
+    expect(value.battlecryEater).toBeGreaterThan(0);
+    // Слагаемое ТРИГГЕРА молчит: голова у этого текста другая, и дважды
+    // одно и то же в ценность не попадает.
+    expect(value.tavernEater).toBe(0);
+    // Тело 6/5 на нашей шкале статов стоит 5.5 — прибавка клича с ним
+    // сравнима, то есть правило двигает выбор, а не округление.
+    expect(value.battlecryEater).toBeGreaterThan(5);
+  });
+
+  it('свой на борде очков за клич не приносит: он уже отыгран', () => {
+    const state = turns.find((t) => t.turn === 21)?.state;
+    const muck = state!.shop.find((m) => m.cardId === 'BG23_357');
+    // Тот же миньон, но числящийся на борде, — клич позади (граница взята
+    // у `tavernEaterValue`, где она стоит с D271).
+    const asOwn = { ...muck!, entityId: state!.board[0]!.entityId };
+    expect(minionValue(asOwn, state!, { cards }).battlecryEater).toBe(0);
   });
 });

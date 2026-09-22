@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { adviseTavern, freezeRule } from '../../src/advisors/tavern/advisor.js';
+import { adviseTavern, freezeRule, minionValue } from '../../src/advisors/tavern/advisor.js';
 import { readTavernTurnsAsync, type TavernTurn } from '../../src/advisors/tavern/turns.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
@@ -160,5 +160,30 @@ describe('part62: Sire Denathrius — квесты силы героя, замо
     // Украденное лассо тело — Lullabot из той же витрины: он разыгран
     // в том же ходу, хотя куплен не был.
     expect(fifth.some((a) => a.type === 'play' && a.cardId === 'BG26_146')).toBe(true);
+  });
+
+  /**
+   * ГРАНИЦА правила D278 (Mind Muck `BG23_357`): «Battlecry: Choose
+   * a friendly Demon. It consumes a minion in the Tavern to gain its stats».
+   *
+   * В этой партии он дважды лежал в витрине — на ходах 15 и 17, — и оба
+   * раза кормить было НЕКОГО: своих демонов на борде ноль. Клич без цели
+   * не отыгрывает, и слагаемое обязано молчать (та же граница, что у D272).
+   * Партия целиком держит эту сторону правила: положительная — в part65.
+   */
+  it('D278: клич-пожиратель без своих демонов молчит (ходы 15 и 17)', () => {
+    for (const turn of [15, 17]) {
+      const state = turns.find((t) => t.turn === turn)?.state;
+      expect(state).toBeDefined();
+      const muck = state!.shop.find((m) => m.cardId === 'BG23_357');
+      expect(muck, `ход ${String(turn)}: Mind Muck в витрине`).toBeDefined();
+
+      const demons = state!.board.filter((m) => {
+        const races = cards.info(m.cardId)?.races ?? [];
+        return races.includes('DEMON') || races.includes('ALL');
+      });
+      expect(demons).toEqual([]);
+      expect(minionValue(muck!, state!, { cards }).battlecryEater).toBe(0);
+    }
   });
 });
