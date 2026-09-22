@@ -65,7 +65,10 @@ const stateOf = (patch: Partial<GameState> = {}): GameState => ({
  * а здесь проверяются правила «когда считать и что усреднять». Со снапшотом
  * карт каждый такой тест стоил бы секунды.
  */
-function fakeSimulator(outcomes: readonly { won: number; tied: number }[]): {
+function fakeSimulator(
+  outcomes: readonly { won: number; tied: number; deaths?: number }[],
+  sims = 40,
+): {
   simulator: BattleSimulator;
   calls: () => number;
 } {
@@ -76,7 +79,22 @@ function fakeSimulator(outcomes: readonly { won: number; tied: number }[]): {
     run: () => {
       const outcome = outcomes[call % outcomes.length] ?? { won: 0, tied: 0 };
       call += 1;
-      return { wonPercent: outcome.won, tiedPercent: outcome.tied } as never;
+      // Проценты и штуки разом: доля побед считается из первых (так её
+      // считает рантайм), а смерть — из вторых. Настоящий симулятор
+      // отдаёт и то, и другое.
+      const won = Math.round((outcome.won / 100) * sims);
+      const tied = Math.round((outcome.tied / 100) * sims);
+      return {
+        wonPercent: outcome.won,
+        tiedPercent: outcome.tied,
+        won,
+        tied,
+        lost: sims - won - tied,
+        lostLethal: outcome.deaths ?? 0,
+        wonLethal: 0,
+        damageWon: 0,
+        damageLost: 0,
+      } as never;
     },
   } as unknown as BattleSimulator;
   return { simulator, calls: () => call };
@@ -201,6 +219,35 @@ describe('сила стола: что за число', () => {
     // отсутствие данных.
     expect(strength?.damageOnLoss).toBeNull();
     expect(strength?.damageLosses).toBe(0);
+  });
+
+  it('считает смерть штуками по ВСЕМУ полю, а не средним из процентов', () => {
+    // Смерть — событие редкое, и проценты пакета округлены до десятой доли:
+    // на четырёх бордах по сорок симуляций разница между «округлить каждый
+    // борд» и «сложить штуки» и есть весь ответ.
+    const snapshot = snapshotOf(field(6, 4));
+    const { simulator } = fakeSimulator([
+      { won: 100, tied: 0, deaths: 0 },
+      { won: 0, tied: 0, deaths: 40 },
+      { won: 50, tied: 50, deaths: 4 },
+      { won: 0, tied: 100, deaths: 0 },
+    ]);
+
+    const strength = fieldStrength(stateOf(), snapshot, simulator, options);
+
+    // 44 смерти на 160 симуляций поля.
+    expect(strength?.deathPercent).toBeCloseTo(27.5, 5);
+  });
+
+  it('без смертей даёт ноль — это факт, а не отсутствие данных', () => {
+    // В отличие от цены поражения, где ноль был бы ложью: здесь ноль значит
+    // «ни в одной симуляции поля игрок не умер», и подача на этом молчит.
+    const snapshot = snapshotOf(field(6, 4));
+    const { simulator } = fakeSimulator([{ won: 30, tied: 0 }]);
+
+    const strength = fieldStrength(stateOf(), snapshot, simulator, options);
+
+    expect(strength?.deathPercent).toBe(0);
   });
 
   it('на одном положении даёт одно и то же число', () => {

@@ -43,6 +43,7 @@ import type { BattleSetup } from '../battle/mapper.js';
 import type { BattleSimulator } from '../battle/simulator.js';
 import { toBattleInfo } from '../battle/mapper.js';
 import { withSeededRandom } from '../position/rng.js';
+import { toEstimate } from '../position/score.js';
 import { tavernTurnOf } from '../tavern/rules.js';
 import type { GameState } from '../../state/types.js';
 import { boardsOfTurn, type FieldSnapshot } from './boards.js';
@@ -79,6 +80,23 @@ export interface FieldStrengthQuestion {
 export interface FieldStrength {
   /** Доля выигранных боёв против поля хода, 0..100. */
   readonly percent: number;
+  /**
+   * Доля боёв поля, в которых игрок УМИРАЕТ, 0..100.
+   *
+   * Не «доля поражений»: смерть — это поражение, в котором полученный урон
+   * достал до нашего запаса здоровья с бронёй. Считает её сам симулятор
+   * (`lostLethal`: урон ≥ `hpLeft`), и потому число зависит от здоровья
+   * так же, как от борда: тот же стол на 30 очках и на 8 даёт разную
+   * смертность при одной и той же доле побед.
+   *
+   * Зачем отдельным числом при живой цене поражения рядом. Цена — это
+   * СРЕДНЕЕ по проигранным боям, а смерть решает хвост: на девяти очках
+   * здоровья при средней цене поражения 8 hp умирает не «около половины»
+   * боёв, а столько, сколько их приходится на правый хвост распределения
+   * урона. Отвечать на «доживу ли» средним — то же самое, что переходить
+   * реку по средней глубине.
+   */
+  readonly deathPercent: number;
   /** Сколько бордов было в поле — размер выборки, за которой стоит число. */
   readonly boards: number;
   readonly tavernTurn: number;
@@ -200,6 +218,12 @@ export function runFieldStrength(
   options: FieldStrengthOptions = DEFAULT_FIELD_STRENGTH_OPTIONS,
 ): FieldStrength {
   let sum = 0;
+  // Смерть копится СЧЁТЧИКАМИ по всем симуляциям поля, а не средним
+  // из процентов каждого борда: проценты пакета округлены до десятой доли,
+  // а на редком событии округление — это и есть весь ответ (D205 о том же
+  // у доли побед). Складывать штуки можно точно.
+  let deaths = 0;
+  let sims = 0;
   for (const setup of question.setups) {
     // Между бордами, а не внутри боя: один бой на сорока симуляциях идёт
     // миллисекунды, а всё поле — полсекунды, и бросать надо именно её.
@@ -209,11 +233,17 @@ export function runFieldStrength(
       deps.simulator.run(info, options.simulations),
     );
     sum += result.wonPercent + result.tiedPercent / 2;
+    const estimate = toEstimate(result);
+    deaths += estimate.lostLethal;
+    // Не `options.simulations`: симулятор обрывает прогон по своему пределу
+    // времени, и тогда сделанных симуляций меньше заказанных.
+    sims += estimate.sims;
   }
 
   const damage = damageOnLoss(snapshot, question.tavernTurn);
   return {
     percent: sum / question.setups.length,
+    deathPercent: sims === 0 ? 0 : (deaths / sims) * 100,
     boards: question.setups.length,
     tavernTurn: question.tavernTurn,
     damageOnLoss: damage?.mean ?? null,
