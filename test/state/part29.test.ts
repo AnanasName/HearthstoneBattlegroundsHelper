@@ -282,7 +282,16 @@ describe('part29: сила героя с целью, цена в здоровь�
       playRules(s, { cards }, DEFAULT_TAVERN_RULES).some((r) => r.minion?.cardId === 'BG_LOE_077'),
     ).toBe(false);
     const plan = spendPlan(s, { cards });
-    expect(plan.steps.some((step) => step.recommendation.action === 'play')).toBe(false);
+    // Проверка про СЛОТ, а не про розыгрыш вообще. Прежде здесь стояло
+    // «в плане нет ни одного `play`» — тогда это было одно и то же, потому
+    // что единственными розыгрышами были тела. С D277 из руки советуются
+    // и заклинания-пожиратели, а на этом кадре их два по нулевой цене
+    // (Methodical Madness при витрине из шести тел, +44 статов каждое),
+    // и слота они не занимают. Широкая проверка запрещала бы их заодно
+    // с Бранном — то есть отвечала бы не на тот вопрос, который задал игрок.
+    expect(
+      plan.steps.some((step) => step.recommendation.action === 'play' && step.recommendation.minion !== null),
+    ).toBe(false);
   });
 
   it('пункт 5: там, где слот не последний, ставка выкладывается по-прежнему', () => {

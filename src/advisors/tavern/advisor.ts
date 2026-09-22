@@ -10605,6 +10605,43 @@ export function spellRules(
       ];
     }
 
+    // ПОГЛОЩЕНИЕ ВИТРИНЫ заклинанием ИЗ РУКИ (D277). Ветка витрины
+    // заведена D271 по part63, а рука осталась слепой — и это не мелочь
+    // поверхности: такие карты чаще ПРИХОДЯТ в руку, чем лежат в продаже.
+    // В part65 их давал Eredar Escapist `BG36_733` за урон герою, и за
+    // партию игрок разыграл 12 штук (7 Methodical Madness, 5 Corrupted
+    // Cupcakes), не услышав ни про одну: на кадре 15:48:05 в руке лежало
+    // ШЕСТЬ по нулевой цене при трёх телах витрины, а весь совет был
+    // про магниты.
+    //
+    // Счёт, цель и цена — те же, что у покупки такого же заклинания
+    // (`spellConsumeGain`): съедаемое читается ЖИВОЙ витриной, получатель —
+    // крупнейший свой названного племени (D142), цена в очки не вычитается
+    // (D151), её считает план.
+    const eaten = spellConsumeGain(deps.cards.info(spell.cardId)?.text ?? '', state, deps, rules);
+    if (eaten !== null) {
+      if (spell.cost > state.gold) return [];
+      const score = eaten.stats * rules.value.perStatPoint;
+      if (score <= 0) return [];
+      const eaterName = deps.cards.info(spell.cardId)?.name ?? spell.cardId;
+      return [
+        {
+          action: 'play' as const,
+          minion: null,
+          spellCardId: spell.cardId,
+          targetMinion: eaten.target,
+          score,
+          cost: spell.cost,
+          requiresSlot: false,
+          sellFirst: null,
+          reason:
+            `${eaterName} из руки — съедает витрину: ` +
+            `+${String(Math.round(eaten.stats))} статов на ` +
+            `${deps.cards.info(eaten.target.cardId)?.name ?? eaten.target.cardId}`,
+        },
+      ];
+    }
+
     const effect = spellEffect(spell.cardId, spell.scriptData, deps.cards, rules);
     if (effect === null) return [];
     const name = deps.cards.info(spell.cardId)?.name ?? spell.cardId;

@@ -69,3 +69,60 @@ describe('part65: Божество — получатель, которого н
     expect(minionValue(brainRotter, state, { cards }).activation).toBe(0);
   });
 });
+
+/**
+ * Поглощение витрины заклинанием ИЗ РУКИ (D277).
+ *
+ * D271 завёл это правило по фикстуре part63 — но только для ПОКУПКИ
+ * заклинания из витрины. В part65 те же карты приходили в руку по нулевой
+ * цене (их давал Eredar Escapist `BG36_733` за урон герою), и там правила
+ * не было: за партию игрок разыграл 7 × Methodical Madness `BG36_880`
+ * и 5 × Corrupted Cupcakes `BG28_607`, а советник не назвал ни одной.
+ *
+ * Кадр 15:48:05 — предел этой слепоты: в руке ШЕСТЬ таких заклинаний
+ * по нулю, в витрине три тела, и вся речь советника про магниты.
+ */
+describe('part65: пожиратели витрины из руки', () => {
+  let cards: CardIndex;
+  let state: GameState;
+
+  beforeAll(() => {
+    cards = loadCardIndex();
+    const clock = parseClock('15:48:05');
+    const slice = sliceLogByClock(part65Game(), clock!);
+    expect(slice?.inGame).toBe(true);
+    state = frameAt(slice!).state;
+  }, 600_000);
+
+  it('кадр воспроизводится: шесть бесплатных пожирателей в руке', () => {
+    const free = state.handSpells.filter(
+      (s) => s.cardId === 'BG36_880' || s.cardId === 'BG28_607',
+    );
+    expect(free.length).toBe(6);
+    expect(free.every((s) => s.cost === 0)).toBe(true);
+    // Есть кого съесть и кому скормить: без витрины правило молчит по D034.
+    expect(state.shop.length).toBe(3);
+  });
+
+  it('советует разыграть пожирателя из руки и называет получателя', () => {
+    const advice = adviseTavern(state, { cards });
+    const eaters = (advice?.recommendations ?? []).filter(
+      (r) => r.action === 'play' && (r.spellCardId === 'BG28_607' || r.spellCardId === 'BG36_880'),
+    );
+    expect(eaters.length).toBeGreaterThan(0);
+
+    // Цель — КРУПНЕЙШИЙ свой демон, как и у покупки такого же заклинания
+    // из витрины: съеденное остаётся на нём навсегда (D142).
+    const top = eaters[0]!;
+    expect(cards.info(top.targetMinion?.cardId ?? '')?.name).toBe("Insatiable Ur'zul");
+
+    // Съедаются три тела витрины из трёх — Cupcakes сильнее Madness, потому
+    // что та ест два. Обе на нашей шкале статов, цена нулевая.
+    const cupcakes = eaters.find((r) => r.spellCardId === 'BG28_607');
+    const madness = eaters.find((r) => r.spellCardId === 'BG36_880');
+    expect(cupcakes).toBeDefined();
+    expect(madness).toBeDefined();
+    expect(cupcakes!.score).toBeGreaterThan(madness!.score);
+    expect(cupcakes!.cost).toBe(0);
+  });
+});
