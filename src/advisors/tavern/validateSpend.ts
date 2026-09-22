@@ -15,6 +15,7 @@ import { createBattleSimulator } from '../battle/simulator.js';
 import { loadCardIndex } from '../../data/cards.js';
 import { partsArg, seedArg } from '../../measure/args.js';
 import { emitResult, round } from '../../measure/result.js';
+import { readShards, shardInArg, shardOutArg, writeShard } from '../../measure/shard.js';
 import {
   averageGoldLeft,
   measureSpendQuality,
@@ -30,10 +31,27 @@ const SEED = seedArg(process.argv);
 /** Граница «внутри выборки / вне её» — см. пояснение в `validate.ts`. */
 const IN_SAMPLE_UNTIL = 26;
 
-function main(): void {
+/**
+ * Собранное по партиям — сырьё, из которого считаются метрики.
+ *
+ * Едет между процессами как JSON: в `SpendComparison` одни числа и флаги,
+ * поэтому запись и чтение куска строку не меняют. Метрики по этому сырью
+ * считает `summarize` — один и тот же код и при прогоне подряд, и при склейке.
+ */
+interface Collected {
+  all: SpendComparison[];
+  decisive: SpendComparison[];
+  sameShape: SpendComparison[];
+  inSample: SpendComparison[];
+  outOfSample: SpendComparison[];
+  skippedNoBattle: number;
+  skippedNoChoice: number;
+}
+
+function collect(parts: readonly number[]): Collected {
   const cards = loadCardIndex();
   const simulator = seededSimulator(createBattleSimulator(), SEED);
-  console.log(`зерно ${String(SEED)}, партий ${String(FIXTURES.length)}`);
+  console.log(`зерно ${String(SEED)}, партий ${String(parts.length)}`);
 
   const all: SpendComparison[] = [];
   const decisive: SpendComparison[] = [];
@@ -43,7 +61,7 @@ function main(): void {
   let skippedNoBattle = 0;
   let skippedNoChoice = 0;
 
-  for (const part of FIXTURES) {
+  for (const part of parts) {
     const text = readFixtureGame(part);
     if (text === null) {
       console.log(`part${String(part)}: лога нет, пропущено`);
@@ -73,6 +91,30 @@ function main(): void {
       );
     }
   }
+
+  return { all, decisive, sameShape, inSample, outOfSample, skippedNoBattle, skippedNoChoice };
+}
+
+/**
+ * Склейка кусков в порядке партий.
+ *
+ * Порядок здесь — это порядок файлов кусков, а тот задан номером партии,
+ * поэтому склеенный массив поэлементно равен собранному прогоном подряд.
+ */
+function concat(pieces: readonly Collected[]): Collected {
+  return {
+    all: pieces.flatMap((p) => p.all),
+    decisive: pieces.flatMap((p) => p.decisive),
+    sameShape: pieces.flatMap((p) => p.sameShape),
+    inSample: pieces.flatMap((p) => p.inSample),
+    outOfSample: pieces.flatMap((p) => p.outOfSample),
+    skippedNoBattle: pieces.reduce((s, p) => s + p.skippedNoBattle, 0),
+    skippedNoChoice: pieces.reduce((s, p) => s + p.skippedNoChoice, 0),
+  };
+}
+
+function summarize(collected: Collected): void {
+  const { all, decisive, sameShape, inSample, outOfSample, skippedNoBattle, skippedNoChoice } = collected;
 
   const percent = (rows: readonly SpendComparison[]): number | null =>
     rows.length === 0 ? null : round(spendAgreement(rows) * 100, 1);
@@ -160,6 +202,18 @@ function main(): void {
       '  главный итог — строка «внутри формы»: там у наборов одна длина\n' +
       '  и одно решение о подъёме, и вопрос сводится к «те ли тела куплены».',
   );
+}
+
+function main(): void {
+  const shardOut = shardOutArg(process.argv);
+  const shardIn = shardInArg(process.argv);
+  // Склейка не грузит ни карт, ни симулятора: метрики — числа над числами.
+  const collected = shardIn === null ? collect(FIXTURES) : concat(readShards<Collected>(shardIn));
+  if (shardOut !== null) {
+    writeShard(shardOut, collected);
+    return;
+  }
+  summarize(collected);
 }
 
 main();

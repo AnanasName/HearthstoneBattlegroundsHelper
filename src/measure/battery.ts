@@ -22,13 +22,14 @@
  * (`git worktree add --detach <каталог> HEAD`, node_modules — связкой).
  */
 import { execFileSync, spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { availableParallelism } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CURRENT_BUILD_PARTS, fixtureLogPaths } from '../data/fixtureGames.js';
 import { partsArg, seedArg } from './args.js';
 import { runPool } from './pool.js';
+import { shardName } from './shard.js';
 import {
   comparable,
   durationLabel,
@@ -38,7 +39,7 @@ import {
   type MeasurementRun,
   type NoiseBand,
 } from './report.js';
-import { parseResult } from './result.js';
+import { parseResult, type MeasureResult } from './result.js';
 
 interface Measurement {
   readonly name: string;
@@ -57,6 +58,11 @@ interface Measurement {
    * быстрой командой разработчика.
    */
   readonly takesPaths?: boolean;
+  /**
+   * Умеет ли скрипт считать свои партии куском (`--shard-out`) и склеивать
+   * куски (`--shard-in`). Без этого замер гоняется одним процессом, как раньше.
+   */
+  readonly shardable?: boolean;
 }
 
 /**
@@ -64,9 +70,9 @@ interface Measurement {
  * `emitResult` в конце своего скрипта — больше ничего не нужно.
  */
 const MEASUREMENTS: readonly Measurement[] = [
-  { name: 'validate:tavern', script: 'src/advisors/tavern/validate.ts', takesParts: true },
-  { name: 'validate:spend', script: 'src/advisors/tavern/validateSpend.ts', takesParts: true },
-  { name: 'calibrate', script: 'src/advisors/battle/calibrate.ts', takesParts: false, takesPaths: true },
+  { name: 'validate:tavern', script: 'src/advisors/tavern/validate.ts', takesParts: true, shardable: true },
+  { name: 'validate:spend', script: 'src/advisors/tavern/validateSpend.ts', takesParts: true, shardable: true },
+  { name: 'calibrate', script: 'src/advisors/battle/calibrate.ts', takesParts: false, takesPaths: true, shardable: true },
 ];
 
 const OUT_DIR = 'data/measurements';
@@ -128,35 +134,157 @@ function jobsArg(argv: readonly string[]): number {
   return jobs;
 }
 
-function runScript(m: Measurement, seed: number, parts: readonly number[], full: boolean, logPath: string): Promise<MeasurementRun> {
+/**
+ * Один запуск скрипта замера: либо замер целиком, либо кусок по партиям,
+ * либо склейка кусков.
+ */
+interface Job {
+  readonly m: Measurement;
+  readonly parts: readonly number[];
+  /** Файл, куда кусок складывает строки; `null` — не кусок. */
+  readonly shardOut: string | null;
+  /** Каталог кусков для склейки; `null` — не склейка. */
+  readonly shardIn: string | null;
+}
+
+interface JobRun {
+  readonly exitCode: number;
+  readonly durationSec: number;
+  readonly result: MeasureResult | null;
+  /** Вывод процесса в порядке прихода — его пишут в лог замера целиком. */
+  readonly output: string;
+}
+
+function jobArgs(job: Job, seed: number, full: boolean): string[] {
+  const { m } = job;
+  const args = [TSX_CLI, m.script, `--seed=${String(seed)}`];
+  if (job.shardIn !== null) {
+    // Склейке список партий нужен ради поля `parts` в итоге замера.
+    args.push(`--parts=${job.parts.join(',')}`, `--shard-in=${job.shardIn}`);
+    return args;
+  }
+  // Куску партии передаются ВСЕГДА, в том числе при полном прогоне: его
+  // партия — одна, а умолчание скрипта — весь список.
+  if (job.shardOut !== null) args.push(`--parts=${job.parts.join(',')}`, `--shard-out=${job.shardOut}`);
+  else if (m.takesParts && !full) args.push(`--parts=${job.parts.join(',')}`);
+  // Пути передаются ВСЕГДА, в том числе при полном прогоне: у скрипта,
+  // читающего пути, умолчание — своё и узкое (см. `takesPaths`).
+  if (m.takesPaths === true) args.push(...job.parts.flatMap((p) => fixtureLogPaths(p)));
+  return args;
+}
+
+function runJob(job: Job, seed: number, full: boolean): Promise<JobRun> {
   return new Promise((resolve) => {
-    const args = [TSX_CLI, m.script, `--seed=${String(seed)}`];
-    if (m.takesParts && !full) args.push(`--parts=${parts.join(',')}`);
-    // Пути передаются ВСЕГДА, в том числе при полном прогоне: у скрипта,
-    // читающего пути, умолчание — своё и узкое (см. `takesPaths`).
-    if (m.takesPaths === true) args.push(...parts.flatMap((p) => fixtureLogPaths(p)));
     const started = Date.now();
-    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const log = createWriteStream(logPath);
+    const child = spawn(process.execPath, jobArgs(job, seed, full), { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
+    let output = '';
     child.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       stdout += text;
-      log.write(text);
-      // Отметка о партии — целой строкой с именем замера: замеры идут
+      output += text;
+      // Отметка о партии — целой строкой с именем замера: задачи идут
       // одновременно, и дописывать их в одну строку значит смешать вывод.
-      for (const match of text.matchAll(/═══ (part\d+)/g)) console.log(`  ${m.name} ${match[1] ?? ''}`);
+      for (const match of text.matchAll(/═══ (part\d+)/g)) console.log(`  ${job.m.name} ${match[1] ?? ''}`);
     });
-    child.stderr.on('data', (chunk: Buffer) => log.write(chunk));
+    child.stderr.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+    });
     child.on('close', (code) => {
-      log.end();
       resolve({
         exitCode: code ?? 1,
         durationSec: Math.round((Date.now() - started) / 1000),
         result: parseResult(stdout),
+        output,
       });
     });
   });
+}
+
+/**
+ * Резать ли замер на куски по партиям. Смысл в этом есть, только если
+ * партий больше одной и есть куда их разложить.
+ */
+function shardedByParts(m: Measurement, parts: readonly number[], jobs: number): boolean {
+  return m.shardable === true && parts.length > 1 && jobs > 1;
+}
+
+/** Прогон всех замеров одного зерна. */
+async function runSeed(
+  selected: readonly Measurement[],
+  parts: readonly number[],
+  seed: number,
+  full: boolean,
+  jobs: number,
+  stamp: string,
+  sha: string,
+): Promise<Record<string, MeasurementRun>> {
+  const shardRoot = mkdtempSync(join(tmpdir(), 'hsbg-battery-'));
+  const shardDir = (m: Measurement): string => join(shardRoot, m.name.replace(':', '-'));
+  try {
+    // Первая волна — счёт. Куски по партиям у тех замеров, что принимают
+    // партии, и замер целиком у остальных; все в ОДНОЙ очереди, чтобы
+    // длинный хвост одного замера считался рядом с кусками другого.
+    const wave: Job[] = [];
+    const mine = new Map<string, number[]>();
+    for (const m of selected) {
+      const indices: number[] = [];
+      if (shardedByParts(m, parts, jobs)) {
+        for (const [i, p] of parts.entries()) {
+          indices.push(wave.length);
+          wave.push({ m, parts: [p], shardOut: join(shardDir(m), shardName(i)), shardIn: null });
+        }
+      } else {
+        indices.push(wave.length);
+        wave.push({ m, parts, shardOut: null, shardIn: null });
+      }
+      mine.set(m.name, indices);
+    }
+    console.log(
+      `▶ зерно ${String(seed)}, партий ${String(parts.length)}, замеров ${String(selected.length)},` +
+        ` задач ${String(wave.length)}, одновременно ${String(Math.min(jobs, wave.length))}`,
+    );
+    const counted = await runPool(wave, jobs, (job) => runJob(job, seed, full));
+
+    // Вторая волна — склейка. Карт и симулятора она не грузит, поэтому
+    // стоит секунды, но начаться может только после всех своих кусков.
+    const toMerge = selected.filter((m) => shardedByParts(m, parts, jobs));
+    const mergedList = await runPool(toMerge, jobs, (m) =>
+      runJob({ m, parts, shardOut: null, shardIn: shardDir(m) }, seed, full),
+    );
+    const merged = new Map(toMerge.map((m, i) => [m.name, mergedList[i] as JobRun]));
+
+    // Порядок ключей — как в MEASUREMENTS, а не как замеры финишировали:
+    // от него зависит порядок разделов в docs/measurements.md.
+    const measurements: Record<string, MeasurementRun> = {};
+    for (const m of selected) {
+      const pieces = (mine.get(m.name) ?? []).map((i) => counted[i] as JobRun);
+      const merge = merged.get(m.name) ?? null;
+      const all = merge === null ? pieces : [...pieces, merge];
+      // Лог замера — один файл, куски в порядке партий: так он читается
+      // ровно как при прогоне подряд.
+      writeFileSync(
+        join(LOG_DIR, `${stamp}_${sha}_seed${String(seed)}_${m.name.replace(':', '-')}.txt`),
+        all.map((r) => r.output).join(''),
+      );
+      const run: MeasurementRun = {
+        // Сумма по задачам, а не время по часам: замеры считаются вперемешку,
+        // и «сколько стоил замер» — это его работа, а не окно, в котором
+        // она уместилась. С прежними числами такая сумма сравнима.
+        durationSec: all.reduce((s, r) => s + r.durationSec, 0),
+        exitCode: all.find((r) => r.exitCode !== 0)?.exitCode ?? 0,
+        result: merge === null ? (pieces[0]?.result ?? null) : merge.result,
+      };
+      measurements[m.name] = run;
+      console.log(
+        `✓ ${m.name}: ${durationLabel(run.durationSec)}, код ${String(run.exitCode)}` +
+          `${run.result === null ? ', ИТОГА НЕТ' : ''}`,
+      );
+    }
+    return measurements;
+  } finally {
+    rmSync(shardRoot, { recursive: true, force: true });
+  }
 }
 
 function status(): number {
@@ -224,31 +352,20 @@ async function main(): Promise<number> {
   mkdirSync(LOG_DIR, { recursive: true });
 
   const jobs = jobsArg(argv);
+  const wallStarted = Date.now();
   const runs: BatteryRun[] = [];
   for (const seed of seeds) {
     const startedAt = new Date().toISOString();
     const stamp = startedAt.slice(0, 16).replace(/[:T]/g, '-');
-    console.log(
-      `▶ зерно ${String(seed)}, партий ${String(parts.length)}, замеров ${String(selected.length)},` +
-        ` одновременно ${String(Math.min(jobs, selected.length))}`,
-    );
-    const finished = await runPool(selected, jobs, async (m) => {
-      const logPath = join(LOG_DIR, `${stamp}_${sha}_seed${String(seed)}_${m.name.replace(':', '-')}.txt`);
-      const run = await runScript(m, seed, parts, full, logPath);
-      console.log(
-        `✓ ${m.name}: ${durationLabel(run.durationSec)}, код ${String(run.exitCode)}` +
-          `${run.result === null ? ', ИТОГА НЕТ' : ''}`,
-      );
-      return run;
-    });
-    // Порядок ключей — как в MEASUREMENTS, а не как замеры финишировали:
-    // от него зависит порядок разделов в docs/measurements.md.
-    const measurements: Record<string, MeasurementRun> = {};
-    for (const [i, m] of selected.entries()) measurements[m.name] = finished[i] as MeasurementRun;
+    const measurements = await runSeed(selected, parts, seed, full, jobs, stamp, sha);
     const run: BatteryRun = { startedAt, sha, dirty: dirty.length > 0, seed, parts, full, measurements };
     runs.push(run);
     writeFileSync(join(outDir, `${stamp}_${sha}_seed${String(seed)}.json`), `${JSON.stringify(run, null, 2)}\n`);
   }
+
+  // Время ПО ЧАСАМ — не сумма по замерам: задачи шли вперемешку, и ждал
+  // пользователь именно этого числа.
+  console.log(`\nвсего по часам: ${durationLabel(Math.round((Date.now() - wallStarted) / 1000))}`);
 
   const current = runs[runs.length - 1] as BatteryRun;
   if (seedsRaw !== null) {
