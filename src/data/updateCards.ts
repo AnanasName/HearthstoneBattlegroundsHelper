@@ -14,6 +14,7 @@
 import { writeFileSync } from 'node:fs';
 
 import { CARDS_PATH, loadCardIndex } from './cards.js';
+import { serializeSnapshot } from './cardsSnapshot.js';
 
 const SOURCE = 'https://static.zerotoheroes.com/data/cards/cards_enUS.gz.json';
 
@@ -44,8 +45,17 @@ async function main(): Promise<void> {
     throw new Error('источник вернул не массив карт');
   }
 
-  writeFileSync(CARDS_PATH, text, 'utf8');
-  console.log(`записано ${CARDS_PATH}: ${cards.length.toLocaleString('ru-RU')} карт`);
+  // Снапшот ложится обрезанным и без отступов: источник отдаёт 39.8 МБ,
+  // из которых половина — пробелы, а ещё 11.5 МБ — поля, которые не читает
+  // ни симулятор, ни мы. Что именно выбрасывается и почему — в cardsSnapshot.ts,
+  // список сторожит тест.
+  const trimmed = serializeSnapshot(cards);
+  writeFileSync(CARDS_PATH, trimmed, 'utf8');
+  const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)} МБ`;
+  console.log(
+    `записано ${CARDS_PATH}: ${cards.length.toLocaleString('ru-RU')} карт,` +
+      ` ${mb(Buffer.byteLength(trimmed))} вместо ${mb(Buffer.byteLength(text))} у источника`,
+  );
   console.log(
     'проверьте после обновления: npm test, npm run calibrate\n' +
       'снапшот коммитится — он часть данных, а не кэш',

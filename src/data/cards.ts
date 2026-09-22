@@ -6,7 +6,8 @@ import { CARDS_PATH } from '../app/paths.js';
  * Справочник карт: cardId → племя, тир, статы.
  *
  * Источник — тот же снапшот Firestone, что кормит симулятор
- * (`data/cards/cards_enUS.json`, 35 321 карта, из них 1833 с `techLevel`).
+ * (`data/cards/cards_enUS.json`, 36 023 карты, из них 1968 с `techLevel`).
+ * Снапшот лежит обрезанным: что и почему из него выброшено — в cardsSnapshot.ts.
  * Коллекционный срез HearthstoneJSON из ТЗ здесь не годится по той же причине,
  * что и для симулятора: в нём нет ни `techLevel`, ни `races`, ни `isBaconPool`.
  *
