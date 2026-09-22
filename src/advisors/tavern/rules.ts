@@ -1386,6 +1386,26 @@ export interface TavernRules {
    */
   readonly buffsShopWords: readonly string[];
   /**
+   * Получатель прибавки — БОЖЕСТВО, а не миньон стола (D276, part65).
+   *
+   * «Discard a card to give your **Deity** +{0}/+{1}» (Brain Rotter
+   * `BG36_099`), «Whenever you cast a Tavern spell, give this and your
+   * **Deity** +{0}/+{1}» (Vicious Mindslasher), «Give your **Deity**
+   * +{0}/+{1}» (Energizing Chamber) — в снапшоте таких текстов 23.
+   *
+   * Божества на столе нет: в логе это скрытая сущность `BG_OldGod`
+   * в зоне SECRET, а на стол она выходит только В БОЮ, пробудившись
+   * после того, как за бой умрут три своих аберрации. Общее правило
+   * «цель баффа — крупнейший свой» указывало на миньона борда, и игрок
+   * на это пожаловался дословно: «предлагает выбрать целью карту, которая
+   * не может быть целью» (кадр 15:31:55).
+   *
+   * Шаблон терпит `<b>` вокруг слова и форму «your team's Deities»
+   * (C'Thrax Wrecker), а переносы строк сведены в пробел при загрузке
+   * снапшота (D198).
+   */
+  readonly deityRecipientWords: readonly string[];
+  /**
    * Витринный бафф, который держится ВСЮ ПАРТИЮ, а не до обновления.
    *
    * Разница в цене громадная и читается прямо в тексте: у Them Apples
@@ -2281,6 +2301,12 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
     '\\bgive\\b[^.]*\\bin\\s+the\\s+tavern\\b[^.]*\\+',
     '\\bminions?\\s+in\\s+the\\s+tavern\\b[^.]*\\bhave\\s+\\+',
   ],
+  // Только ЧИСТАЯ форма «give your Deity»: единственный получатель — оно.
+  // Формы с союзом статы борду ДАЮТ, и гасить их нельзя — «give **this and**
+  // your Deity» (Cutthroat K'Thir `BG36_106`, Vicious Mindslasher `BG36_108`)
+  // усиливает сам носитель, «give **your minions and** Deity» (Sha of Fear
+  // `BG36_111`) — весь борд. Под шаблон они не подходят именно поэтому.
+  deityRecipientWords: ['\\bgives?\\s+your\\s+(?:team\'s\\s+)?(?:<b>)?deit(?:y|ies)\\b'],
   buffsShopAllGameWords: ['\\bthis\\s+game\\b'],
   shopBuffOwnTypeWords: ['\\bof\\s+(?:its|their)\\s+type\\b'],
   // Замер 06.09.2026, `npm run spike:horizon`: 45 партий, 537 точек.

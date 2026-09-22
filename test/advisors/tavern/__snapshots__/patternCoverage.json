@@ -89,6 +89,27 @@
    "BG25_008",
    "BG25_008_G"
   ],
+  "deityRecipientWords": [
+   "BG36_099",
+   "BG36_099_G",
+   "BG36_109",
+   "BG36_109_G",
+   "BG36_110",
+   "BG36_110_G",
+   "BG36_113",
+   "BG36_113_G",
+   "BG36_318",
+   "BG36_318_G",
+   "BG36_371",
+   "BG36_MagicItem_404",
+   "BG36_MagicItem_404t",
+   "BGDUO_701",
+   "BGDUO_701_G",
+   "BGDUO_701_Gs",
+   "BGDUO_701s",
+   "BGFYM_005",
+   "BGFYM_005_G"
+  ],
   "delayedRewardWords": [
    "BG22_HERO_000p_Alt",
    "BG27_Anomaly_805",

@@ -7831,6 +7831,13 @@ function activationBoardStats(
   if (effectText === null) return 0;
   if (/\bdestroy\b/i.test(effectText)) return 0;
   if (rules.buffsShopWords.some((w) => new RegExp(w, 'i').test(effectText))) return 0;
+  // Прибавка БОЖЕСТВУ (D276) — та же граница, что у витринного усиления:
+  // слагаемое считает статы, которые кладёт на НАШ борд одно нажатие,
+  // а Божество лежит скрытой сущностью в SECRET и на стол выходит только
+  // в бою, пробудившись. В part65 это стоило Brain Rotter `BG36_099`
+  // четырёх лишних статов ценности при Божестве 1/1, которое за всю
+  // партию так и не проснулось.
+  if (rules.deityRecipientWords.some((w) => new RegExp(w, 'i').test(effectText))) return 0;
 
   const others = state.board.filter((m) => m.entityId !== minion.entityId);
   const setStats = setStatsOf(minion, effectText, rules);
@@ -8162,7 +8169,17 @@ export function activationRules(
 
     // Тот же разбор, что у заклинаний: литералы и плейсхолдеры-индексы
     // в теги NUM — только теги здесь живут на самом миньоне.
-    const stats = activationStats(minion, effectText);
+    //
+    // Получатель, названный словом «your Deity», — НЕ миньон стола (D276,
+    // part65, Brain Rotter `BG36_099`: «Activate ({2}): Discard a card
+    // to give your Deity +{0}/+{1}»). Обнуление здесь гасит совет целиком,
+    // и это верный статус, а не поблажка: ни цели назвать нельзя (игра
+    // выбора не предлагает — расширение D067), ни статы посчитать нашими
+    // (граница D184). Чего такая прибавка СТОИТ — вопрос открытый:
+    // Божество копит статы за партию (в part64 доросло до 76/111),
+    // и доля по остатку счётчика пробуждения без замера не вносится.
+    const feedsDeity = rules.deityRecipientWords.some((w) => new RegExp(w, 'i').test(effectText));
+    const stats = feedsDeity ? 0 : activationStats(minion, effectText);
     const givesMinion = /\b(?:get|summon|discover)\b/i.test(effectText);
     /**
      * «…Then destroy it…» — указанный миньон не получатель прибавки,
@@ -9734,6 +9751,17 @@ function computeSpellEffect(
   if (/\+(?:\{\d\}|\d+)(?:\s*\/\s*\+(?:\{\d\}|\d+))?\s+twice\b/i.test(text)) {
     stats *= 2;
     temporaryStats *= 2;
+  }
+  // «Give your Deity +{0}/+{1}» — получатель не на столе (D276): Energizing
+  // Chamber `BG36_371`, клич Joyous `BG36_110`, хрип Drifting Sacrifice
+  // `BG36_113`. Обнуляется у ИСТОЧНИКА, а не у каждого читателя `stats`:
+  // иначе цель назовёт то правило, которое про Божество не знает, — ровно
+  // так и вышло у активации (кадр part65 15:31:55). Ноль статов гасит
+  // и цель (её называют только при `stats > 0`), и сам совет: разбор
+  // без единого узнанного эффекта честно возвращает `null`.
+  if (rules.deityRecipientWords.some((w) => new RegExp(w, 'i').test(text))) {
+    stats = 0;
+    temporaryStats = 0;
   }
   const shield = /divine shield/i.test(text);
 
