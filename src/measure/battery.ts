@@ -7,6 +7,7 @@
  *   npm run battery -- --seeds=5     полоса шума: тот же код на зёрнах 1..5
  *   npm run battery -- --status      устарела ли батарея и какие партии вне списка
  *   npm run battery -- --allow-dirty прогон при незакоммиченном src/
+ *   npm run battery -- --jobs=1      замеры друг за другом, как до 23.09.2026
  *
  * Зачем. Замеры гонялись по одному, вывод читался глазами, а числа
  * переписывались прозой в три файла документации. Батарея выбрасывалась
@@ -22,10 +23,12 @@
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 
 import { CURRENT_BUILD_PARTS, fixtureLogPaths } from '../data/fixtureGames.js';
 import { partsArg, seedArg } from './args.js';
+import { runPool } from './pool.js';
 import {
   comparable,
   durationLabel,
@@ -109,6 +112,22 @@ function loadNoise(parts: readonly number[]): NoiseBand | null {
   return bands[bands.length - 1] ?? null;
 }
 
+/**
+ * Сколько замеров гонять одновременно.
+ *
+ * Умолчание — половина ядер, но не больше числа задач: каждый замер держит
+ * свой снапшот карт (40 МБ JSON), и восемь процессов на шестнадцатиядерной
+ * машине оставляют запас и памяти, и ядер под тесты соседней сессии.
+ * `--jobs=1` возвращает прежний порядок «друг за другом».
+ */
+function jobsArg(argv: readonly string[]): number {
+  const raw = flag(argv, 'jobs');
+  if (raw === null) return Math.max(1, Math.floor(availableParallelism() / 2));
+  const jobs = Number(raw);
+  if (!Number.isInteger(jobs) || jobs < 1) throw new Error(`--jobs ждёт целое число от единицы, а получил «${raw}»`);
+  return jobs;
+}
+
 function runScript(m: Measurement, seed: number, parts: readonly number[], full: boolean, logPath: string): Promise<MeasurementRun> {
   return new Promise((resolve) => {
     const args = [TSX_CLI, m.script, `--seed=${String(seed)}`];
@@ -124,12 +143,13 @@ function runScript(m: Measurement, seed: number, parts: readonly number[], full:
       const text = chunk.toString('utf8');
       stdout += text;
       log.write(text);
-      for (const match of text.matchAll(/═══ (part\d+)/g)) process.stdout.write(` ${match[1] ?? ''}`);
+      // Отметка о партии — целой строкой с именем замера: замеры идут
+      // одновременно, и дописывать их в одну строку значит смешать вывод.
+      for (const match of text.matchAll(/═══ (part\d+)/g)) console.log(`  ${m.name} ${match[1] ?? ''}`);
     });
     child.stderr.on('data', (chunk: Buffer) => log.write(chunk));
     child.on('close', (code) => {
       log.end();
-      process.stdout.write('\n');
       resolve({
         exitCode: code ?? 1,
         durationSec: Math.round((Date.now() - started) / 1000),
@@ -203,18 +223,28 @@ async function main(): Promise<number> {
   mkdirSync(outDir, { recursive: true });
   mkdirSync(LOG_DIR, { recursive: true });
 
+  const jobs = jobsArg(argv);
   const runs: BatteryRun[] = [];
   for (const seed of seeds) {
     const startedAt = new Date().toISOString();
     const stamp = startedAt.slice(0, 16).replace(/[:T]/g, '-');
-    const measurements: Record<string, MeasurementRun> = {};
-    for (const m of selected) {
-      process.stdout.write(`▶ ${m.name}, зерно ${String(seed)}, партий ${String(parts.length)}:`);
+    console.log(
+      `▶ зерно ${String(seed)}, партий ${String(parts.length)}, замеров ${String(selected.length)},` +
+        ` одновременно ${String(Math.min(jobs, selected.length))}`,
+    );
+    const finished = await runPool(selected, jobs, async (m) => {
       const logPath = join(LOG_DIR, `${stamp}_${sha}_seed${String(seed)}_${m.name.replace(':', '-')}.txt`);
       const run = await runScript(m, seed, parts, full, logPath);
-      measurements[m.name] = run;
-      console.log(`  ${m.name}: ${durationLabel(run.durationSec)}, код ${String(run.exitCode)}${run.result === null ? ', ИТОГА НЕТ' : ''}`);
-    }
+      console.log(
+        `✓ ${m.name}: ${durationLabel(run.durationSec)}, код ${String(run.exitCode)}` +
+          `${run.result === null ? ', ИТОГА НЕТ' : ''}`,
+      );
+      return run;
+    });
+    // Порядок ключей — как в MEASUREMENTS, а не как замеры финишировали:
+    // от него зависит порядок разделов в docs/measurements.md.
+    const measurements: Record<string, MeasurementRun> = {};
+    for (const [i, m] of selected.entries()) measurements[m.name] = finished[i] as MeasurementRun;
     const run: BatteryRun = { startedAt, sha, dirty: dirty.length > 0, seed, parts, full, measurements };
     runs.push(run);
     writeFileSync(join(outDir, `${stamp}_${sha}_seed${String(seed)}.json`), `${JSON.stringify(run, null, 2)}\n`);
