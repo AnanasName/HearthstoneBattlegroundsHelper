@@ -31,7 +31,7 @@ import { readBattleEpisodes, type BattleEpisode } from '../battle/episodes.js';
 import { toBattleInfo, withPlayerBoard } from '../battle/mapper.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import { partsArg } from '../../measure/args.js';
-import { fixtureLogPaths } from '../../data/fixtureGames.js';
+import { CURRENT_BUILD_PARTS, fixtureLogPaths } from '../../data/fixtureGames.js';
 import { advisePosition } from './advisor.js';
 import { arrangementSpace } from './arrangements.js';
 import { chooseAdvice } from './merge.js';
@@ -123,7 +123,10 @@ function casesFrom(part: number, wanted: number, size: number): Case[] {
 }
 
 function main(): void {
-  const parts = partsArg(process.argv, [17, 30, 41]);
+  // Универсум — весь список замеров, а не короткий набор по умолчанию:
+  // `partsArg` ФИЛЬТРУЕТ запрошенное по этому списку, и с коротким умолчанием
+  // «--parts=50,55» молча отбрасывались, а выборка держалась на двух партиях.
+  const parts = partsArg(process.argv, CURRENT_BUILD_PARTS);
   const searches = flag('searches', 8);
   const perPart = flag('boards', 2);
   const size = flag('size', DEFAULT_BOARD);
@@ -145,6 +148,7 @@ function main(): void {
   const pooledGaps: number[] = [];
   const lcbGaps: number[] = [];
   const richGaps: number[] = [];
+  const sharpGaps: number[] = [];
   let singleBest = 0;
   let pooledBest = 0;
   let lcbBest = 0;
@@ -218,6 +222,20 @@ function main(): void {
       },
     );
 
+    // Четвёртый способ — тот, на который указал сам замер. Если лишние
+    // кандидаты вредят (максимум из большего числа шумных оценок смещён
+    // сильнее), то ядра надо тратить не на ШИРИНУ отбора, а на его ТОЧНОСТЬ:
+    // кандидатов столько же, но каждый оценивается вдесятеро надёжнее.
+    const sharp = advisePosition(
+      episode,
+      { simulator },
+      {
+        ...NO_BUDGET,
+        seed: 1,
+        screenSims: DEFAULT_SEARCH_OPTIONS.screenSims * searches,
+      },
+    );
+
     const single = advices[0]?.top[0]?.key ?? '';
     const pooled = chooseAdvice(advices, objective)?.key ?? '';
     // Тот же выбор, но с уценкой на неуверенность: расстановка, за которой
@@ -231,10 +249,12 @@ function main(): void {
     const pooledGap = gapOf(pooled);
     const lcbGap = gapOf(lcb);
     const richGap = gapOf(rich.top[0]?.key ?? '');
+    const sharpGap = gapOf(sharp.top[0]?.key ?? '');
     singleGaps.push(singleGap);
     pooledGaps.push(pooledGap);
     lcbGaps.push(lcbGap);
     richGaps.push(richGap);
+    sharpGaps.push(sharpGap);
     if (single === bestKey) singleBest += 1;
     if (pooled === bestKey) pooledBest += 1;
     if (lcb === bestKey) lcbBest += 1;
@@ -256,9 +276,14 @@ function main(): void {
         `${lcb === bestKey ? ' (попал в лучшую)' : ''}${lcb === single ? ' — как один поиск' : ''}`,
     );
     console.log(
-      `  один x${String(searches)} бюджет: отставание ${richGap.toFixed(2)} п.п.` +
+      `  шире отбор (x${String(searches)} кандидатов): отставание ${richGap.toFixed(2)} п.п.` +
         `${rich.top[0]?.key === bestKey ? ' (попал в лучшую)' : ''}` +
         `, кандидатов ${String(rich.report.evaluated)} против ${String(advices[0]?.report.evaluated ?? 0)}`,
+    );
+    console.log(
+      `  точнее отбор (x${String(searches)} симуляций): отставание ${sharpGap.toFixed(2)} п.п.` +
+        `${sharp.top[0]?.key === bestKey ? ' (попал в лучшую)' : ''}` +
+        `, кандидатов ${String(sharp.report.evaluated)}`,
     );
   }
 
@@ -273,12 +298,14 @@ function main(): void {
   console.log(`  среднее отставание, один поиск:        ${mean(singleGaps).toFixed(2)} п.п.`);
   console.log(`  среднее отставание, ${String(searches)} поисков:        ${mean(pooledGaps).toFixed(2)} п.п.`);
   console.log(`  среднее отставание, ${String(searches)} с уценкой:      ${mean(lcbGaps).toFixed(2)} п.п.`);
-  console.log(`  среднее отставание, один x${String(searches)} бюджет:  ${mean(richGaps).toFixed(2)} п.п.`);
+  console.log(`  среднее отставание, шире отбор:        ${mean(richGaps).toFixed(2)} п.п.`);
+  console.log(`  среднее отставание, точнее отбор:      ${mean(sharpGaps).toFixed(2)} п.п.`);
   console.log(
     `\n  выигрыш против одного поиска (больше нуля — лучше):` +
       `\n    ${String(searches)} поисков:        ${(mean(singleGaps) - mean(pooledGaps)).toFixed(2)} п.п.` +
       `\n    ${String(searches)} с уценкой:      ${(mean(singleGaps) - mean(lcbGaps)).toFixed(2)} п.п.` +
-      `\n    один x${String(searches)} бюджет:   ${(mean(singleGaps) - mean(richGaps)).toFixed(2)} п.п.`,
+      `\n    шире отбор:       ${(mean(singleGaps) - mean(richGaps)).toFixed(2)} п.п.` +
+      `\n    точнее отбор:     ${(mean(singleGaps) - mean(sharpGaps)).toFixed(2)} п.п.`,
   );
 }
 
