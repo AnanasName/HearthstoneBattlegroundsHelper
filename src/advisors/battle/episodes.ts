@@ -1,7 +1,7 @@
 import { insideBlock, readPowerEvents, type PowerEvent, type Yielder } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
-import type { GameState, GlobalInfo, Hero, Minion } from '../../state/types.js';
+import type { Deity, GameState, GlobalInfo, Hero, Minion } from '../../state/types.js';
 
 /**
  * Извлечение боёв с известным исходом.
@@ -36,6 +36,9 @@ export interface BattleEpisode {
   /** Взятые тринкеты, свои и противника, как dbfId из лога. */
   readonly playerTrinketDbfIds: readonly number[];
   readonly opponentTrinketDbfIds: readonly number[];
+  /** Божества обеих сторон на начало боя (D287), `null` — сигила нет. */
+  readonly playerDeity: Deity | null;
+  readonly opponentDeity: Deity | null;
   /** Чем бой закончился на самом деле. */
   readonly outcome: Outcome;
   /** Сколько здоровья потерял игрок. */
@@ -61,6 +64,8 @@ interface Pending {
   opponentPlayerId: number | null;
   playerTrinketDbfIds: readonly number[];
   opponentTrinketDbfIds: readonly number[];
+  playerDeity: Deity | null;
+  opponentDeity: Deity | null;
   hpBefore: number;
 }
 
@@ -149,6 +154,8 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
             state.currentOpponentPlayerId === null
               ? []
               : (state.trinketsByPlayer[state.currentOpponentPlayerId] ?? []),
+          playerDeity: state.deity,
+          opponentDeity: state.opponentDeity,
           hpBefore: hpBeforeCombat,
         };
       }
@@ -174,6 +181,8 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
         opponentPlayerId: pending.opponentPlayerId,
         playerTrinketDbfIds: pending.playerTrinketDbfIds,
         opponentTrinketDbfIds: pending.opponentTrinketDbfIds,
+        playerDeity: pending.playerDeity,
+        opponentDeity: pending.opponentDeity,
         outcome,
         damageTaken,
       });

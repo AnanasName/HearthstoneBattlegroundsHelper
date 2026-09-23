@@ -14,6 +14,7 @@ import {
   EMPTY_STATE,
   raceOfSubsetTag,
   type ChoiceOption,
+  type Deity,
   type Enchantment,
   type GameState,
   type GlobalInfo,
@@ -73,6 +74,9 @@ const TECH_UP_BUTTON_RE = /^TB_BaconShopTechUp\d+_Button$/;
 
 /** Кнопка тёмного дара — `CARDTYPE=GAME_MODE_BUTTON`, цена в теге `COST`. */
 const DARK_GIFT_BUTTON = 'BG36_Button_DarkGift';
+
+/** Скрытый сигил Божества, «Secret Deity [DNT]», `CARDTYPE=SPELL` (D276). */
+const DEITY_SIGIL_CARD_ID = 'BG_OldGod';
 
 /** Кнопка обновления витрины — её `COST` и есть живая цена реролла. */
 const REROLL_BUTTON = 'TB_BaconShop_8p_Reroll_Button';
@@ -510,6 +514,7 @@ export function createReducer(players: Players): Reducer {
         found.cardId = cardId;
         noteShopMinion(found);
         noteCounterEnchant(found);
+        noteDeitySigil(found);
       }
       return found;
     }
@@ -525,6 +530,7 @@ export function createReducer(players: Players): Reducer {
     };
     entities.set(id, created);
     noteCounterEnchant(created);
+    noteDeitySigil(created);
     return created;
   };
 
@@ -853,6 +859,7 @@ export function createReducer(players: Players): Reducer {
     entities.clear();
     enchantmentsCache = null;
     counterEnchantIds.clear();
+    deitySigilIds.clear();
     current = null;
     currentIsGameEntity = false;
     openChoice = null;
@@ -1241,6 +1248,48 @@ export function createReducer(players: Players): Reducer {
   };
 
   /**
+   * Сигилы Божества `BG_OldGod` — узкий индекс, как у счётчиков выше (D287).
+   *
+   * Свой сигил один на партию (part71: id 370, `SECRET` с первого хода).
+   * Сигил соперника игра заводит заново на КАЖДЫЙ бой: создаёт под нашим
+   * контроллером в `SETASIDE`, переводит под слот соперника, раскрывает
+   * `SHOW_ENTITY` и после боя уносит в `REMOVEDFROMGAME` (part71, строки
+   * 265278 → 267407 для финального боя). Отсюда и правило выборки — то же,
+   * что у энчантов-счётчиков: новейшая сущность контроллера в рабочей зоне.
+   */
+  const deitySigilIds = new Set<number>();
+
+  const noteDeitySigil = (e: Entity): void => {
+    if (e.cardId === DEITY_SIGIL_CARD_ID) deitySigilIds.add(e.id);
+  };
+
+  const deityOf = (controller: number | null): Deity | null => {
+    if (controller === null) return null;
+    let newest: Entity | null = null;
+    for (const id of deitySigilIds) {
+      const e = entities.get(id);
+      if (e === undefined) continue;
+      // Только `SECRET`: копия соперника до раскрытия лежит в `SETASIDE`
+      // ещё под НАШИМ контроллером, и взять её значило бы приписать себе
+      // чужие статы.
+      if (e.controller !== controller || e.zone !== 'SECRET') continue;
+      if (newest === null || e.id > newest.id) newest = e;
+    }
+    if (newest === null) return null;
+    const tags = newest.tags;
+    return {
+      entityId: newest.id,
+      cardDbfId: tags.get('TAG_SCRIPT_DATA_NUM_6') ?? tags.get('BACON_EVOLUTION_CARD_ID') ?? null,
+      // Ноль — это «счётчик уже отработал в этом бою»; перезаряжает его игра
+      // на три. Симулятор читает ноль так же (`scriptDataNum1 || 3`), а мы
+      // отдаём его как есть: «сколько осталось» — факт лога, не догадка.
+      remaining: tags.get('TAG_SCRIPT_DATA_NUM_1') ?? tags.get('QUEST_PROGRESS_TOTAL') ?? 3,
+      attack: tags.get('TAG_SCRIPT_DATA_NUM_2') ?? tags.get('BACON_EVOLUTION_CARD_OVERWRITE_ATK') ?? 1,
+      health: tags.get('TAG_SCRIPT_DATA_NUM_3') ?? tags.get('BACON_EVOLUTION_CARD_OVERWRITE_HEALTH') ?? 1,
+    };
+  };
+
+  /**
    * Кнопка апгрейда таверны — она же цена подъёма.
    *
    * Сущность `TB_BaconShopTechUp0N_Button` в `PLAY` под своим контроллером.
@@ -1602,6 +1651,8 @@ export function createReducer(players: Players): Reducer {
       // Счётчики СОПЕРНИКА текущего боя — та же функция, другой контроллер.
       // Без них правка выше была бы асимметричной (см. её шапку).
       opponentGlobalInfo: { ...EMPTY_GLOBAL_INFO, ...enchantCountersOf(opponentController()) },
+      deity: deityOf(players.selfPlayerId),
+      opponentDeity: deityOf(opponentController()),
       nextOpponentPlayerId,
       currentOpponentPlayerId,
       wonLastCombat,

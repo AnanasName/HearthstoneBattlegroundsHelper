@@ -7,11 +7,13 @@ import type {
   BoardEnchantment,
   BoardEntity,
 } from '@firestone-hs/simulate-bgs-battle/dist/board-entity.js';
+import type { BoardSecret } from '@firestone-hs/simulate-bgs-battle/dist/board-secret.js';
 
 import { loadCardIndex, type CardIndex } from '../../data/cards.js';
 import { tavernTurnOf } from '../tavern/rules.js';
 import {
   EMPTY_GLOBAL_INFO,
+  type Deity,
   type Enchantment,
   type GlobalInfo,
   type Hero,
@@ -201,6 +203,36 @@ export interface BattleSetup {
    */
   readonly playerTrinketDbfIds?: readonly number[];
   readonly opponentTrinketDbfIds?: readonly number[];
+  /**
+   * Божества сторон (D287): сигил, из которого симулятор В БОЮ выпускает
+   * тело после смерти нужного числа своих аберраций. Необязательные
+   * по той же причине, что тринкеты: `undefined` — «не знаем», `null` —
+   * «сигила нет».
+   */
+  readonly playerDeity?: Deity | null;
+  readonly opponentDeity?: Deity | null;
+}
+
+/**
+ * Сигил Божества → секрет симулятора.
+ *
+ * Пакет (с 1.1.757, `simulation/deity.js`) ищет среди секретов героя карту
+ * `BG_OldGod` и читает с неё ровно те теги, что лежат на сигиле в логе:
+ * `scriptDataNum1` — остаток счётчика, `_2`/`_3` — статы тела, `_6` — dbfId
+ * тела. Отсюда и перевод один к одному, без пересчёта.
+ */
+function toDeitySecrets(deity: Deity | null | undefined): BoardSecret[] {
+  if (deity === null || deity === undefined) return [];
+  return [
+    {
+      entityId: deity.entityId,
+      cardId: 'BG_OldGod',
+      scriptDataNum1: deity.remaining,
+      scriptDataNum2: deity.attack,
+      scriptDataNum3: deity.health,
+      ...(deity.cardDbfId === null ? {} : { scriptDataNum6: deity.cardDbfId }),
+    },
+  ];
 }
 
 /**
@@ -244,6 +276,7 @@ export function toBattleInfo(
     questEntities: [],
     globalInfo: toGlobalInfo(episode.opponentGlobalInfo ?? EMPTY_GLOBAL_INFO),
     trinkets: toTrinkets(episode.opponentTrinketDbfIds),
+    secrets: toDeitySecrets(episode.opponentDeity),
   };
 
   return {
@@ -251,6 +284,7 @@ export function toBattleInfo(
       player: {
         ...toPlayerEntity(episode.playerHero, episode.techLevel, episode.globalInfo),
         trinkets: toTrinkets(episode.playerTrinketDbfIds),
+        secrets: toDeitySecrets(episode.playerDeity),
         // Рука — только когда она известна: у старых эпизодов её нет,
         // и пустой список означал бы «рука пуста», а не «не знаем».
         ...(episode.playerHand === undefined

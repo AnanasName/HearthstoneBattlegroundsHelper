@@ -305,6 +305,7 @@ export function measureSpendQuality(
       techLevel: state.techLevel,
       anomalyCardId: state.anomalyCardId,
       globalInfo: state.globalInfo,
+      playerDeity: state.deity,
       playerTrinketDbfIds:
         state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
       opponentTrinketDbfIds:

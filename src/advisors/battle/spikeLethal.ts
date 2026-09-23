@@ -169,6 +169,7 @@ function collect(parts: readonly number[], seed: number, skipField: boolean): Po
               techLevel: episode.techLevel,
               anomalyCardId: episode.anomalyCardId,
               globalInfo: episode.globalInfo,
+              playerDeity: episode.playerDeity,
               playerTrinketDbfIds: episode.playerTrinketDbfIds,
               opponentTrinketDbfIds: opponent.trinketDbfIds,
             }),

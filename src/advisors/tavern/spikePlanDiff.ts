@@ -233,6 +233,7 @@ function compare(beforePath: string, afterPath: string, sims: number): void {
           techLevel: s.techLevel,
           anomalyCardId: s.anomalyCardId,
           globalInfo: s.globalInfo,
+          playerDeity: s.deity,
           playerTrinketDbfIds: s.playerId === null ? [] : (s.trinketsByPlayer[s.playerId] ?? []),
           opponentTrinketDbfIds: opponent.trinketDbfIds,
         },

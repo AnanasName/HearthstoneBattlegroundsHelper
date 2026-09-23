@@ -593,6 +593,26 @@ export interface PlayerAction {
   readonly subOption: number | null;
 }
 
+/**
+ * Божество игрока — скрытый сигил `BG_OldGod` в зоне `SECRET` (D276, D287).
+ *
+ * На столе Божества нет: оно выходит только в бою, когда умрёт `remaining`
+ * своих аберраций, со статами сигила, и тело его (К'Тун `BGFYM_000`,
+ * Y'Shaarj `BGFYM_011`) делает своё «после пробуждения». Поля — ровно
+ * четыре тега сигила, которые читает и симулятор (`deity.js` пакета
+ * с 1.1.757): `TAG_SCRIPT_DATA_NUM_1` — остаток счётчика, `_2`/`_3` —
+ * атака и здоровье, `_6` — dbfId тела.
+ */
+export interface Deity {
+  readonly entityId: number;
+  /** dbfId тела, которое выйдет (`TAG_SCRIPT_DATA_NUM_6`, он же `BACON_EVOLUTION_CARD_ID`). */
+  readonly cardDbfId: number | null;
+  /** Сколько своих аберраций ещё должно умереть в бою, чтобы оно пробудилось. */
+  readonly remaining: number;
+  readonly attack: number;
+  readonly health: number;
+}
+
 export interface GameState {
   readonly phase: Phase;
   /** Номер хода из тега `TURN` на `GameEntity`. */
@@ -726,6 +746,19 @@ export interface GameState {
    * которого нам понадобятся, заранее неизвестно.
    */
   readonly opponentGlobalInfo: GlobalInfo;
+  /**
+   * Своё Божество (D287). Сигил один на партию и живёт в `SECRET` с первого
+   * хода, поэтому известен и в таверне; `null` — в партии без Божеств.
+   */
+  readonly deity: Deity | null;
+  /**
+   * Божество СОПЕРНИКА текущего боя. Игра заводит его сигил заново на каждый
+   * бой и убирает в `REMOVEDFROMGAME` после, поэтому, как и
+   * `opponentGlobalInfo`, оно известно только в бою. Без него бой
+   * асимметричен в худшую сторону: part71, ход 22 — К'Тун соперника
+   * 1137/1131, прогноз 100 % победы, бой проигран и партия кончилась.
+   */
+  readonly opponentDeity: Deity | null;
   /**
    * `PlayerID` следующего противника — тег `NEXT_OPPONENT_PLAYER_ID`.
    *
@@ -977,6 +1010,8 @@ export const EMPTY_STATE: GameState = {
   anomalyCardId: null,
   globalInfo: EMPTY_GLOBAL_INFO,
   opponentGlobalInfo: EMPTY_GLOBAL_INFO,
+  deity: null,
+  opponentDeity: null,
   nextOpponentPlayerId: null,
   currentOpponentPlayerId: null,
   wonLastCombat: null,

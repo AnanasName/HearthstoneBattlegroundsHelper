@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { readBattleEpisodesAsync, type BattleEpisode } from '../../../src/advisors/battle/episodes.js';
 import { toBattleInfo } from '../../../src/advisors/battle/mapper.js';
 import { seededSimulator } from '../../../src/advisors/battle/seeded.js';
-import { createBattleSimulator } from '../../../src/advisors/battle/simulator.js';
+import { sharedBattleSimulator } from '../../../src/advisors/battle/simulator.js';
 import { createBreather } from '../../breather.js';
 import { part71Game } from '../../fixtures.js';
 
@@ -52,12 +52,62 @@ describe('part71: сила Drek’Thar в симуляторе боя', () => {
     // До правки: 71 % побед с силой против 10 % без неё — симулятор ставил
     // на стол копию, которой в бою не было (бой выигран без неё, блока
     // `TRIGGER` силы на ходу 10 в логе нет).
-    const simulator = seededSimulator(createBattleSimulator(), 1);
+    const simulator = seededSimulator(sharedBattleSimulator(), 1);
     const episode = at(10);
     const withPower = simulator.run(toBattleInfo(episode, 1000));
     const withoutPower = simulator.run(
       toBattleInfo({ ...episode, playerHero: { ...episode.playerHero, heroPowerCardId: null } }, 1000),
     );
     expect(Math.abs(withPower.wonPercent - withoutPower.wonPercent)).toBeLessThan(10);
+  });
+
+  /**
+   * Божество (жалоба игрока 24.09: «учитывал ли ты, что будет призывать
+   * ктун после смерти трёх аберраций в бою?», D287).
+   *
+   * Сигил лежит в `SECRET` у обеих сторон боя, и четыре его тега — ровно
+   * то, что читает `deity.js` симулятора. Финальный бой (ход 22):
+   * свой сигил id 370 — 256/358 (последние `TAG_SCRIPT_DATA_NUM_2/_3`
+   * до строки 265278), сигил соперника id 13084 — 1137/1131, тело К'Тун
+   * dbfId 130610 (строки 265278–265295, раскрыт под слотом соперника
+   * строкой 267407).
+   */
+  it('сигил Божества читается у обеих сторон боя', () => {
+    expect(at(2).playerDeity).toMatchObject({ attack: 1, health: 1, remaining: 3, cardDbfId: 130610 });
+    expect(at(22).playerDeity).toEqual({
+      entityId: 370,
+      cardDbfId: 130610,
+      remaining: 3,
+      attack: 256,
+      health: 358,
+    });
+    expect(at(22).opponentDeity).toEqual({
+      entityId: 13084,
+      cardDbfId: 130610,
+      remaining: 3,
+      attack: 1137,
+      health: 1131,
+    });
+  });
+
+  it('с Божествами прогноз сходится с исходом там, где без них промахивался', () => {
+    const simulator = seededSimulator(sharedBattleSimulator(), 1);
+    const run = (episode: BattleEpisode, deities: boolean) =>
+      simulator.run(
+        toBattleInfo(deities ? episode : { ...episode, playerDeity: null, opponentDeity: null }, 1000),
+      );
+
+    // Ход 8 (таверна 4), бой выигран: свой К'Тун 3/3 пробудился и отдал
+    // +3/+3 Harmless Bonehead (строки 30712–30865). Без него — поражение.
+    expect(at(8).outcome).toBe('won');
+    expect(run(at(8), false).wonPercent).toBeLessThan(10);
+    expect(run(at(8), true).wonPercent).toBeGreaterThan(50);
+
+    // Ход 22, финал: бой проигран на 15 и партия кончилась. Без Божеств
+    // симулятор обещал победу наверняка — К'Тун соперника 1137/1131 он
+    // не видел.
+    expect(at(22).outcome).toBe('lost');
+    expect(run(at(22), false).wonPercent).toBeGreaterThan(90);
+    expect(run(at(22), true).lostPercent).toBeGreaterThan(90);
   });
 });
