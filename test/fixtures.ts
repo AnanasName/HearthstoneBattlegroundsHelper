@@ -1586,3 +1586,21 @@ export function part69Game(): string {
 export function part70Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part70', 'game.log'), 'utf8');
 }
+
+/**
+ * part71 — 24.09.2026, Drek'Thar `BG22_HERO_002`, 5-е место, билд 251952,
+ * 11 ходов таверны (00:49–01:09). Аберрации на Божестве К'Тун `BGFYM_000`
+ * и тавернских заклинаниях (Vicious Mindslasher с портретом-тринкетом).
+ *
+ * Первая партия корпуса, где Drek'Thar — СВОЙ герой (в part5, part28,
+ * part43 и part53 он у соперника). Сила Frostwolf Fervor `BG22_HERO_002p` —
+ * «When you have space in combat, summon a copy of your highest-Attack
+ * minion. (Unlocks on Turn 7.)» — заперта тегом `LOCK_VISUAL=1` с создания
+ * (строка 1285) и отпирается на ходу партии 13, то есть на СЕДЬМОМ ходу
+ * таверны (строка 69059, `TURN=13` строкой 68419). Сработала она четыре
+ * раза, по разу за бой — ходы 14, 16, 20, 22 (блоки `TRIGGER` силы, первый
+ * строкой 84920), — и ни разу на ходах 7–12.
+ */
+export function part71Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part71', 'game.log'), 'utf8');
+}

@@ -9,6 +9,7 @@ import type {
 } from '@firestone-hs/simulate-bgs-battle/dist/board-entity.js';
 
 import { loadCardIndex, type CardIndex } from '../../data/cards.js';
+import { tavernTurnOf } from '../tavern/rules.js';
 import {
   EMPTY_GLOBAL_INFO,
   type Enchantment,
@@ -264,7 +265,11 @@ export function toBattleInfo(
     },
     options: { numberOfSimulations, skipInfoLogs: true },
     gameState: {
-      currentTurn: episode.turn,
+      // Ход ТАВЕРНЫ, а не партии (D286): у симулятора это шкала силы
+      // «Unlocks on Turn 7» (Drek'Thar, Vanndar) и ограничителя урона.
+      // Сырой ход партии отпирал силу Drek'Thar на четвёртом ходу таверны
+      // и ставил в бой копию, которой не было (part71, ходы 8–12).
+      currentTurn: tavernTurnOf(episode.turn),
       ...(episode.anomalyCardId === null ? {} : { anomalies: [episode.anomalyCardId] }),
     },
   };
