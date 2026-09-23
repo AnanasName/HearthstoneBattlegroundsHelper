@@ -69,7 +69,7 @@ describe('part41: метки поверх карт — ряд витрины, к
 
     // Верхний совет — покупка этого заклинания, и теперь у неё есть кольцо.
     const v = view(state);
-    expect(v.actions[0]?.text).toContain('Recruit a Trainee');
+    expect(v.main[0]?.text).toContain('Recruit a Trainee');
     const mark = v.marks.find((m) => m.row === 'shop');
     expect(mark?.count).toBe(4);
     expect(mark?.index).toBe(2);
@@ -154,7 +154,7 @@ describe('part41: метки поверх карт — ряд витрины, к
     expect(state.trinketOffer.every((t) => t.entityId > 0)).toBe(true);
 
     const v = view(state);
-    expect(v.actions[0]?.text).toContain('Faerie Dragon Scale');
+    expect(v.main[0]?.text).toContain('Faerie Dragon Scale');
     expect(v.marks).toHaveLength(1);
     expect(v.marks[0]?.row).toBe('trinket');
     expect(v.marks[0]?.index).toBe(3);

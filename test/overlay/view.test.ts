@@ -8,7 +8,7 @@ import type {
   ValueBreakdown,
 } from '../../src/advisors/tavern/advisor.js';
 import type { SpendPlan, SpendStep } from '../../src/advisors/tavern/spend.js';
-import { buildView, type ViewInput } from '../../src/overlay/view.js';
+import { buildView, failedView, type ViewInput } from '../../src/overlay/view.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { EMPTY_STATE, type GameState } from '../../src/state/types.js';
 import { recommendationLine } from '../../src/ui/format.js';
@@ -203,7 +203,7 @@ describe('вид оверлея', () => {
     expect(view.active).toBe(false);
   });
 
-  it('шапка, борд, витрина и три первых совета', () => {
+  it('шапка, борд, витрина; на виду верхний совет, два следующих свёрнуты', () => {
     const view = buildView(input(), cards);
 
     expect(view.header).toContain('ход 9');
@@ -213,19 +213,24 @@ describe('вид оверлея', () => {
     expect(view.board).toHaveLength(2);
     expect(view.shop).toHaveLength(2);
 
-    // Три совета, не больше: с «разыграть» и подъёмом-приоритетом в топе
-    // обычно сочетание разных действий, а простыня оверлею всё же не к лицу.
-    expect(view.actions).toHaveLength(3);
-    expect(view.actions[0]?.tone).toBe('good');
+    // Просьба игрока 24.09 (D285): явно показывается только основная линия.
+    // Без живого плана это верхний совет — одна строка.
+    expect(view.main).toHaveLength(1);
+    expect(view.main[0]?.tone).toBe('good');
+    expect(view.main[0]?.text).toBe(recommendationLine(tavern.recommendations[0]!, cards));
+    // Три совета, как и прежде, не больше: два других уходят в свёрнутый
+    // раздел, а четвёртый в него не попал бы — это уже хвост ранжирования.
+    expect(view.alternatives.map((l) => l.text)).toEqual([
+      recommendationLine(tavern.recommendations[1]!, cards),
+      recommendationLine(tavern.recommendations[2]!, cards),
+    ]);
+    expect(view.alternatives.every((l) => l.tone === 'normal')).toBe(true);
   });
 
-  it('план трат — своим блоком; в списке советов место одно, как и было', () => {
+  it('план трат — своим блоком, и он же основная линия', () => {
     // Ход состоит из нескольких действий, и описывать его целиком по-прежнему
-    // обязано то, что стоит выше советов. Изменилась ФОРМА этого решения,
-    // а не оно само: вместо одной плотной строки — блок по шагу в строку,
-    // где виден остаток золота после каждого шага. Место в списке план
-    // занимает прежнее — ровно одно: первый шаг почти всегда и есть верхний
-    // совет, и третья строка была бы платой за повтор.
+    // обязано то, что стоит выше советов: блок по шагу в строку, где виден
+    // остаток золота после каждого шага.
     const view = buildView(input({ spendPlan: plan() }), cards);
 
     expect(view.plan?.gold).toBe(7);
@@ -242,11 +247,14 @@ describe('вид оверлея', () => {
     expect(view.plan?.restVerbs).toHaveLength(0);
     expect(view.plan?.goldCaption).toBe('остаток');
 
-    expect(view.actions).toHaveLength(2);
-    expect(view.actions[0]?.text).toContain('КУПИТЬ');
-    // Зелёный акцент отдан блоку: два зелёных объекта на экране спорили бы
-    // за то, с чего начинать читать.
-    expect(view.actions[0]?.tone).toBe('normal');
+    // Строки совета над блоком нет: первый шаг плана и есть верхний совет,
+    // и повтор был бы второй основной линией.
+    expect(view.main).toHaveLength(0);
+    // В другие ходы уходит только то, чего в плане нет: покупка и подъём —
+    // шаги плана, обновление — нет.
+    expect(view.alternatives.map((l) => l.text)).toEqual([
+      recommendationLine(tavern.recommendations[2]!, cards),
+    ]);
 
     // План из одного шага блоком не рисуется — это и есть верхняя строка.
     const one = buildView(
@@ -254,7 +262,46 @@ describe('вид оверлея', () => {
       cards,
     );
     expect(one.plan).toBeNull();
-    expect(one.actions[0]?.tone).toBe('good');
+    expect(one.main[0]?.tone).toBe('good');
+  });
+
+  it('план, начатый не с верхнего совета, отдаёт верхний совет в другие ходы', () => {
+    // План умеет начать с соперника верхнего совета, когда тот запирает
+    // остаток золота (part23). Тогда верхний совет — как раз альтернатива
+    // линии, и «всё, кроме первого» спрятало бы именно его.
+    const view = buildView(
+      input({
+        spendPlan: plan({
+          steps: [step(tavern.recommendations[1]!, 7, 2), step(tavern.recommendations[2]!, 2, 1)],
+        }),
+      }),
+      cards,
+    );
+
+    expect(view.alternatives.map((l) => l.text)).toEqual([
+      recommendationLine(tavern.recommendations[0]!, cards),
+    ]);
+  });
+
+  it('тот же ход в плане с другой жертвой — не альтернатива', () => {
+    // План считает шаги на гипотетических состояниях, и та же покупка там
+    // может платить другой жертвой. Ход — действие и его предмет.
+    const otherVictim: Recommendation = {
+      ...tavern.recommendations[0]!,
+      sellFirst: minion(101),
+    };
+    const view = buildView(
+      input({
+        spendPlan: plan({
+          steps: [step(otherVictim, 7, 4), step(tavern.recommendations[1]!, 4, 0)],
+        }),
+      }),
+      cards,
+    );
+
+    expect(view.alternatives.map((l) => l.text)).toEqual([
+      recommendationLine(tavern.recommendations[2]!, cards),
+    ]);
   });
 
   it('сгорающий остаток назван словами и помечен на последнем шаге', () => {
@@ -792,13 +839,14 @@ describe('вид оверлея', () => {
     };
     const view = buildView(input({ tavern: withTrinkets }), cards);
     expect(view.marks).toHaveLength(0);
-    expect(view.actions[0]?.text).toContain('Faerie Dragon Scale');
+    expect(view.main[0]?.text).toContain('Faerie Dragon Scale');
   });
 
   it('метки: лавка без основания для порядка кольца не получает', () => {
     // Когда ни племён, ни статистики, порядок вариантов задан обходом
     // сущностей — кольцо на первом утверждало бы выбор, которого мы
-    // не делали. Панель при этом всё равно показывает все варианты.
+    // не делали. По той же причине первый вариант и не основная линия:
+    // на виду признание, что оценки нет, а варианты — в свёрнутом разделе.
     const withUnknown: TavernAdvice = {
       ...tavern,
       trinkets: [
@@ -822,7 +870,8 @@ describe('вид оверлея', () => {
       cards,
     );
     expect(view.marks).toHaveLength(0);
-    expect(view.actions[0]?.text).toContain('Неизвестный');
+    expect(view.main[0]?.text).toContain('оценить варианты не берёмся');
+    expect(view.alternatives[0]?.text).toContain('Неизвестный');
   });
 
   it('номера расстановки появляются только когда совет что-то меняет', () => {
@@ -852,10 +901,10 @@ describe('вид оверлея', () => {
 
   it('покупка на полном борде называет, кого продать', () => {
     const view = buildView(input(), cards);
-    expect(view.actions[0]?.text).toContain('продав');
+    expect(view.main[0]?.text).toContain('продав');
   });
 
-  it('досчёт покупок: несогласие боя выделено, шум приглушён', () => {
+  it('досчёт покупок — в других ходах; несогласие боя выделено, шум приглушён', () => {
     const target = single();
     const outcome = (cardId: string, outcome: number) => ({
       cardId,
@@ -881,9 +930,13 @@ describe('вид оверлея', () => {
       }),
       cards,
     );
-    const line = disagree.actions[disagree.actions.length - 1];
+    const line = disagree.alternatives[disagree.alternatives.length - 1];
     expect(line?.text).toContain('ПО БОЮ ЛУЧШЕ');
     expect(line?.tone).toBe('warn');
+    // Сверх лимита других ходов, а не вместо одного из них.
+    expect(disagree.alternatives).toHaveLength(3);
+    // Свёрнутый раздел прячет строку, но не её вес: кнопка жёлтая.
+    expect(disagree.sections.find((s) => s.key === 'alternatives')?.tone).toBe('warn');
 
     // Разброс в шуме: «лучший» случаен, строка приглушена.
     const noisy = buildView(
@@ -902,9 +955,10 @@ describe('вид оверлея', () => {
       }),
       cards,
     );
-    const noisyLine = noisy.actions[noisy.actions.length - 1];
+    const noisyLine = noisy.alternatives[noisy.alternatives.length - 1];
     expect(noisyLine?.text).toContain('неразличимы');
     expect(noisyLine?.tone).toBe('muted');
+    expect(noisy.sections.find((s) => s.key === 'alternatives')?.tone).toBe('muted');
 
     // Насыщенный исход — не «кандидаты равны», а «цель уже не соперник».
     const saturated = buildView(
@@ -923,30 +977,104 @@ describe('вид оверлея', () => {
       }),
       cards,
     );
-    const saturatedLine = saturated.actions[saturated.actions.length - 1];
+    const saturatedLine = saturated.alternatives[saturated.alternatives.length - 1];
     expect(saturatedLine?.text).toContain('выигрывается любой покупкой');
   });
 
-  it('предупреждение продукта — первой строкой, поверх лимита советов', () => {
-    // «Снапшот отстал от патча» обесценивает советы ниже — прятать нельзя.
+  it('предупреждение продукта — первой строкой основной линии, не свёрнуто', () => {
+    // «Снапшот отстал от патча» обесценивает советы ниже — прятать нельзя,
+    // и в свёрнутый раздел тоже.
     const view = buildView(input({ warning: 'снапшот карт отстал от патча' }), cards);
-    expect(view.actions[0]?.text).toContain('отстал от патча');
-    expect(view.actions[0]?.tone).toBe('warn');
-    // Советы не вытеснены: все три строки на месте, ниже предупреждения.
-    expect(view.actions.length).toBe(4);
+    expect(view.main[0]?.text).toContain('отстал от патча');
+    expect(view.main[0]?.tone).toBe('warn');
+    // Совет не вытеснен: он на месте, ниже предупреждения.
+    expect(view.main).toHaveLength(2);
+    expect(view.main[1]?.tone).toBe('good');
+    expect(view.alternatives).toHaveLength(2);
+
+    // И при живом плане: основная линия тогда — блок, а предупреждение
+    // остаётся строкой над кнопками разделов.
+    const planned = buildView(
+      input({ warning: 'снапшот карт отстал от патча', spendPlan: plan() }),
+      cards,
+    );
+    expect(planned.main.map((l) => l.text)).toEqual(['снапшот карт отстал от патча']);
   });
 
-  it('напоминание о тринкетах — приглушённой строкой поверх лимита советов', () => {
+  it('напоминание о тринкетах — своим разделом, советов не вытесняет', () => {
     // Напоминание — подготовка борда к следующему ходу (тьюторинг,
-    // docs/jeefhs.md); спрятанное за тремя покупками оно не видно никогда.
+    // docs/jeefhs.md), а не ход этого: основной линией оно не бывает,
+    // но и за советами не теряется — у него своя кнопка.
     const withForecast = { ...tavern, trinketForecast: 'следующим ходом — выбор тринкета' };
     const view = buildView(input({ tavern: withForecast }), cards);
 
-    const last = view.actions[view.actions.length - 1];
-    expect(last?.text).toContain('выбор тринкета');
-    expect(last?.tone).toBe('muted');
-    // Советы напоминание не вытесняет: все три строки на месте.
-    expect(view.actions).toHaveLength(4);
+    expect(view.reminders).toHaveLength(1);
+    expect(view.reminders[0]?.text).toContain('выбор тринкета');
+    expect(view.reminders[0]?.tone).toBe('muted');
+    expect(view.sections.find((s) => s.key === 'reminders')?.title).toBe('тринкеты');
+    // Советы напоминание не вытесняет.
+    expect(view.main).toHaveLength(1);
+    expect(view.alternatives).toHaveLength(2);
+  });
+
+  it('разделы: только непустые, в порядке важности', () => {
+    const view = buildView(
+      input({
+        tavern: { ...tavern, trinketForecast: 'следующим ходом — выбор тринкета' },
+        position: { kind: 'advice', advice: advice(), target: single() },
+        strength: {
+          percent: 62,
+          deathPercent: 0,
+          boards: 41,
+          tavernTurn: 5,
+          damageOnLoss: 7.5,
+          damageLosses: 23,
+        },
+        forecast: { place: 4.1, error: 1.7, games: 43 },
+      }),
+      cards,
+    );
+
+    // Сначала действенное, потом фон без вердикта (D164).
+    expect(view.sections.map((s) => s.key)).toEqual([
+      'alternatives',
+      'position',
+      'reminders',
+      'strength',
+      'tempo',
+      'forecast',
+    ]);
+    expect(view.sections.map((s) => s.title)).toEqual([
+      'другие ходы',
+      'расстановка',
+      'тринкеты',
+      'сила стола',
+      'темп',
+      'прогноз места',
+    ]);
+    // Расстановка, которая что-то меняет, видна цветом кнопки: номера мест
+    // на столе стоят и при свёрнутой панели, и кнопка связывает их со словами.
+    expect(view.sections.find((s) => s.key === 'position')?.tone).toBe('good');
+    // У фона вердикта нет — нет его и на кнопке.
+    expect(view.sections.find((s) => s.key === 'strength')?.tone).toBe('muted');
+
+    // Пустого раздела нет: кнопка, под которой пусто, выглядела бы поломкой.
+    const bare = buildView(input({ tavern: { ...tavern, recommendations: [] } }), cards);
+    expect(bare.main).toHaveLength(0);
+    expect(bare.sections.map((s) => s.key)).toEqual(['tempo']);
+  });
+
+  it('сбой советника гасит план и темп — и кнопку темпа вместе с ним', () => {
+    const view = buildView(input({ spendPlan: plan() }), cards);
+    expect(view.sections.some((s) => s.key === 'tempo')).toBe(true);
+
+    const failed = failedView(view, 'симулятор упал');
+    expect(failed.header).toBe('сбой советника: симулятор упал');
+    expect(failed.plan).toBeNull();
+    expect(failed.tempo).toBeNull();
+    expect(failed.sections.some((s) => s.key === 'tempo')).toBe(false);
+    // Описание положения сбой переживает.
+    expect(failed.alternatives).toEqual(view.alternatives);
   });
 
   it('открытый выбор карт вытесняет советы, лучший помечен', () => {
@@ -1012,13 +1140,20 @@ describe('вид оверлея', () => {
     };
     const view = buildView(input({ tavern: withChoice }), cards);
 
-    expect(view.actions[0]?.text).toContain('ВЫБРАТЬ?');
-    expect(view.actions[0]?.text).toContain('Часовой');
-    expect(view.actions[0]?.tone).toBe('good');
-    expect(view.actions).toHaveLength(2);
+    // Основная линия — лучший вариант; прочие свёрнуты.
+    expect(view.main).toHaveLength(1);
+    expect(view.main[0]?.text).toContain('ВЫБРАТЬ?');
+    expect(view.main[0]?.text).toContain('Часовой');
+    expect(view.main[0]?.tone).toBe('good');
+    expect(view.alternatives).toHaveLength(1);
+    expect(view.alternatives[0]?.text).toContain('Дар');
+    expect(view.sections[0]).toMatchObject({ key: 'alternatives', title: 'другие варианты' });
+    // Советы таверны за модальным экраном не показываются вовсе — даже
+    // свёрнутыми: пока открыт выбор, игрок решает его.
+    expect(view.alternatives.some((l) => l.text.includes('КУПИТЬ'))).toBe(false);
   });
 
-  it('выбор из одних неоценённых вариантов всё равно показывается', () => {
+  it('выбор из одних неоценённых вариантов: линии нет, но выбор замечен', () => {
     // part10, ход 17: три сокровища-заклинания, а оверлей советовал покупки,
     // будто модального экрана нет. Открытый выбор доминирует всегда.
     const withSpells: TavernAdvice = {
@@ -1034,8 +1169,14 @@ describe('вид оверлея', () => {
       ],
     };
     const view = buildView(input({ tavern: withSpells }), cards);
-    expect(view.actions[0]?.text).toContain('ВЫБРАТЬ?');
-    expect(view.actions[0]?.tone).toBe('normal');
+    // Первый вариант первым стоит по обходу сущностей, а не по оценке:
+    // показать его одного значило бы выбрать за игрока. На виду — признание.
+    expect(view.main).toHaveLength(1);
+    expect(view.main[0]?.text).toContain('оценить варианты не берёмся');
+    expect(view.main[0]?.tone).toBe('muted');
+    expect(view.alternatives[0]?.text).toContain('ВЫБРАТЬ?');
+    expect(view.alternatives[0]?.tone).toBe('normal');
+    expect(view.sections[0]).toMatchObject({ key: 'alternatives', title: 'варианты' });
   });
 
   it('план на несколько розыгрышей заменяет отдельные строки «разыграть»', () => {
@@ -1058,10 +1199,28 @@ describe('вид оверлея', () => {
     };
     const view = buildView(input({ tavern: withPlan }), cards);
 
-    expect(view.actions[0]?.text).toContain('ПО ПОРЯДКУ');
-    expect(view.actions[0]?.text).toContain('примагнитить к');
+    expect(view.main[0]?.text).toContain('ПО ПОРЯДКУ');
+    expect(view.main[0]?.text).toContain('примагнитить к');
     // Отдельные «разыграть» свёрнуты в одну строку плана.
-    expect(view.actions.filter((a) => a.text.includes('РАЗЫГРАТЬ'))).toHaveLength(1);
+    const all = [...view.main, ...view.alternatives];
+    expect(all.filter((a) => a.text.includes('РАЗЫГРАТЬ'))).toHaveLength(1);
+
+    // При живом плане трат розыгрыши, стоящие в нём шагами, в другие ходы
+    // не уходят: это та же линия, а не альтернатива ей.
+    const planned = buildView(
+      input({
+        tavern: withPlan,
+        spendPlan: plan({
+          steps: [
+            step(withPlan.recommendations[0]!, 7, 7),
+            step(withPlan.recommendations[1]!, 7, 7),
+            step(tavern.recommendations[1]!, 7, 2),
+          ],
+        }),
+      }),
+      cards,
+    );
+    expect(planned.alternatives.some((a) => a.text.includes('РАЗЫГРАТЬ'))).toBe(false);
   });
 
   it('идущий счёт показывается вместо прошлого совета', () => {
@@ -1287,9 +1446,13 @@ describe('экран выбора героя', () => {
 
     expect(view.active).toBe(true);
     expect(view.header).toBe('выбор героя');
-    expect(view.actions[0]?.text).toContain('Хроми');
-    expect(view.actions[0]?.text).toContain('3.86');
-    expect(view.actions[0]?.tone).toBe('good');
-    expect(view.actions[1]?.tone).toBe('normal');
+    expect(view.main).toHaveLength(1);
+    expect(view.main[0]?.text).toContain('Хроми');
+    expect(view.main[0]?.text).toContain('3.86');
+    expect(view.main[0]?.tone).toBe('good');
+    // Остальные герои — свёрнуты, и больше на этом экране разделов нет.
+    expect(view.alternatives[0]?.text).toContain('Новый герой');
+    expect(view.alternatives[0]?.tone).toBe('normal');
+    expect(view.sections.map((s) => s.key)).toEqual(['alternatives']);
   });
 });

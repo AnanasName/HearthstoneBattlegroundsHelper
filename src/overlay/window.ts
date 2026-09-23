@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
-import { BrowserWindow, globalShortcut, screen } from 'electron';
+import { BrowserWindow, globalShortcut, ipcMain, screen, type IpcMainEvent } from 'electron';
 
 import { spendPlan } from '../advisors/tavern/spend.js';
 import { loadCardIndex } from '../data/cards.js';
@@ -12,7 +12,7 @@ import type { LiveNotice } from '../live/watcher.js';
 import type { GameState } from '../state/types.js';
 import { waitingForLogText } from '../ui/setup.js';
 import { stageBox } from './layout.js';
-import { buildView, EMPTY_VIEW, type OverlayView, type ViewInput } from './view.js';
+import { buildView, EMPTY_VIEW, failedView, type OverlayView, type ViewInput } from './view.js';
 import { loadFieldBoards } from '../advisors/strength/boards.js';
 import { strengthKey } from '../advisors/strength/strength.js';
 
@@ -29,9 +29,14 @@ import { strengthKey } from '../advisors/strength/strength.js';
  *
  * - **прозрачное и без рамки** — поверх игры не должно быть ничего лишнего;
  * - **сквозное для мыши** (`setIgnoreMouseEvents`) — иначе оверлей крал бы
- *   клики, а в Battlegrounds кликают по всему экрану;
+ *   клики, а в Battlegrounds кликают по всему экрану. Исключение одно
+ *   и узкое: кнопка свёрнутого раздела панели, пока курсор стоит именно
+ *   на ней (D285). Узнаёт об этом разметка — движения мыши доходят до неё
+ *   и сквозь окно (`forward`), — а переключает окно здесь;
  * - **не в панели задач и не забирает фокус** — переключение фокуса
- *   в полноэкранной игре сворачивает её.
+ *   в полноэкранной игре сворачивает её. Щелчок по кнопке раздела фокуса
+ *   тоже не забирает: окно, которое нельзя активировать, щелчок получает,
+ *   а игра остаётся активной.
  *
  * Оговорка, которую не обойти: поверх ИСКЛЮЧИТЕЛЬНОГО полноэкранного режима
  * Windows не показывает ничего. Игру надо ставить в оконный без рамки —
@@ -108,7 +113,29 @@ function createWindow(getLastView: () => OverlayView): BrowserWindow {
   created.setAlwaysOnTop(true, 'screen-saver');
   created.setVisibleOnAllWorkspaces(true);
   // forward: события мыши всё равно доходят до игры, а окно их не перехватывает.
-  created.setIgnoreMouseEvents(true, { forward: true });
+  // Движения курсора при этом приходят и в разметку — по ним она узнаёт,
+  // что курсор встал на кнопку раздела.
+  const passThrough = (): void => {
+    if (!created.isDestroyed()) created.setIgnoreMouseEvents(true, { forward: true });
+  };
+  passThrough();
+
+  /**
+   * Разметка просит принимать щелчки, пока курсор на кнопке раздела.
+   *
+   * Окно во весь экран, поэтому застрявшее «принимать» отняло бы у игры
+   * мышь целиком. Отсюда два правила. Верится только своей разметке
+   * и только буквальному `true`. А всё, после чего разметка не может
+   * сказать «отпусти», — перезагрузка страницы и падение её процесса —
+   * возвращает окно в сквозное само, не дожидаясь просьбы.
+   */
+  const onInteractive = (event: IpcMainEvent, interactive: unknown): void => {
+    if (created.isDestroyed() || event.sender !== created.webContents) return;
+    if (interactive === true) created.setIgnoreMouseEvents(false);
+    else passThrough();
+  };
+  ipcMain.on('overlay:interactive', onInteractive);
+  created.webContents.on('render-process-gone', passThrough);
 
   /**
    * Где на окне лежит экран — считается ПОСЛЕ создания и по фактическому
@@ -130,6 +157,7 @@ function createWindow(getLastView: () => OverlayView): BrowserWindow {
   // отправленные до её готовности, пропадают молча. Поэтому последний вид
   // хранится и отправляется заново, когда окно готово.
   created.webContents.on('did-finish-load', () => {
+    passThrough();
     sendStage();
     created.webContents.send('overlay:view', getLastView());
   });
@@ -141,8 +169,12 @@ function createWindow(getLastView: () => OverlayView): BrowserWindow {
     sendStage();
   };
   screen.on('display-metrics-changed', onMetrics);
+  // Оверлей включают и выключают из трея много раз за жизнь приложения,
+  // а `ipcMain` один на всё приложение: слушатель старого окна обязан
+  // уйти вместе с ним.
   created.on('closed', () => {
     screen.removeListener('display-metrics-changed', onMetrics);
+    ipcMain.removeListener('overlay:interactive', onInteractive);
   });
 
   // Путь абсолютный, и это не придирка: относительный `loadFile` считается
@@ -314,14 +346,10 @@ export function startOverlay(options: OverlayOptions): OverlayHandle {
       onError: (error) => {
         // В окно, а не в консоль: у GUI-сборки Electron на Windows стандартный
         // вывод к терминалу не подключён вовсе, и console.error никто
-        // не увидит — ошибка выглядела бы как молчание советника.
+        // не увидит — ошибка выглядела бы как молчание советника. Что
+        // сбой гасит, а что переживает, решает вид (`failedView`).
         thinking = false;
-        // Борд, витрина и прошлые советы сбой переживают — это описание
-        // положения, оно не портится от того, что счёт упал. План и темп
-        // гасятся: это прескриптивные блоки, и «купи, продай, подними»,
-        // пережившее сбой, — ровно тот случай, ради которого отметка о счёте
-        // идёт впереди прошлого ответа.
-        send({ ...lastView, plan: null, tempo: null, header: `сбой советника: ${error.message}` });
+        send(failedView(lastView, error.message));
       },
       onNotice: (notice) => {
         // Новая партия — предупреждение прошлой гаснет: оно пересчитается.

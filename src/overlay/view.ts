@@ -311,14 +311,55 @@ export interface OverlayStrength {
   readonly label: string;
 }
 
+/**
+ * Раздел панели, свёрнутый по умолчанию: игрок раскрывает его щелчком.
+ *
+ * На виду остаётся только основная линия — план хода или верхний совет,
+ * — а всё, что её дополняет, ждёт, пока его попросят (просьба игрока
+ * 24.09, D285). Какие разделы есть, в каком порядке и как подписаны,
+ * решает вид; разметке остаётся нарисовать кнопки и помнить, какие
+ * из них игрок открыл.
+ */
+export type OverlaySectionKey =
+  | 'alternatives'
+  | 'position'
+  | 'reminders'
+  | 'strength'
+  | 'tempo'
+  | 'forecast';
+
+export interface OverlaySection {
+  readonly key: OverlaySectionKey;
+  /** Подпись кнопки раздела. */
+  readonly title: string;
+  /**
+   * Тон кнопки — тон самой весомой строки внутри: `warn`, если такая есть,
+   * иначе `good`, иначе `muted`.
+   *
+   * Свёрнутый раздел прячет строки, но не их вес: несогласие боя с планом
+   * («ПО БОЮ ЛУЧШЕ …») и расстановка, которая что-то меняет, видны цветом
+   * кнопки, не раскрывая её. У силы, темпа и прогноза тона нет вовсе —
+   * вердикта у этих блоков нет, нет его и на кнопке.
+   */
+  readonly tone: Tone;
+}
+
 export interface OverlayView {
   /** Есть ли что показывать вообще. */
   readonly active: boolean;
   readonly header: string;
   readonly board: readonly string[];
   readonly shop: readonly string[];
-  /** Что делать: первые рекомендации по таверне. */
-  readonly actions: readonly OverlayLine[];
+  /**
+   * Основная линия — то, что на виду: предупреждение продукта и верхний
+   * совет или лучший вариант открытого выбора. При живом плане хода
+   * совета здесь нет: линию описывает блок плана.
+   */
+  readonly main: readonly OverlayLine[];
+  /** Другие ходы или другие варианты выбора — свёрнуты. */
+  readonly alternatives: readonly OverlayLine[];
+  /** Подготовка к следующему ходу (напоминание о тринкетах) — свёрнута. */
+  readonly reminders: readonly OverlayLine[];
   /** Расстановка: совет, причина молчания или отметка о счёте. */
   readonly position: OverlayLine | null;
   /** План трат хода блоком; `null` — плана нет, он из одного шага, или экран модальный. */
@@ -329,6 +370,8 @@ export interface OverlayView {
   readonly strength: OverlayStrength | null;
   /** Прогноз места; `null` — модели нет, стола не видно или не таверна. */
   readonly forecast: OverlayForecast | null;
+  /** Свёрнутые разделы в порядке показа — только те, где есть что показать. */
+  readonly sections: readonly OverlaySection[];
   /** Кольца и подписи поверх настоящих карт игры. */
   readonly marks: readonly OverlayMark[];
   /** Номера советуемой расстановки над своими миньонами. */
@@ -340,22 +383,27 @@ export const EMPTY_VIEW: OverlayView = {
   header: 'жду партию',
   board: [],
   shop: [],
-  actions: [],
+  main: [],
+  alternatives: [],
+  reminders: [],
   position: null,
   plan: null,
   tempo: null,
   strength: null,
   forecast: null,
+  sections: [],
   marks: [],
   order: [],
 };
 
 /**
- * Сколько советов по таверне помещается, не превращая оверлей в простыню.
+ * Сколько верхних советов по таверне рассматривается вообще: основная
+ * линия и другие ходы берутся из них.
  *
  * Три, а не два: с появлением «разыграть» и подъёма-приоритета в топе
  * обычно сочетание разных действий, и обрезка до двух прятала бы покупку
- * за подъёмом и розыгрышем.
+ * за подъёмом и розыгрышем. Свёрнутый раздел глубже тоже не заглядывает:
+ * четвёртый совет — уже не альтернатива, а хвост ранжирования.
  */
 const MAX_ACTIONS = 3;
 
@@ -442,15 +490,20 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   // выбор, а не отсутствие героя.
   const heroPick = input.tavern?.heroChoice ?? [];
   if (heroPick.length > 0) {
+    const lines = choiceLines(
+      heroPick.map((h) => ({
+        text: `ВЗЯТЬ? ${h.name} — ${h.reason}`,
+        grounded: h.averagePosition !== null,
+      })),
+    );
     return {
       active: true,
       header: 'выбор героя',
       board: [],
       shop: [],
-      actions: heroPick.map((h, i) => ({
-        text: `ВЗЯТЬ? ${h.name} — ${h.reason}`,
-        tone: i === 0 && h.averagePosition !== null ? 'good' : 'normal',
-      })),
+      main: lines.main,
+      alternatives: lines.alternatives,
+      reminders: [],
       position: null,
       // На экране выбора героя нет ни золота, ни тира: тратить и подниматься
       // ещё нечем и некуда. Стола с картами тоже нет — помечать нечего.
@@ -462,18 +515,20 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
       // Прогноз молчит и здесь: точек решения ещё нет, а модель считает
       // по ним — на экране выбора героя ей нечего читать.
       forecast: null,
+      sections: sectionsOf({ ...lines, position: null, strength: null, tempo: null, forecast: null }),
       marks: [],
       order: [],
     };
   }
   if (state.hero === null) return EMPTY_VIEW;
 
-  // Предупреждение продукта — первой строкой и поверх лимита советов:
-  // «снапшот отстал от патча» обесценивает советы ниже, и прятать его
-  // за ними нельзя.
+  // Предупреждение продукта — первой строкой основной линии: «снапшот
+  // отстал от патча» обесценивает советы ниже, и прятать его в свёрнутый
+  // раздел нельзя.
   const warning = input.warning ?? null;
-  const actions = actionLines(input, cards);
-  if (warning !== null) actions.unshift({ text: warning, tone: 'warn' });
+  const lines = panelLines(input, cards);
+  const main: OverlayLine[] =
+    warning === null ? lines.main : [{ text: warning, tone: 'warn' }, ...lines.main];
 
   // Открытый выбор гасит и план, и темп — по той же причине, по которой он уже
   // вытесняет советы: в игре это модальный экран, и пока он открыт, игрок
@@ -484,21 +539,27 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   // Сила считается ДО темпа: строка риска к подъёму берёт её готовые числа,
   // а не считает свои (`upgradeRisk`).
   const strength = strengthView(input);
+  const position = positionView(input, cards);
+  const tempo = modal ? null : tempoView(input, strength);
+  // Сила стола за модалкой ОСТАЁТСЯ, как и прогноз места: она про борд
+  // и ход целиком, а не про золото и витрину, которых за модальным
+  // экраном нет. Выбор тринкета её не устаревает.
+  const forecast = forecastView(input);
 
   return {
     active: true,
     header: situationLine(state),
     board: state.board.map((m) => minionLabel(m, cards)),
     shop: state.shop.map((m) => minionLabel(m, cards)),
-    actions,
-    position: positionView(input, cards),
+    main,
+    alternatives: lines.alternatives,
+    reminders: lines.reminders,
+    position,
     plan: modal ? null : planView(input, cards),
-    tempo: modal ? null : tempoView(input, strength),
-    // Сила стола за модалкой ОСТАЁТСЯ, как и прогноз места: она про борд
-    // и ход целиком, а не про золото и витрину, которых за модальным
-    // экраном нет. Выбор тринкета её не устаревает.
+    tempo,
     strength,
-    forecast: forecastView(input),
+    forecast,
+    sections: sectionsOf({ ...lines, position, strength, tempo, forecast }),
     // Пока открыт модальный экран, стол игре не принадлежит: карты витрины
     // и борда за ним, и кольцо на них показывало бы в никуда. А вот сам
     // модальный экран пометить можно — у лавки аксессуаров ряд свой.
@@ -507,84 +568,224 @@ export function buildView(input: ViewInput, cards: CardIndex): OverlayView {
   };
 }
 
-function actionLines(input: ViewInput, cards: CardIndex): OverlayLine[] {
+/**
+ * Вид после сбоя советника.
+ *
+ * Описание положения сбой переживает — борд, витрина и прошлые советы
+ * от падения счёта не портятся. Гаснут прескриптивные блоки, план и темп:
+ * «купи, продай, подними», пережившее сбой, — ровно тот случай, ради
+ * которого отметка о счёте идёт впереди прошлого ответа. Вместе с блоком
+ * гаснет и его раздел: кнопка, под которой пусто, выглядела бы поломкой.
+ */
+export function failedView(last: OverlayView, message: string): OverlayView {
+  return {
+    ...last,
+    header: `сбой советника: ${message}`,
+    plan: null,
+    tempo: null,
+    sections: last.sections.filter((s) => s.key !== 'tempo'),
+  };
+}
+
+/** Панель словами: основная линия и то, что свёрнуто рядом с ней. */
+interface PanelLines {
+  readonly main: OverlayLine[];
+  readonly alternatives: OverlayLine[];
+  /** Подпись раздела альтернатив: у модального экрана это варианты, а не ходы. */
+  readonly alternativesTitle: string;
+  readonly reminders: OverlayLine[];
+}
+
+/**
+ * Что сказать, когда у открытого выбора нет лучшего варианта.
+ *
+ * Молчать нельзя: спрятанный выбор выглядел бы так, будто помощник его
+ * не заметил (part10, ход 17). Назвать первый вариант тоже нельзя — первым
+ * он стоит по обходу сущностей, а не по оценке.
+ */
+const UNRANKED_CHOICE = 'оценить варианты не берёмся — выбор за вами';
+
+/**
+ * Открытый выбор: лучший вариант — основная линия, прочие свёрнуты.
+ *
+ * Лучшим первый вариант считается, только если ранжирование НА ЧЁМ-ТО
+ * основано, — то же условие, по которому он выделен цветом и получает
+ * кольцо на столе (`trinketMarks`). Когда оснований нет, основной линии
+ * нет вовсе: на виду остаётся признание, а сами варианты — в разделе.
+ */
+function choiceLines(
+  options: readonly { readonly text: string; readonly grounded: boolean }[],
+): PanelLines {
+  const first = options[0];
+  if (first?.grounded === true) {
+    return {
+      main: [{ text: first.text, tone: 'good' }],
+      alternatives: options.slice(1).map((o) => ({ text: o.text, tone: 'normal' })),
+      alternativesTitle: 'другие варианты',
+      reminders: [],
+    };
+  }
+  return {
+    main: first === undefined ? [] : [{ text: UNRANKED_CHOICE, tone: 'muted' }],
+    alternatives: options.map((o) => ({ text: o.text, tone: 'normal' })),
+    alternativesTitle: 'варианты',
+    reminders: [],
+  };
+}
+
+function panelLines(input: ViewInput, cards: CardIndex): PanelLines {
   // Открытый выбор тринкета вытесняет обычные советы: в игре это модальный
-  // экран, и пока он открыт, игрок решает именно его.
+  // экран, и пока он открыт, игрок решает именно его. Лучший помечается
+  // и при выборе по статистике: нейтральный тринкет с хорошим средним
+  // местом — обоснованный совет, а не «первый попавшийся» (JeefHS: сильный
+  // нейтральный лучше слабого племенного).
   const trinkets = input.tavern?.trinkets ?? [];
   if (trinkets.length > 0) {
-    // Лучший помечается и при выборе по статистике: нейтральный тринкет
-    // с хорошим средним местом — обоснованный совет, а не «первый попавшийся»
-    // (JeefHS: сильный нейтральный лучше слабого племенного).
-    return trinkets.map((t, i) => ({
-      text: `ВЗЯТЬ? ${trinketLine(t)}`,
-      tone: i === 0 && (t.tribeMinions > 0 || t.averagePlacement != null) ? 'good' : 'normal',
-    }));
+    return choiceLines(
+      trinkets.map((t) => ({
+        text: `ВЗЯТЬ? ${trinketLine(t)}`,
+        grounded: t.tribeMinions > 0 || t.averagePlacement != null,
+      })),
+    );
   }
 
   // Открытый выбор карт — награда за тройку, раскопка, сокровища — такой же
-  // модальный экран, и пока он открыт, игрок решает именно его. Показывается
-  // всегда: спрятанный выбор выглядел так, будто помощник его не заметил
-  // (part10, ход 17 — три сокровища-заклинания и советы про покупки поверх).
+  // модальный экран, и пока он открыт, игрок решает именно его.
   const choice = input.tavern?.choice ?? [];
   if (choice.length > 0) {
-    return choice.map((c, i) => ({
-      text: `ВЫБРАТЬ? ${choiceLine(c)}`,
-      tone: i === 0 && c.score !== null ? 'good' : 'normal',
-    }));
+    return choiceLines(
+      choice.map((c) => ({ text: `ВЫБРАТЬ? ${choiceLine(c)}`, grounded: c.score !== null })),
+    );
   }
 
+  return tavernLines(input, cards);
+}
+
+/**
+ * Ход как предмет: действие и то, над чем оно совершается.
+ *
+ * Цель, жертва и ветвь в ключ не входят намеренно: план считает шаги
+ * на гипотетических состояниях, и та же покупка там может платить другой
+ * жертвой или бить в другую цель — это тот же ход, а не другой.
+ */
+function moveKey(r: Recommendation): string {
+  return `${r.action}:${String(r.minion?.entityId ?? r.spellCardId ?? '')}`;
+}
+
+/**
+ * Ход таверны: основная линия и другие ходы.
+ *
+ * Основная линия — план хода, когда он живой (два шага и больше: блок
+ * над списком), иначе верхний совет. Другие ходы — верхние советы, которых
+ * в основной линии нет. При живом плане это отбор по ходам плана, а не
+ * «всё, кроме первого»: план умеет начать не с верхнего совета (развилка
+ * сгорающего золота, part23), и тогда верхний совет — как раз альтернатива.
+ */
+function tavernLines(input: ViewInput, cards: CardIndex): PanelLines {
   // План на несколько розыгрышей заменяет отдельные строки «разыграть»:
-  // игрок читает верхнюю строку, и она должна описывать весь ход.
+  // строка должна описывать весь розыгрыш, а не первое тело.
   const recommendations = input.tavern?.recommendations ?? [];
-  const plan = input.tavern?.playPlan ?? [];
-  // План трат — первой строкой: ход состоит из нескольких действий, и верхняя
-  // строка должна описывать весь ход, а не первое из них. Отдельные советы
-  // остаются ниже: план их не отменяет, а собирает.
-  const spend = input.spendPlan ?? null;
-  const lines: string[] = [];
-  let planShown = false;
+  const plays = input.tavern?.playPlan ?? [];
+  const ranked: { readonly text: string; readonly moves: readonly string[] }[] = [];
+  let playsShown = false;
   for (const r of recommendations) {
-    if (plan.length >= 2 && r.action === 'play') {
-      if (!planShown) {
-        lines.push(planLine(plan, cards));
-        planShown = true;
+    if (plays.length >= 2 && r.action === 'play') {
+      if (!playsShown) {
+        ranked.push({
+          text: planLine(plays, cards),
+          moves: recommendations.filter((p) => p.action === 'play').map(moveKey),
+        });
+        playsShown = true;
       }
       continue;
     }
-    lines.push(recommendationLine(r, cards));
+    ranked.push({ text: recommendationLine(r, cards), moves: [moveKey(r)] });
+  }
+  const top = ranked.slice(0, MAX_ACTIONS);
+
+  const spend = input.spendPlan ?? null;
+  let main: OverlayLine[];
+  let alternatives: OverlayLine[];
+  if (spend !== null && spend.steps.length >= 2) {
+    const planned = new Set(spend.steps.map((s) => moveKey(s.recommendation)));
+    main = [];
+    alternatives = top
+      .filter((l) => l.moves.some((m) => !planned.has(m)))
+      .map((l) => ({ text: l.text, tone: 'normal' }));
+  } else {
+    main = top.slice(0, 1).map((l) => ({ text: l.text, tone: 'good' }));
+    alternatives = top.slice(1).map((l) => ({ text: l.text, tone: 'normal' }));
   }
 
-  // План уехал в свой блок над советами, но места в списке по-прежнему
-  // занимает ровно одно. Решение «верхняя строка обязана описывать весь ход»
-  // блок исполняет строже — ход виден целиком, без обрезки на четырёх шагах,
-  // — а слот остаётся за ним потому, что первый шаг плана почти всегда и есть
-  // верхний совет: третья строка списка была бы платой за повтор. Зелёный
-  // акцент при живом блоке отдан блоку, и держится это флагом, а не побочным
-  // эффектом ветки.
-  const planned = spend !== null && spend.steps.length >= 2;
-  const shown: OverlayLine[] = lines
-    .slice(0, planned ? MAX_ACTIONS - 1 : MAX_ACTIONS)
-    .map((text, i) => ({ text, tone: i === 0 && !planned ? 'good' : 'normal' }));
-
-  // Досчёт покупок боем — строкой поверх лимита, как и напоминание ниже:
-  // это дополнение к эвристике, а не её замена. Несогласие боя с эвристикой
-  // выделено тоном — ради него досчёт и существует; разброс в шуме
-  // приглушён: «лучший» там случаен.
+  // Досчёт покупок боем — к другим ходам и сверх их лимита: это второе
+  // мнение о покупке, а не замена эвристике. Несогласие боя с эвристикой
+  // выделено тоном — ради него досчёт и существует, и тон этот виден
+  // на кнопке свёрнутого раздела; разброс в шуме приглушён: «лучший» там
+  // случаен.
   const buyCheck = input.buyCheck ?? null;
   if (buyCheck !== null) {
-    shown.push({
+    alternatives.push({
       text: buyCheckLine(buyCheck.result, buyCheck.target, cards),
       tone: !buyCheck.result.decisive ? 'muted' : buyCheck.result.agreed ? 'normal' : 'warn',
     });
   }
 
-  // Напоминание о тринкетах — приглушённой строкой ПОВЕРХ лимита советов:
-  // это подготовка борда к следующему ходу (тьюторинг, docs/jeefhs.md),
-  // и прятаться за тремя покупками ей нельзя — тогда её не видно никогда.
-  const forecast = input.tavern?.trinketForecast ?? null;
-  if (forecast !== null) shown.push({ text: forecast, tone: 'muted' });
+  // Напоминание о тринкетах — своим разделом: это подготовка борда
+  // к следующему ходу (тьюторинг, docs/jeefhs.md), а не ход этого. Кнопка
+  // раздела видна всегда, когда напоминание есть, поэтому за советами оно
+  // не теряется.
+  const trinketForecast = input.tavern?.trinketForecast ?? null;
+  return {
+    main,
+    alternatives,
+    alternativesTitle: 'другие ходы',
+    reminders: trinketForecast === null ? [] : [{ text: trinketForecast, tone: 'muted' }],
+  };
+}
 
-  return shown;
+/** Самый весомый тон строк: предупреждение важнее похвалы, похвала — тишины. */
+function strongest(lines: readonly OverlayLine[]): Tone {
+  if (lines.some((l) => l.tone === 'warn')) return 'warn';
+  if (lines.some((l) => l.tone === 'good')) return 'good';
+  return 'muted';
+}
+
+/**
+ * Свёрнутые разделы — только непустые и в порядке важности.
+ *
+ * Порядок тот же, что у блоков панели прежде (D164): сначала действенное —
+ * другие ходы, расстановка, напоминание, — потом фон без вердикта: сила
+ * стола, темп и прогноз места.
+ */
+function sectionsOf(parts: {
+  readonly alternatives: readonly OverlayLine[];
+  readonly alternativesTitle: string;
+  readonly reminders: readonly OverlayLine[];
+  readonly position: OverlayLine | null;
+  readonly strength: OverlayStrength | null;
+  readonly tempo: OverlayTempo | null;
+  readonly forecast: OverlayForecast | null;
+}): OverlaySection[] {
+  const sections: OverlaySection[] = [];
+  if (parts.alternatives.length > 0) {
+    sections.push({
+      key: 'alternatives',
+      title: parts.alternativesTitle,
+      tone: strongest(parts.alternatives),
+    });
+  }
+  if (parts.position !== null) {
+    sections.push({ key: 'position', title: 'расстановка', tone: strongest([parts.position]) });
+  }
+  if (parts.reminders.length > 0) {
+    sections.push({ key: 'reminders', title: 'тринкеты', tone: strongest(parts.reminders) });
+  }
+  if (parts.strength !== null) sections.push({ key: 'strength', title: 'сила стола', tone: 'muted' });
+  if (parts.tempo !== null) sections.push({ key: 'tempo', title: 'темп', tone: 'muted' });
+  if (parts.forecast !== null) {
+    sections.push({ key: 'forecast', title: 'прогноз места', tone: 'muted' });
+  }
+  return sections;
 }
 
 /**

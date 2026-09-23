@@ -214,8 +214,10 @@
         overflow: visible;
       }
 
-      #actions .line,
-      #position .line {
+      #main .line,
+      #alternatives .line,
+      #position .line,
+      #reminders .line {
         padding-left: 12px;
         text-indent: -12px; /* висячий отступ: перенос виден как продолжение */
       }
@@ -235,16 +237,70 @@
         color: var(--muted);
       }
 
-      #actions {
+      #main {
         margin-top: 6px;
       }
 
-      #position {
-        margin-top: 6px;
+      /* ── Свёрнутые разделы ───────────────────────────────────────────── */
+
+      /*
+        На виду — только основная линия (план или верхний совет), всё
+        остальное свёрнуто в кнопки и раскрывается щелчком (D285). Кнопки
+        стоят в ОДНУ строку, а не столбиком заголовков: свёрнутая панель
+        обязана быть короткой, иначе сворачивать было незачем.
+
+        Кнопка — единственное место окна, которое принимает щелчок, и только
+        пока курсор на ней; поэтому она обязана выглядеть кнопкой, а курсор
+        над ней — меняться.
+      */
+      #chips:not(:empty) {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 8px;
       }
 
-      #board {
-        margin-top: 6px;
+      .chip {
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--muted);
+        background: var(--panel);
+        border: 1px solid var(--rail);
+        border-radius: 999px;
+        padding: 1px 9px 2px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .chip:hover {
+        color: #eceff1;
+        border-color: rgba(255, 255, 255, 0.36);
+      }
+
+      .chip.open {
+        color: #eceff1;
+        background: rgba(255, 255, 255, 0.11);
+      }
+
+      /*
+        Тон кнопки — тон самой весомой строки внутри (`OverlaySection`):
+        свёрнутый раздел прячет строки, но не их вес. Правила стоят ПОСЛЕ
+        наведения, чтобы жёлтое и зелёное не белели под курсором.
+      */
+      .chip.good {
+        color: var(--good);
+        border-color: rgba(126, 224, 138, 0.5);
+      }
+
+      .chip.warn {
+        color: var(--warn);
+        border-color: rgba(240, 198, 116, 0.55);
+      }
+
+      /* Раскрытые разделы — под кнопками, в порядке кнопок. */
+      #details > * {
+        margin-top: 8px;
       }
 
       /* ── План хода ───────────────────────────────────────────────────── */
@@ -317,8 +373,7 @@
 
       /* ── Темп таверны ────────────────────────────────────────────────── */
 
-      #tempo:not(:empty) {
-        margin-top: 8px;
+      #tempo {
         font-size: 12px;
         color: var(--muted);
       }
@@ -398,8 +453,7 @@
         Цветом «62 %» стало бы либо похвалой, либо тревогой, а число — просто
         доля выигранных боёв.
       */
-      #strength:not(:empty) {
-        margin-top: 8px;
+      #strength {
         font-size: 12px;
         color: var(--muted);
       }
@@ -455,8 +509,7 @@
         промахивающийся на 1.7 места, набранный крупно и ярко, читался бы
         как знание. Выделения нет вовсе — ни цвета, ни веса.
       */
-      #forecast:not(:empty) {
-        margin-top: 8px;
+      #forecast {
         font-size: 12px;
         color: var(--muted);
       }
@@ -475,6 +528,10 @@
       снизу: сначала прогноз места (он ничего не советует вовсе) и темп (фон
       без вердикта), потом витрину и борд — их игрок видит в самой игре, —
       и лишь в последнюю очередь действенное.
+
+      С D285 на виду только основная линия, а прочее свёрнуто в кнопки
+      разделов; раскрытые разделы идут под кнопками в том же порядке
+      важности, так что обрезка по-прежнему съедает фон первым.
     -->
     <div id="stage"></div>
 
@@ -488,18 +545,18 @@
     <div id="card" class="idle">
       <div id="header">жду партию</div>
       <div id="plan"></div>
-      <div id="actions"></div>
-      <div id="position"></div>
-      <div id="strength"></div>
-      <div id="tempo"></div>
-      <div id="forecast"></div>
+      <div id="main"></div>
+      <div id="chips"></div>
+      <div id="details"></div>
     </div>
 
     <script>
-      // Разметка ничего не решает: приходит готовый вид, она его рисует.
-      // Какая клетка чья, какой тон у числа, какая подпись у столбика и есть ли
-      // блок вообще — всё это поля вида, посчитанные в `view.ts` и покрытые
-      // тестами. Здесь не должно появиться ни одного условия про игру.
+      // Разметка ничего не решает об игре: приходит готовый вид, она его
+      // рисует. Какая клетка чья, какой тон у числа, какая подпись у столбика,
+      // какие разделы есть и есть ли блок вообще — всё это поля вида,
+      // посчитанные в `view.ts` и покрытые тестами. Здесь не должно появиться
+      // ни одного условия про игру. Своё у разметки только двое: какие
+      // разделы игрок раскрыл и где стоит курсор.
       const el = (id) => document.getElementById(id);
 
       // Тон `normal` — это отсутствие класса: правила для него нет, и выдавать
@@ -736,34 +793,129 @@
         });
       });
 
-      window.overlay.onView((view) => {
+      // Строки списка — маркером «•», а не «▸»: треугольник теперь значит
+      // «раскрыть», и на строке совета он обещал бы то, чего там нет.
+      function linesBlock(target, lines) {
+        for (const item of lines || []) {
+          target.appendChild(line(`• ${item.text}`, toneClass(item.tone)));
+        }
+      }
+
+      // Чем раздел наполняется — по его ключу; какие разделы есть, решил вид.
+      const SECTION_BODY = {
+        alternatives: (target, view) => linesBlock(target, view.alternatives),
+        position: (target, view) => {
+          if (!view.position) return;
+          target.appendChild(
+            line(`расстановка: ${view.position.text}`, toneClass(view.position.tone)),
+          );
+        },
+        reminders: (target, view) => linesBlock(target, view.reminders),
+        strength: (target, view) => strengthBlock(target, view.strength),
+        tempo: (target, view) => tempoBlock(target, view.tempo),
+        forecast: (target, view) => forecastBlock(target, view.forecast),
+      };
+
+      // Какие разделы игрок раскрыл. Живёт, пока живёт окно: переживает
+      // каждый новый вид (а они приходят после каждого действия в игре)
+      // и смену партии, но не перезапуск — на старте всё свёрнуто.
+      const opened = new Set();
+      let lastView = null;
+
+      function render(view) {
+        lastView = view;
         el('card').className = view.active ? '' : 'idle';
         el('header').textContent = view.header;
 
         planBlock(el('plan'), view.plan);
 
-        const actions = el('actions');
-        actions.replaceChildren();
-        for (const item of view.actions || []) {
-          actions.appendChild(line(`▸ ${item.text}`, toneClass(item.tone)));
+        const main = el('main');
+        main.replaceChildren();
+        for (const item of view.main || []) {
+          main.appendChild(line(item.text, toneClass(item.tone)));
         }
 
-        const position = el('position');
-        position.replaceChildren();
-        if (view.position) {
-          position.appendChild(
-            line(`расстановка: ${view.position.text}`, toneClass(view.position.tone)),
+        const chips = el('chips');
+        const details = el('details');
+        chips.replaceChildren();
+        details.replaceChildren();
+        for (const section of view.sections || []) {
+          const isOpen = opened.has(section.key);
+          const chip = node(
+            'button',
+            `${isOpen ? '▾' : '▸'} ${section.title}`,
+            ['chip', toneClass(section.tone), isOpen ? 'open' : ''].filter((x) => x).join(' '),
           );
-        }
+          chip.type = 'button';
+          chip.tabIndex = -1;
+          chip.dataset.key = section.key;
+          chips.appendChild(chip);
 
-        strengthBlock(el('strength'), view.strength);
-        tempoBlock(el('tempo'), view.tempo);
-        forecastBlock(el('forecast'), view.forecast);
+          if (isOpen && SECTION_BODY[section.key]) {
+            // id раздела — тот же, под которым его блок описан в стилях.
+            const body = node('div', '');
+            body.id = section.key;
+            SECTION_BODY[section.key](body, view);
+            details.appendChild(body);
+          }
+        }
 
         // Метки поверх настоящих карт — последним: они рисуются в своём слое
         // и на панель не влияют.
         stageLayer(el('stage'), view.marks, view.order);
+
+        // Новый вид мог убрать кнопку из-под неподвижного курсора — тогда
+        // окно обязано снова стать сквозным, не дожидаясь движения мыши.
+        syncInteractive();
+      }
+
+      el('chips').addEventListener('click', (event) => {
+        const chip = event.target.closest('.chip');
+        if (!chip || !lastView) return;
+        const key = chip.dataset.key;
+        if (opened.has(key)) opened.delete(key);
+        else opened.add(key);
+        render(lastView);
       });
+
+      // ── Где курсор ────────────────────────────────────────────────────
+      //
+      // Окно сквозное для мыши, и щелчки уходят в игру. Чтобы кнопку
+      // раздела можно было нажать, окно должно принимать щелчки — но только
+      // пока курсор стоит НА НЕЙ: окно во весь экран, и принимающее щелчки
+      // где-то ещё отнимало бы у игры стол. Движения мыши приходят сюда
+      // и сквозь окно (`forward` в window.ts), поэтому разметка видит курсор
+      // всегда и сообщает главному процессу одно булево значение.
+      let pointer = null;
+      let interactive = false;
+
+      function overChip() {
+        if (pointer === null) return false;
+        const hit = document.elementFromPoint(pointer.x, pointer.y);
+        return hit !== null && hit.closest('.chip') !== null;
+      }
+
+      function syncInteractive() {
+        const wanted = overChip();
+        if (wanted === interactive) return;
+        interactive = wanted;
+        // Старый мост без канала — окно просто остаётся сквозным.
+        window.overlay.setInteractive?.(wanted);
+      }
+
+      document.addEventListener('mousemove', (event) => {
+        pointer = { x: event.clientX, y: event.clientY };
+        syncInteractive();
+      });
+
+      // Курсор ушёл из окна совсем (на второй монитор) — щелчки отдать игре.
+      document.addEventListener('mouseout', (event) => {
+        if (event.relatedTarget !== null) return;
+        pointer = null;
+        syncInteractive();
+      });
+
+      window.overlay.onView(render);
     </script>
   </body>
 </html>
