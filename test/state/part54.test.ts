@@ -222,8 +222,12 @@ describe('part54: Инге, драконы и кличи через Kalecgos', (
         }
       }
     }
-    const first25 = spendPlan(decisionPoint(25), { cards }).steps[0]?.recommendation;
-    expect(first25?.action).toBe('play');
+    // Первым розыгрышем идёт Proud Privateer. Первым ШАГОМ был он же; со
+    // снапшотом 24.09 (ротация пула 22.09) план тот же, но начинается
+    // с подъёма — пул следующего тира стал дороже.
+    const first25 = spendPlan(decisionPoint(25), { cards })
+      .steps.map((s) => s.recommendation)
+      .find((r) => r.action === 'play' && r.minion !== null);
     expect(first25?.minion?.cardId).toBe('BG33_825');
   });
 

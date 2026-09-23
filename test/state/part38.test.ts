@@ -112,21 +112,26 @@ describe("part38: прокрутка генератора со счётом ЦИ
     const text = cards.info(RAZORFEN)?.text ?? "";
     expect(text).toMatch(/Get\s+2\b/i);
     expect(text).not.toMatch(/\b(?:two|three|four)\b/i);
-    // Пул целиком: словом счёт пишет ровно один генератор, цифрой — тоже
-    // один. Числа держатся тестом, потому что в прозе они разъезжаются.
+    // Пул целиком: цифрой счёт пишет ровно один генератор, а словом —
+    // ни одного с 24.09 (единственный такой, Oozeling Gladiator, ушёл
+    // из пула ротацией 22.09; правило словом остаётся для старых партий).
+    // Числа держатся тестом, потому что в прозе они разъезжаются.
     const generators = [1, 2, 3, 4, 5, 6, 7]
       .flatMap((t) => cards.poolOfTier(t))
       .filter((c) =>
         /battlecry:?[^.]*\b(?:get|discover|add)s?\b/i.test(c.text ?? ""),
       );
     // 22 → 24 после обновления снапшота под баланс 251952 (16.09): пул
-    // пересобран, и кличевых генераторов стало на два больше.
-    expect(generators).toHaveLength(24);
+    // пересобран, и кличевых генераторов стало на два больше. 24 → 26
+    // со снапшотом 24.09 (ротация пула 22.09): пришли Iron Groundskeeper,
+    // Gormling Gourmet, Auto Accelerator, Leyline Surfacer и Firelands
+    // Fugitive, ушли Shell Collector, Oozeling Gladiator и Deepwater Chieftain.
+    expect(generators).toHaveLength(26);
     expect(
       generators.filter((c) =>
         /\b(?:get|discover|add)s?\s+(?:two|three|four)\b/i.test(c.text ?? ""),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       generators.filter((c) =>
         /\b(?:get|discover|add)s?\s+\d+\b/i.test(c.text ?? ""),

@@ -162,6 +162,9 @@ describe('part11: заряды дара, смертники из гробниц�
     expect(state.seenShopCardIds.length).toBeGreaterThan(10);
 
     const races = lobbyRaces(state, cards);
-    expect([...races].sort()).toEqual(['DEMON', 'MURLOC', 'NAGA', 'QUILBOAR', 'UNDEAD']);
+    // ABERRATION — фантом СНАПШОТА, а не лога: Oozeling Gladiator `BG27_002`
+    // в августе был бесплеменным, а в данных 24.09 (патч 22.09) он аберрация.
+    // Партия сыграна на старом билде, снапшот один на все (D136).
+    expect([...races].sort()).toEqual(['ABERRATION', 'DEMON', 'MURLOC', 'NAGA', 'QUILBOAR', 'UNDEAD']);
   });
 });

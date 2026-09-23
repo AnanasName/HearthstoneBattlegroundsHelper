@@ -201,14 +201,15 @@ describe('part57: Мурлок Холмс, угадывание соперник
     expect(advice?.recommendations[0]?.action).toBe('pass');
 
     // Ветка D025 жива: бесплатное обновление БЕЗ запаса цель по-прежнему
-    // называет — здесь это третья копия Glowing Cinder. Совет приходит
+    // называет — здесь это третья копия Waveling (была Glowing Cinder; со
+    // снапшотом 24.09 он вне пула — ротация 22.09). Совет приходит
     // веткой «делать нечего, а обновление бесплатно», а не `rerollRule`:
     // витрина хороша, и правило обновления молчит само.
     const unstocked: GameState = { ...frame, freeRefreshes: 0 };
     const idle = adviseTavern(unstocked, { cards })?.recommendations.find(
       (r) => r.action === 'reroll',
     );
-    expect(idle?.searchGoal).toContain('Glowing Cinder');
+    expect(idle?.searchGoal).toContain('Waveling');
   });
 
   /** Запас пережил бой: на ходу 17 он всё ещё единица, и потрачен уже с золотом. */

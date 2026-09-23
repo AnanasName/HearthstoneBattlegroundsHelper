@@ -183,13 +183,14 @@ describe('part27: заморозка после покупки, цель про�
         if (isEffectEngine(minion(1, { cardId: info.id }), cards)) combat += 1;
       }
     }
-    // 138 голов триггера (было 129 до снапшота под баланс 251952);
-    // движками остаются 52 — в том числе слушатели
+    // 129 голов триггера (было 129 до снапшота под баланс 251952, 138 после
+    // него, и снова 129 со снапшотом 24.09 — ротация пула 22.09);
+    // движками остаются 49 (было 52) — в том числе слушатели
     // заклинаний («Whenever you cast a Tavern spell»: Timecap'n Hooktail,
     // Charging Czarina) и добычи в руку (Timewarped Peggy): и то и другое
     // случается в бою через Rally, и симулятор это моделирует.
-    expect(withHead).toBe(138);
-    expect(combat).toBe(52);
+    expect(withHead).toBe(129);
+    expect(combat).toBe(49);
   });
 
   it('пункт 2: Slimy Shield целится в крупнейшее тело, а не в отработавший генератор', () => {
@@ -251,8 +252,9 @@ describe('part27: заморозка после покупки, цель про�
 
     expect(unstocked.board).toHaveLength(7);
     // Две пары: Bigwig Bandit (тир 4) на борде и в руке, Dual-Wield Corsair
-    // (тир 5) дважды на борде. Называется старшая по тиру — обе витрина
-    // пятого тира предложить может.
+    // (тир 5) дважды на борде. Называлась старшая по тиру — Corsair; со
+    // снапшотом 24.09 он вне пула (ротация 22.09), витрина его не предложит,
+    // и цель — Bigwig Bandit.
     expect(unstocked.board.some((m) => m.cardId === 'BG33_822')).toBe(true);
     expect(unstocked.hand.some((m) => m.cardId === 'BG33_822')).toBe(true);
     expect(unstocked.board.filter((m) => m.cardId === 'BG31_824')).toHaveLength(2);
@@ -260,7 +262,7 @@ describe('part27: заморозка после покупки, цель про�
     const reroll = rerollRule(unstocked, { cards });
     expect(reroll?.action).toBe('reroll');
     expect(reroll?.reason).toContain('купить нечего и после обновления');
-    expect(reroll?.reason).toContain('искать под заморозку третью копию Dual-Wield Corsair');
+    expect(reroll?.reason).toContain('искать под заморозку третью копию Bigwig Bandit');
     expect(reroll?.reason).not.toContain('покупать нечего');
   });
 

@@ -79,8 +79,10 @@ describe('раж, платящий картой', () => {
     );
     // 32 по МЕХАНИКЕ снапшота; текстовый поиск даёт 34 — лишние две карты
     // говорят о ЧУЖОМ раже («After a friendly Rally minion attacks…»),
-    // и носителями не являются.
-    expect(rally.length).toBe(32);
+    // и носителями не являются. 32 → 31 со снапшотом 24.09 (ротация пула
+    // 22.09): пришли Hoarding Hyena и Heroic Broodmother, ушли Dustbone
+    // Devastator, Seafloor Recruiter и Moat Custodian.
+    expect(rally.length).toBe(31);
     expect(payers.every((c) => (c.mechanics ?? []).includes('BACON_RALLY'))).toBe(true);
     expect(payers.map((c) => c.name).sort()).toEqual([
       'Bigwig Bandit',

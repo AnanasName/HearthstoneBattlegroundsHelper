@@ -85,7 +85,11 @@ describe('part47: сила героя, поднимающая карту вит�
     // Дубли двух каналов лога (`GameState` и `PowerTaskList`) сняты выше
     // фильтром по каналу, здесь берём уникальные по порядку.
     const tiers = targets.map((id) => cards.info(id)?.techLevel ?? null);
-    expect(tiers.slice(0, 10)).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+    // Первая цель — Molten Rock `BGS_127`, тир 1. Со снапшотом 24.09 он вне
+    // пула (ротация 22.09), а карте вне пула данные тир не пишут вовсе —
+    // отсюда `null`. Лестница в логе от этого не меняется (D136).
+    expect(targets[0]).toBe('BGS_127');
+    expect(tiers.slice(0, 10)).toEqual([null, null, 2, 2, 3, 3, 4, 4, 5, 5]);
   });
 
   /**

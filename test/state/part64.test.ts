@@ -1,7 +1,15 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { adviseTavern, lobbyRaces, minionValue } from '../../src/advisors/tavern/advisor.js';
-import { loadCardIndex, withLogRaces, type CardIndex } from '../../src/data/cards.js';
+import {
+  CARDS_PATH,
+  createCardIndex,
+  loadCardIndex,
+  withLogRaces,
+  type CardIndex,
+} from '../../src/data/cards.js';
 import { readPowerEvents } from '../../src/parser/blocks.js';
 import { readPlayers } from '../../src/state/players.js';
 import { createReducer } from '../../src/state/reducer.js';
@@ -24,7 +32,7 @@ describe('part64: Миллифисент — аберрации, которых 
   let final: GameState;
 
   beforeAll(async () => {
-    cards = loadCardIndex();
+    cards = snapshotBlindToAberrations();
     const text = part64Game();
     const reducer = createReducer(readPlayers(text));
     const breather = createBreather();
@@ -42,6 +50,17 @@ describe('part64: Миллифисент — аберрации, которых 
     for (const id of ['BG36_110', 'BG36_116', 'BG36_308', 'BG36_312']) {
       expect(final.logRaces[id]).toBe('ABERRATION');
       expect(cards.info(id)?.races ?? []).toEqual([]);
+    }
+  });
+
+  it('снапшот 24.09 знает племя всех двадцати шести — лог и снапшот сходятся', () => {
+    // Firestone внёс ABERRATION 23.09, и слияние для аберраций теперь молчит:
+    // говорит снапшот. Правило D275 от этого не устарело — оно ждёт
+    // следующего племени, которое придёт в игру раньше, чем в данные.
+    const current = loadCardIndex();
+    const aberrations = Object.entries(final.logRaces).filter(([, race]) => race === 'ABERRATION');
+    for (const [id] of aberrations) {
+      expect({ id, races: current.info(id)?.races }).toEqual({ id, races: ['ABERRATION'] });
     }
   });
 
@@ -138,6 +157,24 @@ describe('part64: Миллифисент — аберрации, которых 
     expect(withTribe.total).toBeGreaterThan(blind.total);
   });
 });
+
+/**
+ * Снапшот, каким он был до 24.09: племени ABERRATION не знала ни одна карта.
+ *
+ * Правило D275 писалось под такой снапшот и проверяется на нём же — иначе
+ * со снапшотом 24.09 (данные Firestone от 23.09, где аберрации есть) слияние
+ * для них молчит, и тест доказывал бы ничего.
+ */
+function snapshotBlindToAberrations(): CardIndex {
+  const raw = JSON.parse(readFileSync(CARDS_PATH, 'utf8')) as { races?: string[]; race?: string }[];
+  return createCardIndex(
+    raw.map((c) =>
+      c.races?.includes('ABERRATION') === true
+        ? { ...c, races: c.races.filter((r) => r !== 'ABERRATION'), race: undefined }
+        : c,
+    ),
+  );
+}
 
 /** Заготовка миньона: поля, которых тест не касается. */
 const MINION = {

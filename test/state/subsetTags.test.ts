@@ -52,18 +52,19 @@ describe('теги BACON_SUBSET_* всех фикстур называют пл�
       for (const info of cards.poolOfTier(tier)) for (const race of info.races) fromSnapshot.add(race);
     }
     // Источников племени два, и сторожу важны оба: тег тринкета обязан
-    // разрешаться хоть одним из них (D275). Снапшота одного уже мало —
-    // `ABERRATION` в нём нет ни у одной карты.
+    // разрешаться хоть одним из них (D275). До 24.09 снапшота одного было
+    // мало — `ABERRATION` в нём не было ни у одной карты; со снапшотом 24.09
+    // (данные Firestone от 23.09) его знают оба источника.
     const known = new Set([...fromSnapshot, ...[...logRaces].map(raceOfLogTag)]);
 
     // Оба известных расхождения в фикстурах есть — иначе тест ничего не значит.
     expect(names).toContain('QUILLBOAR');
     expect(names).toContain('ELEMENTALS');
-    // И третье, ради которого появился второй источник: племя, которого
-    // снапшот не знает, а лог называет.
+    // И третье, ради которого появился второй источник: племя, которое
+    // лог назвал раньше, чем его узнали данные карт.
     expect(names).toContain('ABERRATION');
-    expect(fromSnapshot.has('ABERRATION')).toBe(false);
-    expect(known.has('ABERRATION')).toBe(true);
+    expect(fromSnapshot.has('ABERRATION')).toBe(true);
+    expect(logRaces.has('ABERRATION')).toBe(true);
 
     for (const name of names) expect(known, `BACON_SUBSET_${name}`).toContain(raceOfSubsetTag(name));
   });
