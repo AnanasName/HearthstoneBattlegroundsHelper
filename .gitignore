@@ -57,5 +57,9 @@ data/config.json
 data/games/
 data/contrib/
 
+# Разборы партий (npm run postgame, трей): пересобираются из логов,
+# в репозиторий не идут.
+data/reports/
+
 # Инсталлятор: вывод electron-builder.
 release/

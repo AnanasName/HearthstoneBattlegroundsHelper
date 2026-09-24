@@ -107,4 +107,6 @@ export const DATASET_DIR = join(APP_PATHS.homeDir, 'dataset');
 export const GAMES_DIR = join(APP_PATHS.homeDir, 'games');
 /** Сырые архивы от исполнителей, как пришли: сырьё для фикстур. */
 export const CONTRIB_DIR = join(APP_PATHS.homeDir, 'contrib');
+/** Разборы партий: HTML и JSON каждой и общий `index.html`. */
+export const REPORTS_DIR = join(APP_PATHS.homeDir, 'reports');
 export const CONFIG_PATH = join(APP_PATHS.homeDir, 'config.json');
