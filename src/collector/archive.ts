@@ -92,6 +92,12 @@ export interface LogArchiverOptions {
   readonly pollMs: number;
   readonly now: () => Date;
   readonly onEvent: (event: ArchiverEvent) => void;
+  /**
+   * Дописанные байты живой сессии — уже в копии `partPath`. Для слежения
+   * за концом партии (разбор после неё, `report/job.ts`): архиватор тянет
+   * лог всегда, в том числе без оверлея, и второй читатель файла не нужен.
+   */
+  readonly onData: (live: { readonly session: string; readonly partPath: string }, data: Buffer) => void;
 }
 
 export const DEFAULT_ARCHIVER_OPTIONS: Omit<LogArchiverOptions, 'logsRoot' | 'gamesDir'> = {
@@ -101,6 +107,7 @@ export const DEFAULT_ARCHIVER_OPTIONS: Omit<LogArchiverOptions, 'logsRoot' | 'ga
   pollMs: 1000,
   now: () => new Date(),
   onEvent: () => undefined,
+  onData: () => undefined,
 };
 
 /** Имя сессии из имени файла архива, или null для посторонних файлов. */
@@ -292,6 +299,7 @@ export class LogArchiver {
     if (data.length > 0) {
       await appendFile(live.partPath, data);
       live.bytes += data.length;
+      this.#options.onData({ session: live.session.name, partPath: live.partPath }, data);
     }
   }
 

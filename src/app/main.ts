@@ -7,11 +7,14 @@ import { app, dialog, Menu, nativeImage, shell, Tray } from 'electron';
 import { LogArchiver } from '../collector/archive.js';
 import { exportArchive } from '../collector/export.js';
 import { startOverlay, type OverlayHandle } from '../overlay/window.js';
+import { buildReportInWorker } from '../report/client.js';
+import { createGameOverWatch } from '../report/job.js';
+import { INDEX_FILE, readReports } from '../report/store.js';
 import { checkGameSetup } from '../ui/setup.js';
 import { detectLogsRoot, LOGS_DIR_NAME } from '../watcher/installDir.js';
 import { loadConfig, saveConfig, type AppConfig } from './config.js';
 import { runElevated } from './elevate.js';
-import { APP_PATHS, GAMES_DIR } from './paths.js';
+import { APP_PATHS, GAMES_DIR, REPORTS_DIR } from './paths.js';
 import { APP_VERSION } from './version.js';
 
 /**
@@ -77,6 +80,70 @@ let logsRoot = '';
 let setupText: string | null = null;
 let stopping = false;
 
+/**
+ * Разбор последней партии (`report/`): собирается сам после конца
+ * партии и открывается пунктом трея в браузере — у сборки нет терминала,
+ * а оверлей сквозной и длинного списка не покажет (D285).
+ */
+interface LastReport {
+  readonly htmlPath: string;
+  readonly facts: number;
+}
+let lastReport: LastReport | null = null;
+/** Разбор идёт: пункт трея говорит «готовится», а не открывает старый. */
+let reportBusy = false;
+/** Конец партии, пришедший, пока шёл прошлый разбор, — разобрать следом. */
+let reportQueued: string | null = null;
+let reportWatch = { session: '', watch: createGameOverWatch() };
+
+function latestReport(): LastReport | null {
+  const newest = readReports(REPORTS_DIR)[0];
+  return newest === undefined
+    ? null
+    : { htmlPath: join(REPORTS_DIR, newest.file), facts: newest.report.facts.length };
+}
+
+/**
+ * Собрать разбор партии, только что кончившейся в живой копии лога.
+ * Пауза в пару секунд — дать клиенту дописать хвост партии (итог места
+ * приходит строками после `FINAL_GAMEOVER`).
+ */
+function scheduleReport(partPath: string): void {
+  if (reportBusy) {
+    reportQueued = partPath;
+    return;
+  }
+  reportBusy = true;
+  refreshTray();
+  setTimeout(() => {
+    buildReportInWorker({
+      path: partPath,
+      outDir: REPORTS_DIR,
+      generatedAt: new Date().toISOString(),
+      appVersion: APP_VERSION,
+      // Догон при старте снова видит конец уже разобранной партии.
+      skipExisting: true,
+    })
+      .then((result) => {
+        if (result.kind === 'written') {
+          lastReport = { htmlPath: result.written.htmlPath, facts: result.facts };
+        } else if (result.kind === 'exists') {
+          lastReport ??= latestReport();
+        }
+      })
+      .catch((error: unknown) => {
+        setupText = `разбор партии не собран: ${error instanceof Error ? error.message : String(error)}`;
+      })
+      .finally(() => {
+        reportBusy = false;
+        const next = reportQueued;
+        reportQueued = null;
+        if (next !== null) scheduleReport(next);
+        refreshTray();
+      });
+  }, 3000);
+}
+
 function trayIcon(): Electron.NativeImage {
   const path = fileURLToPath(new URL('./icons/tray.png', import.meta.url));
   return nativeImage.createFromPath(path);
@@ -115,6 +182,24 @@ function refreshTray(): void {
         label: 'Собрать архив для отправки…',
         click: () => {
           void doExport();
+        },
+      },
+      {
+        label: reportBusy
+          ? 'Разбор партии готовится…'
+          : lastReport === null
+            ? 'Разбор последней партии — ещё нет'
+            : `Разбор последней партии (фактов: ${String(lastReport.facts)})`,
+        enabled: !reportBusy && lastReport !== null,
+        click: () => {
+          if (lastReport !== null) void shell.openPath(lastReport.htmlPath);
+        },
+      },
+      {
+        label: 'Все разборы',
+        enabled: existsSync(join(REPORTS_DIR, INDEX_FILE)),
+        click: () => {
+          void shell.openPath(join(REPORTS_DIR, INDEX_FILE));
         },
       },
       {
@@ -193,6 +278,13 @@ async function startArchiver(): Promise<void> {
     onEvent: () => {
       refreshTray();
     },
+    onData: (live, data) => {
+      // Хвост строки конца партии живёт в пределах одной сессии.
+      if (reportWatch.session !== live.session) {
+        reportWatch = { session: live.session, watch: createGameOverWatch() };
+      }
+      if (reportWatch.watch.push(data)) scheduleReport(live.partPath);
+    },
   });
   await archiver.start();
   refreshTray();
@@ -246,6 +338,7 @@ if (!args.setup) {
     ensureGameSetup();
 
     tray = new Tray(trayIcon());
+    lastReport = latestReport();
     refreshTray();
 
     await startArchiver();
