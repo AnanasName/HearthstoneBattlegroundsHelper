@@ -4128,6 +4128,52 @@ export function fullBoardBurnNote(
 }
 
 /**
+ * Почему миньон РУКИ не ставится на полный борд — словами, без новых весов
+ * (part75, кадр 00:15:40, D301).
+ *
+ * Родня `fullBoardBurnNote`: там объясняется сгорающее золото, здесь —
+ * карта, лежащая в руке. План хода 15 начинался с «КУПИТЬ Roaring Recruiter
+ * 2/8» на седьмой слот; игрок купил его после Bronze Timewalker, слот ушёл,
+ * и к кадру в руке лежали Recruiter и Persistent Poet при нуле золота,
+ * а совет был голое «НИЧЕГО». Игрок: «порекомендовал купить мне дракона
+ * из 3 таверны, но как и когда его поставить не указал». Молчание законно:
+ * `playRules` меняет тело на тело только с запасом `sellMargin`, а Recruiter
+ * (21.0) и Poet (23.0) против Tarecgosa (21.0) его не набирают. Строка
+ * называет ровно эти числа.
+ *
+ * Молчит, когда розыгрыш из руки советуется (хоть один проходит планку),
+ * и у карт, которые в руке законно: магнит (садится на носителя, слот
+ * не нужен), карта, работающая из руки, и запертая.
+ */
+export function handHoldNote(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules = DEFAULT_TAVERN_RULES,
+): string | null {
+  if (state.board.length < rules.boardSize) return null;
+  const held = state.hand.filter(
+    (m) =>
+      (m.tags['LITERALLY_UNPLAYABLE'] ?? 0) === 0 &&
+      !isMagnetic(m, deps.cards) &&
+      !isHandWorker(m, deps.cards, rules),
+  );
+  if (held.length === 0) return null;
+  const victim = weakestOwn(state, deps, rules);
+  if (victim === null) return null;
+  const without = state.board.filter((m) => m.entityId !== victim.minion.entityId);
+  const valued = held.map((m) => ({ minion: m, value: minionValue(m, { ...state, board: without }, deps, rules).total }));
+  if (valued.some((c) => c.value > victim.value + rules.sellMargin)) return null;
+  const name = (m: Minion): string => deps.cards.info(m.cardId)?.name ?? m.cardId;
+  const hand = valued.map((c) => `${name(c.minion)} ${c.value.toFixed(1)}`).join(', ');
+  // Коротко по той же причине, что у `fullBoardBurnNote`: это строка
+  // действия в оверлее, а переполнение панели обрезается молча (D164).
+  return (
+    `в руке ${hand} — не лучше ${name(victim.minion)} ${victim.value.toFixed(1)} ` +
+    `с запасом ${String(rules.sellMargin)}: ставить, когда освободится место`
+  );
+}
+
+/**
  * Жертва продажи ПО ВЫБОРУ — на неполном борде, ради золотого (part51).
  *
  * На полном борде продажа вынуждена: место под покупку взять неоткуда,
@@ -13024,6 +13070,8 @@ export function adviseTavern(
       cost: 0,
       requiresSlot: false,
       sellFirst: null,
+      // Рука на полном борде (D301): «НИЧЕГО» называет, почему её не ставят.
+      holdReason: handHoldNote(state, deps, rules),
       reason: 'ничего не делать и оставить золото',
     },
   ].filter((r): r is Recommendation => r !== null);

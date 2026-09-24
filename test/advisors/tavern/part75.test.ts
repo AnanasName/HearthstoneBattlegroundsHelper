@@ -73,6 +73,40 @@ describe('part75: кадры игрока', () => {
   });
 
   /**
+   * Кадр `00_15.png`, ход 15, между розыгрышем Misplaced Tea Set (00:15:31)
+   * и продажей Bronze Warden (00:15:46): борд полон, в руке Roaring Recruiter
+   * и Persistent Poet, золото 0/10, совет — голое «НИЧЕГО». Игрок:
+   * «порекомендовал купить мне дракона из 3 таверны, но как и когда его
+   * поставить не указал» (D301).
+   */
+  describe('00:15:40 — «НИЧЕГО» называет, почему рука не ставится (D301)', () => {
+    it('кадр воспроизводится: борд полон, в руке Recruiter и Poet, золота 0', () => {
+      const state = frame('00:15:40');
+      expect(state.gold).toBe(0);
+      expect(state.board).toHaveLength(7);
+      expect(state.hand.map((m) => cards.info(m.cardId)?.name)).toEqual([
+        'Roaring Recruiter',
+        'Persistent Poet',
+      ]);
+    });
+
+    it('верхний совет — «НИЧЕГО» с рукой, слабейшим и запасом', () => {
+      const [top] = adviseTavern(frame('00:15:40'), { cards })?.recommendations ?? [];
+      if (top === undefined) throw new Error('советов нет');
+      expect(top.action).toBe('pass');
+      expect(recommendationLine(top, cards)).toMatch(
+        /^НИЧЕГО — в руке Roaring Recruiter \d+\.\d, Persistent Poet \d+\.\d — не лучше Tarecgosa \d+\.\d с запасом 3: ставить, когда освободится место$/,
+      );
+    });
+
+    it('у «НИЧЕГО» без руки строка прежняя', () => {
+      const state = frame('00:15:40');
+      const [top] = adviseTavern({ ...state, hand: [] }, { cards })?.recommendations ?? [];
+      expect(top === undefined ? null : recommendationLine(top, cards)).toBe('НИЧЕГО');
+    });
+  });
+
+  /**
    * Кадр `00_24.png`, ход 21, золото 0/10, hp 7, три секунды до боя.
    * Совет: «РАЗЫГРАТЬ Red Chromadrake 6/4, продав Draconic Warden 14/8».
    * Игрок: «рекомендует продать карту, хотя я ничего за это не получу».
