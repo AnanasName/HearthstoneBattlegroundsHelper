@@ -11549,6 +11549,11 @@ export function shopSpellRules(
           minion: null,
           spellCardId: spell.cardId,
           score,
+          // Монета без прибыли в цепочку не добавляет ничего (D291): план
+          // и так возвращает ей золото, а её 0.5 — только место в списке.
+          // С ними «монета → обновление» обходило чистое обновление
+          // (part73, ход 31).
+          ...(net === 0 ? { standaloneScore: 0 } : {}),
           cost: goldCost,
           grantsGold: effect.gold,
           requiresSlot: false,
@@ -12663,6 +12668,22 @@ export function playPlan(
 }
 
 /**
+ * Монета БЕЗ ПРИБЫЛИ в витрине: золото возвращает ровно цену (Tavern Coin
+ * за 1, Corrupted Coin за 2). В этот ход она не меняет ничего, поэтому
+ * обновлению «делать нечего, а золото есть» не соперник (D291, part73,
+ * ход 31: золото 13, верхним стояла монета «про запас»).
+ */
+export function isBreakEvenCoin(r: Recommendation): boolean {
+  return (
+    r.action === 'buy' &&
+    r.spellCardId !== undefined &&
+    r.spellCardId !== null &&
+    r.grantsGold !== undefined &&
+    r.grantsGold === r.cost
+  );
+}
+
+/**
  * Совет по таверне целиком.
  *
  * Возвращает `null` вне фазы таверны: советовать покупки во время боя
@@ -12757,7 +12778,8 @@ export function adviseTavern(
   const idleCannotBuy = state.gold - idleRerollCost < rules.cheapestShopPrice;
   const idleGoal = idleCannotBuy ? rerollFreezeGoal(state, deps, rules) : null;
   if (
-    sorted[0]?.action === 'pass' &&
+    sorted[0] !== undefined &&
+    (sorted[0].action === 'pass' || isBreakEvenCoin(sorted[0])) &&
     state.gold >= idleRerollCost &&
     // «Делать нечего» с золотом на покупку — повод искать; с золотом
     // на один реролл в ранней партии — нет (part18, ход 7).

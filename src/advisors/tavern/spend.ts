@@ -7,6 +7,7 @@ import {
   battlecryPayoffPoints,
   buyCostOf,
   fullBoardBurnNote,
+  isBreakEvenCoin,
   isStandIn,
   isTripledGolden,
   paysForPlayOf,
@@ -1056,9 +1057,13 @@ export function spendPlan(
     // число становится известным РАНЬШЕ: всё, что стоит после нажатия,
     // посчитано на заниженном золоте, и игрок пересчитает это сам, увидев
     // бросок. Обратное (нажать последним) не даёт взамен ничего.
+    //
+    // Монете без прибыли узнавать нечего: её сумма известна до покупки
+    // и равна цене (D291, part73 ход 31 — «монета → обновление» вместо
+    // обновления).
     const better = value > bestValue + 1e-9;
     const tieButLearnsSooner =
-      Math.abs(value - bestValue) <= 1e-9 && (first.grantsGold ?? 0) > 0;
+      Math.abs(value - bestValue) <= 1e-9 && (first.grantsGold ?? 0) > 0 && !isBreakEvenCoin(first);
     if (better || tieButLearnsSooner) best = chain;
   }
   return best;
