@@ -31,6 +31,48 @@ describe('part75: кадры игрока', () => {
   };
 
   /**
+   * Вопрос игрока №1: «Учитывал ли ты силу героя?» — Dream Portal
+   * `TB_BaconShop_HP_062`, «The Tavern offers an extra Dragon whenever it
+   * is Refreshed». Сила читалась («пассивная»), но ни одно правило её
+   * не спрашивало: обновление у Изеры стоило как у любого героя (D300).
+   *
+   * Кадр `00_13.png`, ход 13, после покупки Runic Arcanist: золото 6/9,
+   * борд 5 (четыре дракона и амальгама), витрина — Maw Caster 4/5 и
+   * Refreshing Anomaly 4/5 по 14.0, остальное 7.0–8.0. Плоская планка
+   * тира 4 — 10, и обновления в советах не было. Дракон пула тиров 1–4
+   * на этом борде стоит больше, чем лучшее в витрине вместе с ценой
+   * обновления, — игрок и обновил дважды (00:13:13, 00:13:20).
+   */
+  describe('00:13:10 — Dream Portal в цене обновления (D300)', () => {
+    const DREAM_PORTAL = 'TB_BaconShop_HP_062';
+
+    it('кадр воспроизводится: золото 6, сила — Dream Portal', () => {
+      const state = frame('00:13:10');
+      expect(state.gold).toBe(6);
+      expect(state.board).toHaveLength(5);
+      expect(state.hero?.heroPowerCardId).toBe(DREAM_PORTAL);
+    });
+
+    it('обновление в советах, и строка действия называет дракона силы', () => {
+      const recs = adviseTavern(frame('00:13:10'), { cards })?.recommendations ?? [];
+      const reroll = recs.find((r) => r.action === 'reroll');
+      if (reroll === undefined) throw new Error('обновления нет в советах');
+      expect(reroll.reason).toMatch(/^Dream Portal: новая витрина принесёт Dragon — в среднем \d+\.\d/);
+      expect(recommendationLine(reroll, cards)).toBe('ОБНОВИТЬ за 1 — ищем Dragon от Dream Portal');
+    });
+
+    it('без силы тот же стол обновления не получает — планка прежняя', () => {
+      const state = frame('00:13:10');
+      const hero = state.hero;
+      if (hero === null) throw new Error('нет героя');
+      // Сила Тамсин (part74): пассивная, в витрину ничего не кладёт.
+      const other: GameState = { ...state, hero: { ...hero, heroPowerCardId: 'BG20_HERO_282p' } };
+      const recs = adviseTavern(other, { cards })?.recommendations ?? [];
+      expect(recs.some((r) => r.action === 'reroll')).toBe(false);
+    });
+  });
+
+  /**
    * Кадр `00_24.png`, ход 21, золото 0/10, hp 7, три секунды до боя.
    * Совет: «РАЗЫГРАТЬ Red Chromadrake 6/4, продав Draconic Warden 14/8».
    * Игрок: «рекомендует продать карту, хотя я ничего за это не получу».

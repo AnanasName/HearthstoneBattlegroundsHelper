@@ -1928,6 +1928,18 @@ export interface TavernRules {
    */
   readonly rerollMarginOverTier: number;
   /**
+   * Сила героя, кладущая в КАЖДУЮ новую витрину лишнюю карту племени, —
+   * «The Tavern offers an extra Dragon whenever it is Refreshed» (Dream
+   * Portal `TB_BaconShop_HP_062`, Изера, part75). `{tribe}` — слово племени
+   * из `tribeTextWords`, по нему же читается и само племя.
+   *
+   * Лог это подтверждает поштучно: 23 блока TRIGGER силы за партию, в каждом
+   * один миньон-дракон с `CREATOR_DBID` силы на последнем месте витрины —
+   * 7 в начале хода и 16 на 16 нажатий кнопки обновления (первый —
+   * game.log:2974). На замороженной витрине силы нет: не было обновления.
+   */
+  readonly refreshExtraTribeWords: readonly string[];
+  /**
    * Тир, с которого обновления витрины считаются полноценной тратой.
    *
    * Указано игроком (part11): в ранней партии реролл вместо тела на борде —
@@ -2717,6 +2729,7 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   ],
 
   rerollMarginOverTier: 2,
+  refreshExtraTribeWords: ['\\bthe\\s+tavern\\s+offers\\s+an\\s+extra\\s+{tribe}\\s+whenever\\s+it\\s+is\\s+(?:<b>)?refreshed\\b'],
   cheapestShopPrice: 2,
   lateRerollTier: 4,
   trinketOfferTurns: [11, 17],

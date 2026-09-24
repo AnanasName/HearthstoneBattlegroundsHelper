@@ -653,6 +653,11 @@
    "TB_BaconShop_HERO_22_Buddy",
    "TB_BaconShop_HERO_22_Buddy_G"
   ],
+  "refreshExtraTribeWords": [
+   "BG26_HERO_101_Buddy",
+   "BG34_Giant_589",
+   "TB_BaconShop_HP_062"
+  ],
   "repeatOnRaceWords": [
    "BG32_815"
   ],

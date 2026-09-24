@@ -5558,11 +5558,44 @@ function burningGoldSink(
 }
 
 /**
+ * Племя, которое сила героя кладёт в КАЖДУЮ новую витрину (`refreshExtraTribeWords`,
+ * Dream Portal, part75), и имя силы — для причины. `null` — силы такой нет.
+ */
+function refreshExtraTribeOf(
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { readonly race: string; readonly word: string; readonly power: string } | null {
+  const powerId = state.hero?.heroPowerCardId ?? null;
+  if (powerId === null) return null;
+  const info = deps.cards.info(powerId);
+  const text = info?.text ?? '';
+  if (text === '') return null;
+  for (const [race, tribe] of Object.entries(rules.tribeTextWords)) {
+    for (const pattern of rules.refreshExtraTribeWords) {
+      const found = new RegExp(pattern.replace('{tribe}', `(${tribe})`), 'i').exec(text);
+      if (found !== null) return { race, word: found[1] ?? race, power: info?.name ?? powerId };
+    }
+  }
+  return null;
+}
+
+/**
  * Правило обновления витрины.
  *
  * Советуется, когда покупать нечего: лучший кандидат ниже порога. Отдельно
  * учтено, что реролл нельзя советовать, если золото копится на подъём —
  * иначе совет ворует ход у более важного действия.
+ *
+ * **Сила, добавляющая в новую витрину карту племени** (Dream Portal Изеры,
+ * part75, D300), поднимает планку: свежая витрина обещает не только
+ * «среднюю карту», но и гарантированного дракона. Его цена — среднее
+ * по пулу драконов тиров 1..своего НА НАШЕМ борде (`averagePoolValue`
+ * с племенем: синергия с драконами борда входит сама), за вычетом цены
+ * обновления тем же курсом `goldPointValue`. Своего веса у правила нет,
+ * и плоская планка ему не соперник, а родня: на тире 4 она равна 10,
+ * а средняя свежая карта за вычетом цены обновления — 12.6 − 3 = 9.6.
+ * Дракон на драконьем борде той же мерой стоит 15–25 (part75, ходы 13–21).
  */
 export function rerollRule(
   state: GameState,
@@ -5598,8 +5631,18 @@ export function rerollRule(
 
   // Порог относителен тиру: плоский порог к пятому тиру не срабатывал
   // никогда — любой миньон там дороже шести очков одним тиром.
-  const threshold = rules.value.perTechLevel * state.techLevel + rules.rerollMarginOverTier;
+  const flat = rules.value.perTechLevel * state.techLevel + rules.rerollMarginOverTier;
+  // Гарантированная карта племени от силы героя (D300) — планка выше,
+  // когда её дракон на нашем борде стоит больше плоской планки. Под
+  // заморозку (`cannotBuy`) не считается: купить дракона будет не на что.
+  const extra = cannotBuy ? null : refreshExtraTribeOf(state, deps, rules);
+  const expected =
+    extra === null ? null : averagePoolValue(shopTiers(state.techLevel), state, deps, rules, extra.race);
+  const portal =
+    extra === null || expected === null ? null : { ...extra, expected, line: expected - cost * rules.goldPointValue };
+  const threshold = portal !== null && portal.line > flat ? portal.line : flat;
   if (best >= threshold) return null;
+  const byPortal = portal !== null && threshold === portal.line;
 
   // Копим на подъём: если после реролла на него уже не хватит, а сейчас
   // хватает — реролл дороже, чем кажется.
@@ -5635,13 +5678,17 @@ export function rerollRule(
     cost,
     requiresSlot: false,
     sellFirst: null,
-    searchGoal: freezeGoal?.what ?? null,
+    searchGoal: byPortal && portal !== null ? `${portal.word} от ${portal.power}` : (freezeGoal?.what ?? null),
     reason:
       freezeGoal !== null
         ? `золота ${String(state.gold)} — купить нечего и после обновления, но ${price}: ` +
           `искать под заморозку ${freezeGoal.what} — ${freezeGoal.why}`
-        : `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
-          `${String(state.techLevel)} — покупать нечего, ${price}`,
+        : byPortal && portal !== null
+          ? `${portal.power}: новая витрина принесёт ${portal.word} — в среднем ${portal.expected.toFixed(1)} ` +
+            `по пулу тиров 1–${String(state.techLevel)} на этом борде, за вычетом цены ` +
+            `${portal.line.toFixed(1)}, а лучшее в витрине ${best.toFixed(1)}; ${price}`
+          : `лучшее в витрине стоит ${best.toFixed(1)} при пороге ${threshold.toFixed(0)} для тира ` +
+            `${String(state.techLevel)} — покупать нечего, ${price}`,
   };
 }
 
