@@ -172,6 +172,7 @@ function collect(parts: readonly number[], seed: number, skipField: boolean): Po
               playerDeity: episode.playerDeity,
               playerTrinketDbfIds: episode.playerTrinketDbfIds,
               opponentTrinketDbfIds: opponent.trinketDbfIds,
+              playersAlive: episode.playersAlive,
             }),
           );
           field =

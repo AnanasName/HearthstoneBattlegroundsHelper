@@ -1,7 +1,7 @@
 import { insideBlock, readPowerEvents, type PowerEvent, type Yielder } from '../../parser/blocks.js';
 import { readPlayers } from '../../state/players.js';
 import { createReducer } from '../../state/reducer.js';
-import type { Deity, GameState, GlobalInfo, Hero, Minion } from '../../state/types.js';
+import { playersAlive, type Deity, type GameState, type GlobalInfo, type Hero, type Minion } from '../../state/types.js';
 
 /**
  * Извлечение боёв с известным исходом.
@@ -39,6 +39,11 @@ export interface BattleEpisode {
   /** Божества обеих сторон на начало боя (D287), `null` — сигила нет. */
   readonly playerDeity: Deity | null;
   readonly opponentDeity: Deity | null;
+  /**
+   * Живых в лобби на входе в бой — вход потолка урона (D288); `null`,
+   * если таблица лобби не прочитана.
+   */
+  readonly playersAlive: number | null;
   /** Чем бой закончился на самом деле. */
   readonly outcome: Outcome;
   /** Сколько здоровья потерял игрок. */
@@ -66,6 +71,7 @@ interface Pending {
   opponentTrinketDbfIds: readonly number[];
   playerDeity: Deity | null;
   opponentDeity: Deity | null;
+  playersAlive: number | null;
   hpBefore: number;
 }
 
@@ -108,6 +114,7 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
   let pending: Pending | null = null;
   let frozen = false;
   let hpBeforeCombat = 0;
+  let aliveBeforeCombat: number | null = null;
 
   const push = (event: PowerEvent): void => {
     reducer.step(event);
@@ -128,6 +135,9 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
 
     if (state.phase === 'combat' && phase !== 'combat') {
       hpBeforeCombat = effectiveHp(state.hero);
+      // На входе в бой, как и запас: таблица лобби тут — итог прошлого
+      // раунда, а урон боёв этого раунда в неё ещё не пришёл.
+      aliveBeforeCombat = playersAlive(state);
       pending = null;
       frozen = false;
     }
@@ -156,6 +166,7 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
               : (state.trinketsByPlayer[state.currentOpponentPlayerId] ?? []),
           playerDeity: state.deity,
           opponentDeity: state.opponentDeity,
+          playersAlive: aliveBeforeCombat,
           hpBefore: hpBeforeCombat,
         };
       }
@@ -183,6 +194,7 @@ function createEpisodesCollector(text: string): { push(event: PowerEvent): void;
         opponentTrinketDbfIds: pending.opponentTrinketDbfIds,
         playerDeity: pending.playerDeity,
         opponentDeity: pending.opponentDeity,
+        playersAlive: pending.playersAlive,
         outcome,
         damageTaken,
       });

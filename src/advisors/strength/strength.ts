@@ -45,7 +45,7 @@ import { toBattleInfo } from '../battle/mapper.js';
 import { withSeededRandom } from '../position/rng.js';
 import { toEstimate } from '../position/score.js';
 import { tavernTurnOf } from '../tavern/rules.js';
-import type { GameState } from '../../state/types.js';
+import { playersAlive, type GameState } from '../../state/types.js';
 import { boardsOfTurn, type FieldSnapshot } from './boards.js';
 
 export interface FieldStrengthOptions {
@@ -87,7 +87,10 @@ export interface FieldStrength {
    * достал до нашего запаса здоровья с бронёй. Считает её сам симулятор
    * (`lostLethal`: урон ≥ `hpLeft`), и потому число зависит от здоровья
    * так же, как от борда: тот же стол на 30 очках и на 8 даёт разную
-   * смертность при одной и той же доле побед.
+   * смертность при одной и той же доле побед. Урон — с потолком игры
+   * (D288): при пяти и больше живых запас выше 15 бой не пробивает вовсе,
+   * и до правки на таком запасе печаталась смерть, которой быть не может
+   * (part72, кадр 19:45: «смерть в 2 %» при 28 hp).
    *
    * Зачем отдельным числом при живой цене поражения рядом. Цена — это
    * СРЕДНЕЕ по проигранным боям, а смерть решает хвост: на девяти очках
@@ -132,6 +135,9 @@ export function fieldStrengthQuestion(
   const tavernTurn = tavernTurnOf(state.turn);
   const field = boardsOfTurn(snapshot, tavernTurn, excludePart);
   if (field.length < options.minBoards) return null;
+  // Потолок урона (D288) — число живых НАШЕГО лобби: бой, о котором
+  // спрашивают, наш, а поле лишь подставляет возможного соперника.
+  const alive = playersAlive(state);
 
   const setups = field.map(
     (opponent): BattleSetup => ({
@@ -149,6 +155,7 @@ export function fieldStrengthQuestion(
       playerTrinketDbfIds:
         state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
       opponentTrinketDbfIds: opponent.trinketDbfIds,
+      playersAlive: alive,
     }),
   );
 

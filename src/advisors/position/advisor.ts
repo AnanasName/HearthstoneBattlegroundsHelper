@@ -1,7 +1,7 @@
 import { endOfTurnAuraGains, withEndOfTurnAuras } from '../battle/endOfTurn.js';
 import { toBattleInfo, withPlayerBoard, type BattleSetup } from '../battle/mapper.js';
 import type { BattleSimulator } from '../battle/simulator.js';
-import type { GameState, Minion } from '../../state/types.js';
+import { playersAlive, type GameState, type Minion } from '../../state/types.js';
 import { resolveTarget, type PositionTarget } from './opponent.js';
 import { cardRallyCarriers, preferRallySwing, rallySwingNote } from './rallySwing.js';
 import { withSeededRandom } from './rng.js';
@@ -246,6 +246,7 @@ export function battleQuestion(state: GameState): PositionQuestion | null {
   const target = resolveTarget(state);
   if (target === null || state.hero === null) return null;
   const hero = state.hero;
+  const alive = playersAlive(state);
 
   const setupAgainst = (
     opponentBoard: readonly Minion[],
@@ -266,6 +267,9 @@ export function battleQuestion(state: GameState): PositionQuestion | null {
       state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
     opponentTrinketDbfIds:
       opponentPlayerId === null ? [] : (state.trinketsByPlayer[opponentPlayerId] ?? []),
+    // Потолок урона (D288): довесок расстановки — ожидаемый размен
+    // здоровьем, и без потолка он считал урон, которого игра не нанесёт.
+    playersAlive: alive,
   });
 
   return {

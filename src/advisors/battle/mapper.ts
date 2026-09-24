@@ -211,6 +211,15 @@ export interface BattleSetup {
    */
   readonly playerDeity?: Deity | null;
   readonly opponentDeity?: Deity | null;
+  /**
+   * Сколько игроков живо на начало боя — вход потолка урона (D288).
+   *
+   * Урон боя пакет ограничивает сам (`damage-cap.js`: при пяти и больше
+   * живых 5 на ходах таверны 1–3, 10 на 4–7, 15 дальше), но только зная
+   * число живых. Необязательное по той же причине, что тринкеты:
+   * `undefined` и `null` — «не знаем», и потолка нет, как до правки.
+   */
+  readonly playersAlive?: number | null;
 }
 
 /**
@@ -278,6 +287,10 @@ export function toBattleInfo(
     trinkets: toTrinkets(episode.opponentTrinketDbfIds),
     secrets: toDeitySecrets(episode.opponentDeity),
   };
+  // Потолок урона (D288): число живых и флаг — только вместе и только
+  // при известном числе. Исхода боя потолок не меняет, меняет урон,
+  // а с ним смерть в ближайшем бою (D283).
+  const alive = episode.playersAlive ?? null;
 
   return {
     playerBoard: {
@@ -297,13 +310,18 @@ export function toBattleInfo(
       player: opponentHero,
       board: episode.opponentBoard.map(toBoardEntity),
     },
-    options: { numberOfSimulations, skipInfoLogs: true },
+    options: {
+      numberOfSimulations,
+      skipInfoLogs: true,
+      ...(alive === null ? {} : { applyDamageCap: true }),
+    },
     gameState: {
       // Ход ТАВЕРНЫ, а не партии (D286): у симулятора это шкала силы
       // «Unlocks on Turn 7» (Drek'Thar, Vanndar) и ограничителя урона.
       // Сырой ход партии отпирал силу Drek'Thar на четвёртом ходу таверны
       // и ставил в бой копию, которой не было (part71, ходы 8–12).
       currentTurn: tavernTurnOf(episode.turn),
+      ...(alive === null ? {} : { numberOfPlayersAlive: alive }),
       ...(episode.anomalyCardId === null ? {} : { anomalies: [episode.anomalyCardId] }),
     },
   };
