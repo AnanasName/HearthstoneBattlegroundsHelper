@@ -114,6 +114,28 @@ function toGlobalInfo(info: GlobalInfo): Record<string, number> {
   return out;
 }
 
+/**
+ * Силы, чьё число пакет читает из `heroPower.info`, и номер плейсхолдера
+ * силы (`heroPowerScriptData`), где это число лежит в логе (D290).
+ *
+ * Прочим силам `info` остаётся нулём: у Lock and Load там карта,
+ * у Rapid Reanimation — миньон, у Ozumat и Runic Empowerment — числа,
+ * место которых в логе фикстурами не подтверждено.
+ */
+const HERO_POWER_INFO_FROM_SCRIPT_DATA: Readonly<Record<string, number>> = {
+  // Broodmother (Ониксия): размер дракончика {0}/{0} — TAG_SCRIPT_DATA_NUM_1
+  // силы (part73, game.log:1522 и 30435). Пакет ставит его статами
+  // призванного дракончика (avenge.js), с нулём дракончик 0/0 умирал сразу.
+  BG22_HERO_305p: 0,
+};
+
+function heroPowerInfo(hero: Hero): number {
+  if (hero.heroPowerCardId === null) return 0;
+  const index = HERO_POWER_INFO_FROM_SCRIPT_DATA[hero.heroPowerCardId];
+  if (index === undefined) return 0;
+  return hero.heroPowerScriptData[index] ?? 0;
+}
+
 export function toPlayerEntity(
   hero: Hero,
   tavernTier: number,
@@ -132,7 +154,7 @@ export function toPlayerEntity(
               cardId: hero.heroPowerCardId,
               entityId: hero.heroPowerEntityId ?? 0,
               used: false,
-              info: 0,
+              info: heroPowerInfo(hero),
               info2: 0,
               info3: 0,
               info4: 0,

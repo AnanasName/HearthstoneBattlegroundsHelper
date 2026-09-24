@@ -1625,3 +1625,19 @@ export function part71Game(): string {
 export function part72Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part72', 'game.log'), 'utf8');
 }
+
+/**
+ * part73 — 24.09.2026, Ониксия `BG22_HERO_305`, 2-е место, 17 ходов таверны
+ * (19:52–20:28), билд 253216 — вторая партия сессии клиента 19:26:35
+ * (первая — part72). Кадр игрока — `data/screenshots/20_12.png` (ход 21).
+ *
+ * Сила Broodmother `BG22_HERO_305p` (сущность 196, game.log:1522) —
+ * «Avenge (4): Summon a {0}/{0} Whelp that attacks immediately. Improve
+ * this by +1/+1.» Размер дракончика — `TAG_SCRIPT_DATA_NUM_1` силы: 1 с
+ * создания, растёт на единицу за каждый призыв (первый — строкой 30435,
+ * бой хода 8) и к концу партии доходит до 34. Счётчик мести —
+ * `SCORE_VALUE_2`, внутри боя 0…4, в конце боя сбрасывается в 0.
+ */
+export function part73Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part73', 'game.log'), 'utf8');
+}
