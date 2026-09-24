@@ -3973,6 +3973,37 @@ function isTriggerOverOthers(m: Minion, cards: CardIndex, rules: TavernRules): b
 }
 
 /**
+ * Семейство энчантов тёмного дара: `BG36_MidGameEffect_000t52e` и соседи
+ * (docs/simulator.md — счёт тел с таким энчантом совпадает с тегом
+ * `HAS_DARK_GIFT` один в один).
+ */
+const DARK_GIFT_ENCHANT_PREFIX = 'BG36_MidGameEffect_';
+
+/** Несёт ли тело тёмный дар. */
+export function carriesDarkGift(m: Minion): boolean {
+  return m.enchantments.some((e) => e.cardId.startsWith(DARK_GIFT_ENCHANT_PREFIX));
+}
+
+/**
+ * Кто из двух кандидатов в жертву уходит первым: меньший по шкале, а при
+ * РАВНОЙ ценности — тот, у кого нет тёмного дара (D292, part74).
+ *
+ * Шкала дара не видит (docs/deferred.md: надбавку за дар мерили и не
+ * внесли), и ничья прежде решалась местом на столе — продавался левый.
+ * На кадре part74 23:41 это была Scarlet Skull с Fresh Perspective
+ * («Deathrattle: Gain 2 free Refreshes») против такой же без дара, обе
+ * 7/1 и 19.0 по шкале; игрок продал правую. По корпусу (2890 продаж
+ * part1–part74) слабейший с даром делил ничью с телом без дара в пяти
+ * моментах продажи; там, где игрок продал одно из двух, — всегда тело
+ * без дара, три раза из трёх. Ценность не трогается: правило решает
+ * только то, что шкала не различает.
+ */
+function weakerVictim<T extends { readonly minion: Minion; readonly value: number }>(a: T, b: T): T {
+  if (Math.abs(a.value - b.value) > 1e-9) return b.value < a.value ? b : a;
+  return carriesDarkGift(a.minion) && !carriesDarkGift(b.minion) ? b : a;
+}
+
+/**
  * Слабейший свой — кандидат на продажу, когда борд полон.
  *
  * Ауры на чужих в жертвы не идут, пока есть хоть одно обычное тело (part19,
@@ -4013,7 +4044,7 @@ export function weakestOwn(
   const pool = bodies.length > 0 ? bodies : state.board;
   return pool
     .map((m) => ({ minion: m, value: ownValue(m, state, deps, rules) }))
-    .reduce((a, b) => (b.value < a.value ? b : a));
+    .reduce(weakerVictim);
 }
 
 /**
@@ -4095,7 +4126,7 @@ function electiveVictim(
   if (pool.length === 0) return null;
   return pool
     .map((m) => ({ minion: m, value: ownValue(m, state, deps, rules) }))
-    .reduce((a, b) => (b.value < a.value ? b : a));
+    .reduce(weakerVictim);
 }
 
 /**
@@ -4374,6 +4405,21 @@ export function buyRules(
       // с посчитанной по тиру ценностью выглядела бы противоречием.
       const tier = minion.techLevel ?? deps.cards.info(minion.cardId)?.techLevel ?? null;
       const merge = value.completesTriple ? tripleMergeOf(minion, state, deps.cards, rules) : null;
+      // Клич-жертва (D293): покупка, которая встаёт на борд сразу, — это
+      // и розыгрыш, и жертву называет она же. Не встаёт — тройка уходит
+      // в руку золотой, а на полном борде без продажи карта ждёт в руке, —
+      // клич не срабатывает, и называть некого (так же решает план, `spend.ts`).
+      const playsNow = host === null && merge === null && (!full || sellFirst !== null);
+      const sacrifice = playsNow
+        ? battlecrySacrificeOf(
+            minion,
+            [...state.board.filter((x) => x.entityId !== sellFirst?.entityId), minion],
+            state,
+            deps,
+            rules,
+          )
+        : null;
+      if (sacrifice !== null) notes.push(sacrifice.note);
 
       return [
         {
@@ -4385,6 +4431,12 @@ export function buyRules(
           sellFirst,
           magnetizeTo: host,
           ...(merge === null ? {} : { tripleMerge: merge }),
+          ...(sacrifice === null
+            ? {}
+            : {
+                targetMinion: sacrifice.target,
+                destroysTarget: { rebornCopy: sacrifice.destroyed.rebornCopy },
+              }),
           ...(value.heroPowerBuyLeft === null ? {} : { heroPowerBuyLeft: value.heroPowerBuyLeft }),
           // Пол был ЕДИНИЦЕЙ по краю наблюдений: в логе part40 цена силы
           // принимает ровно три значения — 3 (десять раз), 2 (десять)
@@ -4649,6 +4701,11 @@ export function playRules(
           ];
     const modal = modalBranchAdvice(minion, { ...state, board: boardAfter }, deps, rules);
     if (modal !== null) notes.push(modal.note);
+    // Клич-жертва (D293, part74): кого отдать — на том же борде ПОСЛЕ
+    // розыгрыша, где проданный ради места уже ушёл.
+    const sacrifice =
+      host === null ? battlecrySacrificeOf(minion, boardAfter, state, deps, rules) : null;
+    if (sacrifice !== null) notes.push(sacrifice.note);
 
     return [
       {
@@ -4661,11 +4718,16 @@ export function playRules(
         magnetizeTo: host,
         spellBranches: modal?.branches,
         ...(coinGold > 0 ? { grantsGold: coinGold } : {}),
+        // Жертва клича погибает: план убирает её с борда, у перерождения
+        // оставляет копию (`withTargetDestroyed`, как у Butchering).
+        ...(sacrifice === null
+          ? {}
+          : { destroysTarget: { rebornCopy: sacrifice.destroyed.rebornCopy } }),
         // Цель ветви — в самой строке действия: «Choose One» у миньона игра
         // спрашивает сразу после розыгрыша, и «на кого» — половина вопроса
         // (part43). Цель считается на борде ПОСЛЕ розыгрыша: сам миньон уже
         // стоит и годится в цели, а жертва, освободившая ему место, продана.
-        targetMinion: modal?.target ?? null,
+        targetMinion: modal?.target ?? sacrifice?.target ?? null,
         reason:
           `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} из руки, ` +
           `ценность ${(playValue + doubledGain).toFixed(1)}` +
@@ -4893,8 +4955,8 @@ export function spinRule(
       if (feedsBattlecries(m, deps.cards, rules)) continue;
       if (discoverPayoffTextOf(m.cardId, deps.cards, rules) !== null) continue;
       if (playPayoffTextOf(m.cardId, deps.cards, rules) !== null) continue;
-      const value = ownValue(m, state, deps, rules);
-      if (victim === null || value < victim.value) victim = { minion: m, value };
+      const candidate = { minion: m, value: ownValue(m, state, deps, rules) };
+      victim = victim === null ? candidate : weakerVictim(victim, candidate);
     }
     if (victim === null) return null;
   }
@@ -10518,6 +10580,138 @@ function destroyTrade(
   };
 }
 
+/** Жертва «Destroy a friendly X» и что борд с ней теряет. */
+interface DestroyVictim {
+  readonly target: Minion;
+  /** `rebornCopy` — кем цель вернётся, `loss` — статы, которые борд отдаёт насовсем. */
+  readonly destroyed: { readonly rebornCopy: Minion | null; readonly loss: number };
+  readonly note: string;
+}
+
+/**
+ * Кого отдать «Destroy a friendly X» — одно правило на заклинание
+ * (Butchering, D078/D251) и на клич-жертву миньона (Maw Caster, D293).
+ *
+ * Жертва — наименьший свой (D078), но не тот, кто ПЛАТИТ за перерождение
+ * других, пока у него самого перерождения нет (part59, ход 21): Snazzy
+ * Phantom «After a friendly minion is Reborn…» — единственный, кто
+ * превращает остальные размены в статы, и игрок бил его только дав ему
+ * Reborn. Шире признак не берётся НАМЕРЕННО: вариант «сначала
+ * перерождающиеся, движки не трогать» на корпусе совпал с целями игрока
+ * в 3 точках из 15 против 6 у прежнего — игрок бьёт то, чья смерть
+ * в таверне что-то приносит (хрипы, счётчик Eternal Knight, комбо
+ * с Misplaced Tea Set), а этого наша шкала не читает.
+ *
+ * `spareGifts` — не отдавать тело с тёмным даром, пока есть без дара
+ * (D293). Погибшее тело дар теряет насовсем: копия перерождения приходит
+ * без энчантов (part59, 13:49:14), а без перерождения тела нет вовсе.
+ * Клич Maw Caster на part74 игрок дважды отдал не наименьшую Scarlet Skull
+ * с Fresh Perspective («Deathrattle: Gain 2 free Refreshes»), а соседа
+ * без дара (23:38:31, 23:43:02).
+ */
+function destroyVictimOf(
+  eligible: readonly Minion[],
+  state: GameState,
+  cards: CardIndex,
+  rules: TavernRules,
+  spareGifts: boolean,
+): DestroyVictim {
+  const stats = (m: Minion): number => (m.attack ?? 0) + (m.health ?? 0);
+  const pays = (m: Minion): boolean => {
+    const text = cards.info(m.cardId)?.text ?? '';
+    return !m.reborn && rules.rebornPayoffWords.some((w) => new RegExp(w, 'i').test(text));
+  };
+  const spareable = eligible.filter((m) => !pays(m));
+  const unpaid = spareable.length > 0 ? spareable : eligible;
+  const plain = spareGifts ? unpaid.filter((m) => !carriesDarkGift(m)) : unpaid;
+  const pool = plain.length > 0 ? plain : unpaid;
+  const smallest = (list: readonly Minion[]): Minion =>
+    list.reduce((a, b) => (stats(b) < stats(a) ? b : a));
+  const victim = smallest(pool);
+  // Потеря — то, что борд отдаёт насовсем: у перерождения — статы сверх
+  // копии, без него — всё тело, кроме надбавки всей нежити к атаке: она
+  // висит на игроке и достанется любому следующему телу (part50, ход 21:
+  // Helping Hand 42/1 — это жетон 2/1 и +40 надбавки). У жертвы с ХРИПОМ
+  // вычета нет: хрип в таверне приносит своё, наша шкала хрипов
+  // не считает, и выдуманный вычет заглушил бы ход, который игрок делает
+  // (тот же довод, что D207).
+  const undeadBuff = state.globalInfo.undeadAttackBuff ?? 0;
+  const copyOf = (m: Minion): Minion | null =>
+    m.reborn ? rebornCopyOf(m, state, cards, rules) : null;
+  const loss = (m: Minion): number => {
+    if (cards.info(m.cardId)?.mechanics.includes('DEATHRATTLE') ?? false) return 0;
+    const copy = copyOf(m);
+    if (copy !== null) return Math.max(0, stats(m) - stats(copy));
+    const undead = racesOf(m, cards).some((r) => r === 'UNDEAD' || r === RACE_ALL);
+    return Math.max(0, stats(m) - (undead ? undeadBuff : 0));
+  };
+  const name = (m: Minion): string => cards.info(m.cardId)?.name ?? m.cardId;
+  const copy = copyOf(victim);
+  // Пощажённый дар называется вслух: без этого «наименьший свой» читался бы
+  // ошибкой рядом с меньшим телом, стоящим на борде.
+  const spared = pool === plain && plain.length < unpaid.length ? smallest(unpaid) : null;
+  const giftNote =
+    spared !== null && spared.entityId !== victim.entityId
+      ? `, ${name(spared)} с тёмным даром не отдаём`
+      : '';
+  return {
+    target: victim,
+    destroyed: { rebornCopy: copy, loss: loss(victim) },
+    note:
+      (copy === null
+        ? `в жертву ${name(victim)} — наименьший свой подходящий`
+        : `в жертву ${name(victim)} — перерождение вернёт его ${String(copy.attack)}/${String(copy.health)}`) +
+      giftNote,
+  };
+}
+
+/**
+ * Племя, которое клич миньона требует ОТДАТЬ, — «Battlecry: Destroy
+ * a friendly Undead to Discover an Undead» (Maw Caster), «Consume
+ * a friendly Demon…» (Soul Devourer), «…to get a plain copy of it»
+ * (Disguised Graverobber). Слова те же, что у D272 (`tribeSacrificeWords`);
+ * `null` — клича-жертвы у карты нет.
+ */
+function sacrificeRaceOf(cardId: string, cards: CardIndex, rules: TavernRules): string | null {
+  const info = cards.info(cardId);
+  if (!(info?.mechanics.includes('BATTLECRY') ?? false)) return null;
+  const text = info?.text ?? '';
+  for (const [race, word] of Object.entries(rules.tribeTextWords)) {
+    const named = rules.tribeSacrificeWords.some((w) =>
+      new RegExp(w.replace('{tribe}', `(?:${word})`), 'i').test(text),
+    );
+    if (named) return race;
+  }
+  return null;
+}
+
+/**
+ * Жертва клича миньона, которого разыгрывают на `board` (D293, part74).
+ *
+ * `board` — стол В МОМЕНТ клича: сам миньон уже стоит, а проданный ради
+ * места ушёл. Совет «РАЗЫГРАТЬ Maw Caster» без жертвы оставлял игроку
+ * половину решения — тот же довод, что у цели заклинания (part12)
+ * и носителя магнита (part13). Очки совета не трогаются (как у D207):
+ * цену жертвы в них не вносим, правило только называет, кого отдать.
+ */
+function battlecrySacrificeOf(
+  minion: Minion,
+  board: readonly Minion[],
+  state: GameState,
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): DestroyVictim | null {
+  const race = sacrificeRaceOf(minion.cardId, deps.cards, rules);
+  if (race === null) return null;
+  const eligible = board.filter((m) => {
+    if (m.entityId === minion.entityId) return false;
+    const races = racesOf(m, deps.cards);
+    return races.includes(RACE_ALL) || races.includes(race);
+  });
+  if (eligible.length === 0) return null;
+  return destroyVictimOf(eligible, { ...state, board }, deps.cards, rules, true);
+}
+
 function spellTargetOn(
   effect: SpellEffect,
   state: GameState,
@@ -10555,49 +10749,10 @@ function spellTargetOn(
         note: `заменит ${name} — наименьшего своего подходящего — на случайного нового`,
       };
     }
-    // Жертва — наименьший свой (D078), но не тот, кто ПЛАТИТ за перерождение
-    // других, пока у него самого перерождения нет (part59, ход 21): Snazzy
-    // Phantom «After a friendly minion is Reborn…» — единственный, кто
-    // превращает остальные размены в статы, и игрок бил его только дав ему
-    // Reborn. Шире признак не берётся НАМЕРЕННО: вариант «сначала
-    // перерождающиеся, движки не трогать» на корпусе совпал с целями игрока
-    // в 3 точках из 15 против 6 у прежнего — игрок бьёт то, чья смерть
-    // в таверне что-то приносит (хрипы, счётчик Eternal Knight, комбо
-    // с Misplaced Tea Set), а этого наша шкала не читает.
-    const pays = (m: Minion): boolean => {
-      const text = cards.info(m.cardId)?.text ?? '';
-      return !m.reborn && rules.rebornPayoffWords.some((w) => new RegExp(w, 'i').test(text));
-    };
-    const spareable = eligible.filter((m) => !pays(m));
-    const pool = spareable.length > 0 ? spareable : eligible;
-    const victim = pool.reduce((a, b) => (stats(b) < stats(a) ? b : a));
-    // Потеря — то, что борд отдаёт насовсем: у перерождения — статы сверх
-    // копии, без него — всё тело, кроме надбавки всей нежити к атаке: она
-    // висит на игроке и достанется любому следующему телу (part50, ход 21:
-    // Helping Hand 42/1 — это жетон 2/1 и +40 надбавки). У жертвы с ХРИПОМ
-    // вычета нет: хрип в таверне приносит своё, наша шкала хрипов
-    // не считает, и выдуманный вычет заглушил бы ход, который игрок делает
-    // (тот же довод, что D207).
-    const undeadBuff = state.globalInfo.undeadAttackBuff ?? 0;
-    const copyOf = (m: Minion): Minion | null =>
-      m.reborn ? rebornCopyOf(m, state, cards, rules) : null;
-    const loss = (m: Minion): number => {
-      if (cards.info(m.cardId)?.mechanics.includes('DEATHRATTLE') ?? false) return 0;
-      const copy = copyOf(m);
-      if (copy !== null) return Math.max(0, stats(m) - stats(copy));
-      const undead = racesOf(m, cards).some((r) => r === 'UNDEAD' || r === RACE_ALL);
-      return Math.max(0, stats(m) - (undead ? undeadBuff : 0));
-    };
-    const name = cards.info(victim.cardId)?.name ?? victim.cardId;
-    const copy = copyOf(victim);
-    return {
-      target: victim,
-      destroyed: { rebornCopy: copy, loss: loss(victim) },
-      note:
-        copy === null
-          ? `в жертву ${name} — наименьший свой подходящий`
-          : `в жертву ${name} — перерождение вернёт его ${String(copy.attack)}/${String(copy.health)}`,
-    };
+    // Тёмный дар заклинание не щадит (D293): на part59 (ход 21) пощада
+    // увела бы Butchering со Stealth-дара на Dead Bellringer — движок
+    // активаций, — а игрок бил именно тело с даром.
+    return destroyVictimOf(eligible, state, cards, rules, false);
   }
 
   if (effect.untargeted) {

@@ -388,7 +388,9 @@ export function applyRecommendation(
         state: paid({
           gold: state.gold - rec.cost + refund,
           shop,
-          board: room ? [...board, rec.minion] : board,
+          // Клич-жертва (D293) срабатывает, только если миньон встал на борд:
+          // жертва уходит, у перерождения на её месте остаётся копия.
+          board: room ? withTargetDestroyed([...board, rec.minion], rec) : board,
           hand: room ? state.hand : [...state.hand, rec.minion],
           // Покупка отмечается в журнале: висящая прибавка активации
           // достаётся ПЕРВОЙ покупке, а не каждой в цепочке (part57).
@@ -464,7 +466,12 @@ export function applyRecommendation(
       }
       if (board.length >= rules.boardSize) return null;
       return {
-        state: paid({ gold: state.gold + refund, hand, board: [...board, rec.minion] }),
+        state: paid({
+          gold: state.gold + refund,
+          hand,
+          // Жертва клича (D293) уходит с борда тем же приёмом, что у Butchering.
+          board: withTargetDestroyed([...board, rec.minion], rec),
+        }),
         opaque: false,
         terminal: false,
       };

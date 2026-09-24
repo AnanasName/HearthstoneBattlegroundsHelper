@@ -1642,3 +1642,24 @@ export function part72Game(): string {
 export function part73Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part73', 'game.log'), 'utf8');
 }
+
+/**
+ * part74 — 24.09.2026, Тамсин `BG20_HERO_282` (скин «Tamsin, Shadow Mage»
+ * `BG20_HERO_282_SKIN_C4`), 2-е место, 16 ходов таверны (23:29–00:03),
+ * билд 253216, сессия клиента 23:27:52 (одна партия). Кадры игрока —
+ * `data/screenshots/23_38.png` (ход 13) и `23_41.png` (ход 15).
+ *
+ * Сила Fragrant Phylactery `BG20_HERO_282p` (сущность 227, game.log:1762)
+ * — «Start of Combat: Give your lowest-Attack minion "Deathrattle: Give
+ * your other minions this minion's stats."», 16 срабатываний, по одному
+ * на бой; кнопки, цены и `TAG_SCRIPT_DATA_NUM_*` у неё нет.
+ *
+ * Сборка — нежить на уничтожении вне боя: Maw Caster, Dead Bellringer,
+ * Butchering, тринкеты Bleeding Heart и Maw Caster Portrait. Своя фактура —
+ * **тёмный дар Fresh Perspective** `BG36_MidGameEffect_000t52e`
+ * («Deathrattle: Gain 2 free Refreshes») на одной из двух одинаковых
+ * Scarlet Skull (сущность 4904, энчант 4905, game.log:74667).
+ */
+export function part74Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part74', 'game.log'), 'utf8');
+}
