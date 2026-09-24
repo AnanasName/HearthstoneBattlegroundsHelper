@@ -1565,6 +1565,93 @@ Tavern spell you cast. Each turn, your next Hero Power costs (1) less».
 картой силы» это не является. Поэтому читать `BACON_EVOLUTION_CARD_ID`
 как обещание можно только с сущности СИЛЫ.
 
+## Нажатия игрока и конец хода таверны (отчёт после партии, 25.09)
+
+Всё ниже — фактура для ленты отчёта (`src/report/timeline.ts`); цитаты — part72,
+part73, part68, part65, part61.
+
+**Ход таверны кончается только по таймеру.** Опция `END_TURN` в
+`GameState.DebugPrintOptions()` у Battlegrounds всегда с `error=INVALID`:
+part72 — 128 строк `option 0 type=END_TURN`, неINVALID — 0 (19:31:51.5693566
+первая). Кнопки «конец хода» у игрока нет, и остаток ресурса значит одно
+из двух: не успел или оставил сознательно.
+
+**Нажатие — строка `GameState.SendOption()`**, канал-источник её событием
+не отдаёт (`PowerEventAssembler` берёт только `DebugPrintPower`, выборы
+и метаданные):
+
+```
+part72:4305  D 19:32:21.2766115 GameState.SendOption() - selectedOption=6 selectedSubOption=-1 selectedTarget=430 selectedPosition=0
+```
+
+На part72 их 117 за партию, на part68 — до 63 за ход. Выбор из раскопки,
+тринкета, награды — `GameState.SendChoices()` (раздел «Модальные выборы»),
+его первая строка `id=… ChoiceType=…`.
+
+**Неисполненное нажатие.** Если таймер оборвал ход, игра на последнее
+нажатие не отвечает ничем, кроме служебной строки перед `MAIN_END`:
+
+```
+part68:459256  D 21:44:00.2824106 GameState.SendOption() - selectedOption=2 selectedSubOption=-1 selectedTarget=19004 selectedPosition=0
+part68:459258  D 21:44:03.9696558 GameState.DebugPrintPower() - META_DATA - Meta=ARTIFICIAL_HISTORY_INTERRUPT Data=0 InfoCount=0
+part68:459259  D 21:44:03.9696558 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_END
+```
+
+Критик спецификации насчитал такие ходы в 4 из 198 (part60–75). Пауза
+«последнее действие за ≤ 5 с до конца» обрывом НЕ является: у трети ходов
+последнее нажатие — перестановка своего борда.
+
+**`MAIN_END` хода таверны — на верхнем уровне, у боевого хода — внутри блока:**
+
+```
+part72:4777  D 19:32:38.2785886 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_END
+part72:6866  D 19:32:38.8041735 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_END
+```
+
+Первый `MAIN_END` партии (part72:1965, с отступом) стоит ДО `TURN=1` — это
+подготовка, не ход. Лента фильтрует не отступом, а снимком: фаза таверны
+и нечётный ход.
+
+**Между `MAIN_END` и сменой `TURN` работают триггеры конца хода.** У Ониксии
+борд 6 на `MAIN_END` становится 7 к `TURN=N+1` (дракончик Broodmother, part73,
+ходы 17/19/21). Поэтому «что оставил» снимается перед `MAIN_END`, а «с чем
+ушёл в бой» — перед `TURN=N+1`.
+
+**Показ боя клиентом съедает начало хода.** GameState проходит бой за
+секунду, а `PowerTaskList` проигрывает атаки ещё 10–13 с: part73 — `TURN=25`
+в 20:15:45.50, последняя `BLOCK_START BlockType=ATTACK` канала
+`PowerTaskList` в 20:16:29.67, первое нажатие в 20:16:36.95. Доступное
+игроку время хода считается от конца показа.
+
+**Перетаскивание без покупки — пустой блок `MOVE_MINION`** на сущности
+витрины (`player=9`, зона `PLAY`):
+
+```
+part73:326197  D 20:17:16.0346837 GameState.SendOption() - selectedOption=12 selectedSubOption=-1 selectedTarget=0 selectedPosition=1
+part73:326223  D 20:17:16.3768435 GameState.DebugPrintPower() - BLOCK_START BlockType=MOVE_MINION Entity=[entityName=Голдринн, Великий волк id=18299 zone=PLAY zonePos=1 cardId=BGS_018 player=9] …
+               (следом сразу BLOCK_END)
+```
+
+Перестановка своего борда — тот же блок с `TAG_CHANGE … ZONE_POSITION`
+внутри (part72:34990). В журнал действий редьюсера перестановки не пишутся
+(next-steps).
+
+**Третья копия помечена игрой.** Карта витрины, покупка которой соберёт
+тройку, несёт `BACON_TRIPLE_CANDIDATE=1` (part73:324900, `Entity=18299`,
+20:17:13.6750253). Отчёт тройку считает правилом советника
+(`tripleMergeOf`), тег — независимая сверка, в коде не читается.
+
+**Конец партии для слежения — строка канала-источника на верхнем уровне:**
+
+```
+part72:227998  … GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=NEXT_STEP value=FINAL_GAMEOVER
+part72:228011  … GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=FINAL_GAMEOVER
+part72:238346  … PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=STEP value=FINAL_GAMEOVER
+```
+
+Сигнал разбора — вторая; первая приходит раньше конца, третья — дубль
+канала показа, на 38 с позже.
+
 ## Шум, который надо игнорировать
 
 - `PowerProcessor.DoTaskListForCard() - unhandled BlockType PLAY for sourceEntity […]` —
@@ -1682,8 +1769,15 @@ Risen Rider `#412` → `#769`, Harmless Bonehead `#416` → `#771`), а пуст
 Планка заморозки ради «предложения дешевле покупки» считает это
 (`freezeRule`, docs/tavern.md, двадцать первая порция).
 
-Сущности заморозки — по-прежнему тег `FROZEN` на миньонах витрины; новые
-сущности следующего хода приходят с ним же, пока витрину не обновят.
+Сущности заморозки — по-прежнему тег `FROZEN` на миньонах витрины.
+**Поправка 25.09 (part65):** новые сущности следующего хода приходят
+с `FROZEN=1`, но той же меткой времени игра ставит им `FROZEN=0`
+(part65:14291, :14375 — `FROZEN value=1` на 1089/1091; :14720–14722 —
+`FROZEN value=0` на 1089/1091/1093, всё в 15:28:47.7819323). В точке
+решения следующего хода витрина поэтому НЕ заморожена по тегу — кроме
+заморозки силой (Варден, part60 и part66). «Морозил ли игрок» читать
+из журнала действий (`freeze`), а не из `shop.frozen`. Кто опирается
+на `frozen` в точке решения — в next-steps.
 
 ## Гипотезы — НЕ использовать в коде до подтверждения
 
