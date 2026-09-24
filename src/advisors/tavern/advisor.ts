@@ -10885,9 +10885,15 @@ export function spellRules(
     // платил «ОБНОВИТЬ за 1», держая в руке два бесплатных. Счёт тот же,
     // что у витрины; запас переживает ход (D244), поэтому розыгрыш
     // ничего не теряет, а план тратит его вместо золота.
+    //
+    // Но и НЕ получает ничего, когда на находки не на что купить (D289,
+    // part72, кадр 19:40: золото 0, совет «разыграть» верхним). Запас без
+    // золота ждёт хода с золотом — это правило D244 для обновления, и порог
+    // тот же (`cheapestShopPrice`). А карта в руке ждёт не хуже запаса.
     const refresh = firstMatch(rules.freeRefreshWords, deps.cards.info(spell.cardId)?.text ?? '');
     if (refresh !== null) {
       if (spell.cost > state.gold || state.rerollCost === null) return [];
+      if (state.gold - spell.cost < rules.cheapestShopPrice) return [];
       const count = Number(refresh);
       const perRefresh = refreshWorth(state, rules);
       if (!Number.isFinite(count)) return [];
