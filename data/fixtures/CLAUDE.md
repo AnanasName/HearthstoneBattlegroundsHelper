@@ -1441,3 +1441,40 @@ game.log:350232); `SCORE_VALUE_1=4` — порог, `SCORE_VALUE_2` — счёт
 307 действий) — в журнале, `j-0924-4`. Тесты —
 `test/advisors/battle/part73.test.ts` (дракончик) и
 `test/state/part73.test.ts` (монета).
+
+`part74` — 24.09, Тамсин `BG20_HERO_282` (скин «Tamsin, Shadow Mage»
+`BG20_HERO_282_SKIN_C4`), **2-е место**, 16 ходов таверны (23:29–00:03),
+78 МБ, билд 253216 (карт витрин за партию 115, незнакомых снапшоту 24.09
+ноль); сессия клиента 23:27:52, партия в ней одна,
+вырезана `fixture:passport --game=1`. Кадры игрока —
+`data/screenshots/23_38.png` (ход 13) и `23_41.png` (ход 15),
+воспроизводятся срезами `fixture:at part74 23:38:25` и `23:41:10` до
+знака: борд, витрина, рука, золото, тир и hp совпали.
+
+Сборка — нежить на уничтожении вне боя: Maw Caster `BG32_340` (клич
+«Destroy a friendly Undead to Discover an Undead», 7 розыгрышей), Dead
+Bellringer (17 активаций), Butchering (6), Eternal Knight золотой с хода
+21 (павших рыцарей 25 к концу), Nerubian Deathswarmer, прокрученный
+8 раз; надбавка нежити к атаке +1 → +133. Тринкеты Bleeding Heart
+`BG30_MagicItem_713` (ход 11, «After {1} friendly minions die, get
+a random Undead») и Maw Caster Portrait `BG32_MagicItem_205` (ход 17).
+
+Сила Fragrant Phylactery `BG20_HERO_282p` (сущность 227, game.log:1762)
+пассивная — ни цены, ни `TAG_SCRIPT_DATA_NUM_*`; 16 срабатываний, по
+одному на бой: энчант `BG20_HERO_282e2` («Impending Sacrifice») на
+наименьшего по атаке (первый — Joyous, game.log:6562), раздача статов —
+в блоке ХРИПА носителя, энчанты `BG20_HERO_282pe` (game.log:31992).
+
+Своя фактура — **тёмный дар Fresh Perspective**
+`BG36_MidGameEffect_000t52e` («Deathrattle: Gain 2 free Refreshes») на
+одной из двух одинаковых Scarlet Skull: сущность 4904, `HAS_DARK_GIFT=1`
+(game.log:74694), энчант 4905 (74667); рождён в блоке тёмного дара хода 7
+(game.log:26686–26988). Вторая Scarlet Skull (4911) — без дара, из
+Bleeding Heart (game.log:69597); её игрок и продал в 23:41:15
+(game.log:106731). Клич Maw Caster в 23:38:31 игрок отдал Nerubian
+Deathswarmer (game.log:69519), а не наименьшую Scarlet Skull с даром.
+
+Расхождения с советником (прибор `npm run review -- part74`, 16 точек,
+293 действия) — в журнале, `j-0925-1`. Тесты —
+`test/advisors/tavern/part74.test.ts` (оба кадра) и
+`test/advisors/tavern/sacrifice.test.ts` (правила на подставных картах).
