@@ -1644,7 +1644,7 @@ export function part73Game(): string {
 }
 
 /**
- * part74 — 24.09.2026, Тамсин `BG20_HERO_282` (скин «Tamsin, Shadow Mage»
+ * part74 —24.09.2026, Тамсин `BG20_HERO_282` (скин «Tamsin, Shadow Mage»
  * `BG20_HERO_282_SKIN_C4`), 2-е место, 16 ходов таверны (23:29–00:03),
  * билд 253216, сессия клиента 23:27:52 (одна партия). Кадры игрока —
  * `data/screenshots/23_38.png` (ход 13) и `23_41.png` (ход 15).
@@ -1662,4 +1662,21 @@ export function part73Game(): string {
  */
 export function part74Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part74', 'game.log'), 'utf8');
+}
+
+/**
+ * part75 — 25.09.2026, Изера `TB_BaconShop_HERO_53`, 5-е место, 11 ходов
+ * таверны (00:04–00:24), билд 253216, сессия клиента 00:03:37 — одна партия.
+ * Кадры игрока — `data/screenshots/part75/00_13.png` (ход 13),
+ * `00_15.png` (ход 15), `00_24.png` (ход 21).
+ *
+ * Сила Dream Portal `TB_BaconShop_HP_062` (сущность 121, game.log:888),
+ * пассивная: «The Tavern offers an extra Dragon whenever it is Refreshed».
+ * Борд к концу партии — драконы под золотым Kalecgos, Arcane Aspect
+ * («After you trigger a Battlecry, give your Dragons +{0}/+{1}»); игрок
+ * крутит Chromadrake'ов из Draconic Warden и Bronze Timewalker: разыграть
+ * ради клича и продать.
+ */
+export function part75Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part75', 'game.log'), 'utf8');
 }

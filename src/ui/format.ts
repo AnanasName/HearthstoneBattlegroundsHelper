@@ -144,7 +144,11 @@ export function recommendationLine(r: Recommendation, cards: CardIndex): string 
   // и без этих слов план противоречил бы списку на глазах у игрока — тот
   // самый класс подачи, из-за которого пропадал скрытый шаг усиления.
   const burning = r.blockedByHp === true ? ' — иначе золото сгорает' : '';
-  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${thenBuy}${victim}${magnet}${target}${pair}${goal}${hold}${pick}${discount}${burning}`;
+  // Что клич даст через плательщиков борда — там же и по тому же доводу
+  // (part75): «РАЗЫГРАТЬ Red Chromadrake, продав Draconic Warden» без этих
+  // слов читалось как продажа ни за что, хотя драконы росли перед боем.
+  const gain = r.battlecryGain === undefined ? '' : ` — клич: ${r.battlecryGain}`;
+  return `${ACTION_LABEL[r.action]}${what}${branch}${price}${thenBuy}${victim}${magnet}${target}${pair}${goal}${hold}${pick}${discount}${burning}${gain}`;
 }
 
 /** Вариант выбора тринкета одной строкой. */

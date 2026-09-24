@@ -379,6 +379,17 @@ export interface Recommendation {
    * одного и того же урока.
    */
   readonly holdReason?: string | null;
+  /**
+   * Что клич этой покупки или розыгрыша даст через плательщиков борда
+   * (D224) — короткой строкой: «Kalecgos, Arcane Aspect: +56 статов».
+   *
+   * Четвёртый случай того же урока (part75, кадр 00:24:20): «РАЗЫГРАТЬ Red
+   * Chromadrake, продав Draconic Warden» стояло верхним с 50.5 очками, 28
+   * из которых — золотой Kalecgos, растящий драконов перед боем, а на экране
+   * была только продажа. Игрок: «рекомендует продать карту, хотя я ничего
+   * за это не получу».
+   */
+  readonly battlecryGain?: string;
   /** Обоснование с числами — то, что читает человек. */
   readonly reason: string;
 }
@@ -2318,6 +2329,37 @@ function payoffNote(payoff: BattlecryPayoff, cards: CardIndex): string {
     .join(', ');
   const times = payoff.times > 1 ? ` ×${String(payoff.times)}` : '';
   return `${payoff.payers.join(', ')}: ${buffs}${times} за клич`;
+}
+
+/**
+ * Выгода клича через плательщиков (D224) — словами в причине покупки
+ * и розыгрыша, а не только прокрутки (part75, кадр 00:24:20).
+ *
+ * «РАЗЫГРАТЬ Red Chromadrake 6/4, продав Draconic Warden 14/8» стояло
+ * с 50.5 очками, из которых 28 — золотой Kalecgos, растящий драконов
+ * ПЕРЕД боем. Причина же говорила «своих по племени 6, борд полон, продать
+ * Draconic Warden (32.5)», и игрок прочёл совет как «продать, ничего
+ * не получив». Число то же, что в очках: `board` — борд, на котором
+ * посчитана ценность, то есть без проданной жертвы.
+ *
+ * Две строки: `note` — в причину, с прибавкой на тело; `gain` — в строку
+ * действия (`Recommendation.battlecryGain`), потому что причину оверлей
+ * не показывает.
+ */
+function battlecryGainOf(
+  value: ValueBreakdown,
+  board: readonly Minion[],
+  deps: TavernAdvisorDeps,
+  rules: TavernRules,
+): { readonly note: string; readonly gain: string } | null {
+  if (value.battlecryPayoff <= 0) return null;
+  const payoff = battlecryPayoffOf(board, deps.cards, rules);
+  if (payoff === null) return null;
+  const stats = `+${String(Math.round(value.battlecryPayoff / rules.value.perStatPoint))} статов`;
+  return {
+    note: `${payoffNote(payoff, deps.cards)} (${stats})`,
+    gain: `${payoff.payers.join(', ')}: ${stats}`,
+  };
 }
 
 /** Плательщик за клич или удвоитель клича — такого не продают ради места. */
@@ -4364,6 +4406,14 @@ export function buyRules(
       if (value.doubler > 0) notes.push('свой удвоитель на борде — триггер принесёт вдвое');
       if (value.doublerBuy > 0) notes.push(doublerBuyNote(value));
       if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
+      const soldForBuy = sellFirst;
+      const battlecryGain = battlecryGainOf(
+        value,
+        soldForBuy === null ? state.board : state.board.filter((x) => x.entityId !== soldForBuy.entityId),
+        deps,
+        rules,
+      );
+      if (battlecryGain !== null) notes.push(battlecryGain.note);
       if (value.playEngine > 0) notes.push(playEngineNote(value.playEngine));
       if (value.tavernEater > 0) notes.push(tavernEaterNote(value.tavernEater));
       if (value.battlecryEater > 0) notes.push(battlecryEaterNote(value.battlecryEater));
@@ -4460,6 +4510,7 @@ export function buyRules(
           // и только когда миньон встаёт на борд: клич срабатывает розыгрышем,
           // а на полном борде без продажи карта осталась бы в руке.
           ...(spellDiscount === null ? {} : { spellDiscountAfter: spellDiscount }),
+          ...(battlecryGain === null ? {} : { battlecryGain: battlecryGain.gain }),
           reason:
             `${name} ${String(minion.attack ?? '?')}/${String(minion.health ?? '?')} ` +
             `тир ${tier === null ? '?' : String(tier)}, ` +
@@ -4651,6 +4702,14 @@ export function playRules(
     const notes: string[] = [];
     if (doomed) notes.push('умрёт при розыгрыше в этот ход — но хрип/перерождение сработают');
     if (value.playPayoff > 0) notes.push(playPayoffNote(value.playPayoff, value.playPayers));
+    const soldForPlay = full && host === null ? (victim?.minion ?? null) : null;
+    const battlecryGain = battlecryGainOf(
+      value,
+      soldForPlay === null ? state.board : state.board.filter((x) => x.entityId !== soldForPlay.entityId),
+      deps,
+      rules,
+    );
+    if (battlecryGain !== null) notes.push(battlecryGain.note);
     if (coinGold > 0) notes.push(`сила героя: даст монетку (+${String(coinGold)} золота)`);
     if (value.completesTriple) notes.push('собирает тройку');
     else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
@@ -4723,6 +4782,7 @@ export function playRules(
         ...(sacrifice === null
           ? {}
           : { destroysTarget: { rebornCopy: sacrifice.destroyed.rebornCopy } }),
+        ...(battlecryGain === null ? {} : { battlecryGain: battlecryGain.gain }),
         // Цель ветви — в самой строке действия: «Choose One» у миньона игра
         // спрашивает сразу после розыгрыша, и «на кого» — половина вопроса
         // (part43). Цель считается на борде ПОСЛЕ розыгрыша: сам миньон уже
