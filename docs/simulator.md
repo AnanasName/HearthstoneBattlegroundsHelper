@@ -132,7 +132,7 @@ simulateBattle(
 | поле | статус |
 |---|---|
 | `cardId`, `hpLeft`, `tavernTier` | ✅ есть |
-| `heroPowers: BgsHeroPower[]` | ⚠️ `cardId` и `entityId` силы героя есть; счётчики использования нет |
+| `heroPowers: BgsHeroPower[]` | ⚠️ `cardId` и `entityId` силы героя есть; счётчики использования нет; `info` — только у Broodmother (размер дракончика из `TAG_SCRIPT_DATA_NUM_1`, D290), прочим ноль; у соперника — заглушка без сил |
 | `hand: BoardEntity[]` | ✅ передаётся с 17.08 (part21); поля те же, что у борда, но `maxHealth` обязателен |
 | `globalInfo` | ⚠️ семь полей из ~60, см. ниже |
 | `questEntities`, `questRewards` | ❌ нет |
