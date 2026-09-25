@@ -9,7 +9,7 @@ import {
 import { parseLogLine, splitLogLines } from '../parser/logLine.js';
 import { readPlayers } from '../state/players.js';
 import { createReducer } from '../state/reducer.js';
-import type { GameState } from '../state/types.js';
+import { isBattlegroundsGame, type GameState } from '../state/types.js';
 import { tavernTurnOf } from '../advisors/tavern/rules.js';
 import { DAY, logClockSeconds } from '../ui/logSlice.js';
 
@@ -89,11 +89,12 @@ export interface TurnClock {
   /** Выборов (`SendChoices`) за ход до `MAIN_END`. */
   readonly choices: number;
   /**
-   * Последнее проигрывание боя клиентом (`PowerTaskList`, блок `ATTACK`)
-   * в этом ходу. GameState проходит бой за секунду, а клиент показывает
-   * его ещё 10–13 с (part73: TURN=25 в 20:15:45.50, последняя атака
-   * показа в 20:16:29.67, первое нажатие в 20:16:36.95), и это время хода
-   * игроку недоступно: медиана — 22 % хода, p90 — 61 %.
+   * Конец показа прошлого боя клиентом: строка показа `TAG_CHANGE
+   * Entity=GameEntity tag=TURN value=<этот ход>` канала `PowerTaskList`,
+   * а без неё — начало последней атаки показа. GameState проходит бой
+   * за секунду, а клиент показывает его ещё десятки секунд (part73:
+   * TURN=25 в 20:15:45.50, показ доходит до хода в 20:16:34.91, первое
+   * нажатие в 20:16:36.95), и это время хода игроку недоступно.
    */
   readonly replayEndAt: number | null;
   /**
@@ -144,6 +145,13 @@ const MAIN_END = 'TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_END';
 const SEND_OPTION = 'GameState.SendOption';
 /** Показ боя клиентом — дубль канала-источника, в состояние не идёт. */
 const REPLAY_ATTACK = /^[A-Z] (\S+) PowerTaskList\.DebugPrintPower\(\) -\s+BLOCK_START BlockType=ATTACK /;
+/**
+ * Клиент доходит до хода таверны строкой показа `TAG_CHANGE Entity=GameEntity
+ * tag=TURN value=N` (part73:314276, 20:16:34.91 — через 5 с после начала
+ * последней атаки показа, 20:16:29.67); ни одно первое нажатие хода не
+ * приходит раньше неё (ревью, part68/70/72/73, 50 ходов).
+ */
+const REPLAY_TURN = /^[A-Z] (\S+) PowerTaskList\.DebugPrintPower\(\) -\s+TAG_CHANGE Entity=GameEntity tag=TURN value=(\d+)\s*$/;
 const MOVE_MINION =
   /^[A-Z] (\S+) GameState\.DebugPrintPower\(\) -\s+BLOCK_START BlockType=MOVE_MINION Entity=\[.*? id=(\d+) zone=/;
 /** Служебная строка, которую игра пишет перед обрывом хода, — не ответ на нажатие. */
@@ -160,6 +168,8 @@ interface OpenTurn {
   clicks: number;
   choices: number;
   replayEndAt: number | null;
+  /** Строка хода показа уже была — атака показа её не перебивает. */
+  replayTurnSeen: boolean;
   /** После последнего нажатия игра ещё ничего не ответила. */
   pendingClick: boolean;
   lastClickUnanswered: boolean;
@@ -181,8 +191,19 @@ function createClock(): (time: string) => number | null {
   };
 }
 
+/**
+ * Ход таверны Battlegrounds. Режим партии — обязательно: у рейтинговой
+ * партии фаза по умолчанию тоже «таверна» и герой есть, и лента разобрала
+ * бы ману как золото (ревью: сессия 24.09 01:35, одна партия GT_RANKED).
+ */
 function isTavernTurn(state: GameState): boolean {
-  return state.phase === 'tavern' && state.turn > 0 && state.turn % 2 === 1 && state.hero !== null;
+  return (
+    isBattlegroundsGame(state) &&
+    state.phase === 'tavern' &&
+    state.turn > 0 &&
+    state.turn % 2 === 1 &&
+    state.hero !== null
+  );
 }
 
 /** Накопитель ленты — по сырой строке за раз, один на оба пути чтения. */
@@ -256,6 +277,7 @@ function createTimelineCollector(text: string): {
             clicks: 0,
             choices: 0,
             replayEndAt: null,
+            replayTurnSeen: false,
             pendingClick: false,
             lastClickUnanswered: false,
             end: null,
@@ -318,10 +340,21 @@ function createTimelineCollector(text: string): {
     // Показ боя и перетаскивания — строки, которые событием не становятся:
     // первая идёт другим каналом, вторая — строка BLOCK_START.
     if (open !== null && open.mainEndAt === null) {
-      if (raw.includes('PowerTaskList.DebugPrintPower') && raw.includes('BlockType=ATTACK')) {
+      if (raw.includes('PowerTaskList.DebugPrintPower') && raw.includes('tag=TURN value=')) {
+        // Показ дошёл до этого хода — конец показа боя. Сильнее атаки:
+        // после неё показ ещё идёт 4–8 с.
+        const m = REPLAY_TURN.exec(raw);
+        const at = m?.[1] === undefined ? null : clock(m[1]);
+        if (at !== null && Number(m?.[2]) === open.turn && open.lastClickAt === null) {
+          open.replayEndAt = at;
+          open.replayTurnSeen = true;
+        }
+      } else if (raw.includes('PowerTaskList.DebugPrintPower') && raw.includes('BlockType=ATTACK')) {
+        // Запасной признак — начало последней атаки показа, если строки
+        // хода показа нет.
         const m = REPLAY_ATTACK.exec(raw);
         const at = m?.[1] === undefined ? null : clock(m[1]);
-        if (at !== null && open.lastClickAt === null) open.replayEndAt = at;
+        if (at !== null && open.lastClickAt === null && !open.replayTurnSeen) open.replayEndAt = at;
       } else if (raw.includes('BlockType=MOVE_MINION')) {
         const m = MOVE_MINION.exec(raw);
         if (m?.[1] !== undefined && m[2] !== undefined) {

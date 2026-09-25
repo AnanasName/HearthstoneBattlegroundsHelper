@@ -53,19 +53,33 @@ export const BOARD_LIMIT = 7;
  *
  *  - `BG20_HERO_201p` Spirit Swap (Vol'jin): «They gain each other's
  *    Attack until next turn» — жмётся каждый ход (D240);
- *  - `BG26_HERO_102p2` Minor Hymn (Inge): «Twice per turn, give a minion
- *    Health equal to your Tier» (D187).
+ *  - `BG26_HERO_102p2` Minor Hymn и `BG26_HERO_102p` Major Hymn (Inge):
+ *    «Twice per turn, give a minion Health (Attack) equal to your Tier» —
+ *    силы чередуются через ход (D187).
  */
-export const FREE_ADDING_POWERS: ReadonlySet<string> = new Set(['BG20_HERO_201p', 'BG26_HERO_102p2']);
+export const FREE_ADDING_POWERS: ReadonlySet<string> = new Set([
+  'BG20_HERO_201p',
+  'BG26_HERO_102p2',
+  'BG26_HERO_102p',
+]);
 
 /**
  * Чем карта награждает или переносит НЕистраченное золото — при ней остаток
  * не ошибка: Tavern Tipper (`BG23_352`), Timewarped Tipper (`BG34_Giant_604`),
  * аномалия Prudence of Amitus (`BG27_Anomaly_002`, «Unspent Gold carries over
- * to your next turn»), квест `BG24_Quest_351`. Читается текстом по борду,
- * руке, силе, аномалии и тринкетам — так ловятся и золотые версии.
+ * to your next turn»). Читается текстом по борду, руке, силе, аномалии
+ * и тринкетам — так ловятся и золотые версии.
  */
 const UNSPENT_GOLD_WORDS = /\bunspent\s+gold\b/i;
+
+/**
+ * Силы, чей квест мог быть на несгоревшее золото, а квест не читается
+ * (D270: квесты героя не читаются вовсе). Сир Денатрий `BG24_HERO_100p`
+ * выбирает из двух квестов, и один из них — `BG24_Quest_351` «End your
+ * turn with unspent Gold {0} times». Пока квест не читается, класс
+ * «сгоревшее золото» у такого героя молчит, с причиной.
+ */
+const UNREAD_GOLD_QUEST_POWERS: ReadonlySet<string> = new Set(['BG24_HERO_100p']);
 
 /**
  * Карта, чья ценность — лежать в руке («While this is in your hand…»,
@@ -139,6 +153,13 @@ interface FactContext {
   readonly cards: CardIndex;
   /** Журнал действий всей партии — из финального состояния. */
   readonly actions: readonly PlayerAction[];
+  /**
+   * Класс промолчал по причине, а не потому, что всё чисто: сила призывает
+   * в свободное место, карта платит за несгоревшее золото. Отчёт обязан
+   * это сказать — иначе пустой раздел читается как «сыграно чисто»
+   * (ревью: у Ониксии класс «Слот» выключался молча).
+   */
+  readonly silenced?: (what: string, reason: string) => void;
 }
 
 const skeleton = (turn: ReportTurn): Pick<Finding, 'turn' | 'tavernTurn' | 'nextBattle' | 'impact'> => ({
@@ -155,29 +176,44 @@ interface TripleWindow {
   readonly first: TurnMoment;
   readonly minion: Minion;
   readonly copies: number;
+  /** Имя золотого, которого соберёт покупка: у джокера — имя пары, а не своё. */
+  readonly goldenName: string;
+  /** Сколько золотых с этим именем было у игрока в момент окна. */
+  readonly goldensBefore: number;
   /** Сколько секунд витрина с этой картой простояла на экране при деньгах. */
   readonly exposure: number;
+}
+
+/** Золотые с этим именем на борде и в руке. */
+function goldensNamed(state: GameState, name: string, cards: CardIndex): number {
+  return [...state.board, ...state.hand].filter((m) => m.golden && nameOf(cards, m.cardId) === name).length;
 }
 
 /**
  * Окна хода: карта витрины по карману, покупка которой СОБИРАЕТ золотого.
  *
- * Сливает ли покупка тройку — решает правило советника `tripleMergeOf`:
- * оно знает двухкопийных героев и аномалии (Double Time, False Idols)
- * и джокеров тройки (Elemental of Surprise, D268). Свой подсчёт копий
- * тут разошёлся бы с ним молча.
+ * Сливает ли покупка тройку — решает правило советника `tripleMergeOf`
+ * (двухкопийные герои и аномалии, джокеры тройки, D268) ИЛИ сама игра:
+ * такую карту она метит `BACON_TRIPLE_CANDIDATE=1` (part73:324900). Тег
+ * нужен там, где правило советника число копий не знает: тринкет Designer
+ * Eyepatch («You only need 2 copies of a Pirate») советник намеренно
+ * не читает, а игра метит.
  *
  * Экспозиция — от действия, после которого витрина стала такой (момент
- * перед ним — предыдущий снимок), до последнего момента, где окно ещё
- * открыто, или до конца хода.
+ * перед ним — предыдущий снимок), но не раньше конца показа боя, — до
+ * последнего момента, где окно ещё открыто.
  */
 function tripleWindows(turn: ReportTurn, cards: CardIndex): TripleWindow[] {
   const moments: TurnMoment[] = [
     ...turn.moments,
     { time: turn.endTime, at: turn.clock.mainEndAt ?? 0, state: turn.end },
   ];
+  // Первый момент хода — служебный блок игры, снятый, пока показ боя ещё
+  // идёт: витрины игрок ещё не видит (ревью: part75, ход 7 — «простояла
+  // 32 с» вместо 19).
   const start = Math.max(turn.clock.startAt ?? 0, turn.clock.replayEndAt ?? 0);
-  const open = new Map<number, { first: TurnMoment; shownAt: number; lastAt: number; minion: Minion; copies: number }>();
+  type Open = { first: TurnMoment; shownAt: number; lastAt: number; minion: Minion; copies: number; goldenName: string; goldensBefore: number };
+  const open = new Map<number, Open>();
   moments.forEach((moment, i) => {
     const { state } = moment;
     if (state.altTavern || handCount(state) >= HAND_LIMIT) return;
@@ -189,47 +225,82 @@ function tripleWindows(turn: ReportTurn, cards: CardIndex): TripleWindow[] {
         continue;
       }
       const merge = tripleMergeOf(m, state, cards);
-      if (merge === null) continue;
-      const shownAt = i === 0 ? start : (moments[i - 1]?.at ?? start);
-      open.set(m.entityId, { first: moment, shownAt, lastAt: moment.at, minion: m, copies: merge.consumed.length });
+      const tagged = (m.tags['BACON_TRIPLE_CANDIDATE'] ?? 0) === 1;
+      if (merge === null && !tagged) continue;
+      const goldenName = nameOf(cards, merge?.golden.cardId ?? m.cardId);
+      const copies =
+        merge?.consumed.length ??
+        [...state.board, ...state.hand].filter((x) => !x.golden && x.cardId === m.cardId).length;
+      const shownAt = Math.max(start, i === 0 ? start : (moments[i - 1]?.at ?? start));
+      open.set(m.entityId, {
+        first: moment,
+        shownAt,
+        lastAt: moment.at,
+        minion: m,
+        copies,
+        goldenName,
+        goldensBefore: goldensNamed(state, goldenName, cards),
+      });
     }
   });
   return [...open.values()].map((w) => ({
     first: w.first,
     minion: w.minion,
     copies: w.copies,
+    goldenName: w.goldenName,
+    goldensBefore: w.goldensBefore,
     exposure: Math.max(0, w.lastAt - w.shownAt),
   }));
 }
 
 /**
- * Собрана ли тройка всё-таки: золотая копия этой карты появилась на борде
- * или в руке к концу этого или следующего хода, или куплена та же
- * сущность (с замороженной витрины). По журналу «buy той же карты» судить
+ * Собрана ли тройка всё-таки: куплена та же сущность (с замороженной
+ * витрины) или золотых С ИМЕНЕМ СОБИРАЕМОГО стало больше к концу этого
+ * или следующего хода, чем было в момент окна. Не «есть ли золотой»:
+ * старый золотой той же карты прятал бы настоящий пропуск, а у джокера
+ * своего имени у золотого нет. По журналу «buy той же карты» судить
  * нельзя — соседняя покупка другой копии совпадает случайно (разведка
  * по part73: мнимое «куплено на ходу 27»).
  */
 function tripleTaken(window: TripleWindow, turn: ReportTurn, next: ReportTurn | undefined, ctx: FactContext): boolean {
   if (ctx.actions.some((a) => a.type === 'buy' && a.entityId === window.minion.entityId)) return true;
-  const name = nameOf(ctx.cards, window.minion.cardId);
-  const golden = (s: GameState | undefined): boolean =>
-    s !== undefined && [...s.board, ...s.hand].some((m) => m.golden && nameOf(ctx.cards, m.cardId) === name);
-  return golden(turn.end) || golden(next?.end);
+  const grew = (s: GameState | undefined): boolean =>
+    s !== undefined && goldensNamed(s, window.goldenName, ctx.cards) > window.goldensBefore;
+  return grew(turn.end) || grew(next?.end);
+}
+
+/**
+ * Одно окно на карту за ход — самое показательное: с перетаскиванием,
+ * иначе с наибольшей экспозицией. Первое попавшееся окно маскировало бы
+ * длинное второе (ревью: мелькнувшие 1.5 с превращали эталон Goldrinn
+ * в предположение).
+ */
+function bestWindowPerCard(windows: readonly TripleWindow[], turn: ReportTurn): TripleWindow[] {
+  const byCard = new Map<string, TripleWindow>();
+  const dragged = (w: TripleWindow): boolean => turn.drags.some((d) => d.entityId === w.minion.entityId);
+  for (const w of windows) {
+    const prev = byCard.get(w.minion.cardId);
+    const better =
+      prev === undefined ||
+      (dragged(w) && !dragged(prev)) ||
+      (dragged(w) === dragged(prev) && w.exposure > prev.exposure);
+    if (better) byCard.set(w.minion.cardId, w);
+  }
+  return [...byCard.values()];
 }
 
 export function missedTriples(turns: readonly ReportTurn[], ctx: FactContext): Finding[] {
   const out: Finding[] = [];
   turns.forEach((turn, i) => {
     const next = turns[i + 1];
-    const seenCards = new Set<string>();
-    for (const w of tripleWindows(turn, ctx.cards)) {
-      if (seenCards.has(w.minion.cardId) || tripleTaken(w, turn, next, ctx)) continue;
-      seenCards.add(w.minion.cardId);
+    const untaken = tripleWindows(turn, ctx.cards).filter((w) => !tripleTaken(w, turn, next, ctx));
+    for (const w of bestWindowPerCard(untaken, turn)) {
       const name = nameOf(ctx.cards, w.minion.cardId);
       const { state } = w.first;
       const drag = turn.drags.find((d) => d.entityId === w.minion.entityId);
-      const froze = ctx.actions.some((a) => a.turn === turn.turn && a.type === 'freeze');
-      const frozenWithIt = froze && turn.end.shop.some((m) => m.entityId === w.minion.entityId);
+      // Заморожена ли витрина с этой картой к концу хода — по тегу на ней:
+      // «нажал заморозку» бывает снятым вторым нажатием (unfreeze).
+      const frozenWithIt = turn.end.shop.some((m) => m.entityId === w.minion.entityId && m.frozen);
 
       // Причины не считать это однозначной ошибкой — каждая из фактуры.
       const caveats: string[] = [];
@@ -290,7 +361,14 @@ export function burnedGold(turns: readonly ReportTurn[], ctx: FactContext, gameO
     const options = affordableShop(s);
     if (options.length === 0) continue;
     // Остаток, который что-то даёт или переносится, — не потеря.
-    if (standingTexts(s, ctx.cards).some((text) => UNSPENT_GOLD_WORDS.test(text))) continue;
+    if (standingTexts(s, ctx.cards).some((text) => UNSPENT_GOLD_WORDS.test(text))) {
+      ctx.silenced?.('Сгоревшее золото', 'карта или аномалия награждает за несгоревшее золото');
+      continue;
+    }
+    if (s.hero?.heroPowerCardId != null && UNREAD_GOLD_QUEST_POWERS.has(s.hero.heroPowerCardId)) {
+      ctx.silenced?.('Сгоревшее золото', 'у героя квест, который мог быть на несгоревшее золото, а квесты не читаются (D270)');
+      continue;
+    }
     const cheapest = Math.min(...options.map((m) => buyCostOf(m)));
     const details = [
       `в витрине по карману: ${options.map((m) => `${nameOf(ctx.cards, m.cardId)} за ${String(buyCostOf(m))}`).join(', ')}`,
@@ -381,9 +459,12 @@ export function idleSlots(turns: readonly ReportTurn[], ctx: FactContext): Findi
   for (const turn of turns) {
     const combat = turn.beforeCombat;
     if (combat === null || combat.board.length >= BOARD_LIMIT) continue;
-    if (standingTexts(turn.end, ctx.cards).some((text) => SUMMON_INTO_SPACE.test(text))) continue;
     const left = unplacedMinions(turn, ctx.cards);
     if (left.length === 0) continue;
+    if (standingTexts(turn.end, ctx.cards).some((text) => SUMMON_INTO_SPACE.test(text))) {
+      ctx.silenced?.('Миньон в руке при свободном месте', 'сила, тринкет или карта борда призывают в свободное место — пустой слот бывает стратегией');
+      continue;
+    }
     const names = left.map((m) => nameOf(ctx.cards, m.cardId)).join(', ');
     const free = BOARD_LIMIT - combat.board.length;
     const cut = cutByTimer(turn);
@@ -420,8 +501,12 @@ export const NOT_JUDGED: readonly { readonly what: string; readonly reason: stri
     reason: 'ценность заморозки — на следующем ходу, а приборы через смену хода не смотрят (D274)',
   },
   {
-    what: 'Карты, оставленные в руке, и запас бесплатных обновлений',
+    what: 'Заклинания и монеты в руке, запас бесплатных обновлений',
     reason: 'держать их бывает правильно: запас не сгорает (D244), монета и Leaf ждут покупки (D289, D291)',
+  },
+  {
+    what: 'Квесты героя',
+    reason: 'квест не читается вовсе (D270): что он требует, отчёт не знает',
   },
   {
     what: 'Выбор тринкета, раскопки, героя',

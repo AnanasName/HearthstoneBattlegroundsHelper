@@ -18,7 +18,15 @@ import {
   type ReportTurn,
 } from '../../src/report/timeline.js';
 import { createBreather } from '../breather.js';
-import { part48Game, part49Game, part67Game, part68Game, part72Game, part73Game } from '../fixtures.js';
+import {
+  part35Segment,
+  part48Game,
+  part49Game,
+  part67Game,
+  part68Game,
+  part72Game,
+  part73Game,
+} from '../fixtures.js';
 
 /**
  * Отчёт после партии: лента ходов и пункты, видные из лога без симулятора.
@@ -95,9 +103,16 @@ describe('отчёт после партии: лента и факты', () => {
 
     it('время хода — без показа прошлого боя (part73, ход 25)', () => {
       const t = turnOf(73, 25);
-      // TURN=25 в 20:15:45.50, показ боя до 20:16:29.67, MAIN_END 20:18:18.57.
-      expect(t.clock.replayEndAt).not.toBeNull();
-      expect(turnSeconds(t.clock)).toBeCloseTo(108.9, 0);
+      // TURN=25 в 20:15:45.50; показ доходит до хода строкой PowerTaskList
+      // `TAG_CHANGE Entity=GameEntity tag=TURN value=25` в 20:16:34.91
+      // (game.log:314276), а не на начале последней атаки (20:16:29.67);
+      // MAIN_END в 20:18:18.57.
+      expect(turnSeconds(t.clock)).toBeCloseTo(103.66, 1);
+    });
+
+    it('кусок после переподключения начинается не с хода 1 — отчёт пометит его неполным (part35, сегмент 2)', () => {
+      const tail = readTimeline(part35Segment(2));
+      expect(tail.turns[0]?.turn).toBeGreaterThan(1);
     });
 
     it('перетаскивание карты витрины без покупки видно (part73: Goldrinn id=18299)', () => {

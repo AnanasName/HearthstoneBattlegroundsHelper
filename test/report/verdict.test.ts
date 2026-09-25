@@ -31,6 +31,12 @@ describe('расстановка: почему не факт', () => {
     ]);
   });
 
+  it('карта борда или сила, усиливающая в конце хода соседей или край, снимает факт', () => {
+    expect(notFactReasons({ ...clean, positionalSources: ['Sulfuras'] })).toEqual([
+      'Sulfuras в конце хода усиливает соседей или край борда — порядок решает не только бой',
+    ]);
+  });
+
   it('билд поля — из снапшота, а без него — последний билд партий, из которых поле собрано', () => {
     const field = { builtAt: '2026-09-19', parts: [4], boards: [], damage: [] } as FieldSnapshot;
     expect(fieldBuild(field)).toBe(FIELD_BUILD_FALLBACK);

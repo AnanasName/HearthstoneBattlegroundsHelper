@@ -355,8 +355,35 @@ export function judgePositioning(
     fieldBuild: fieldBuild(deps.field),
     gameBuild: deps.gameBuild,
     paidSlotSources: paidSlots(state, deps.cards).map((p) => p.source),
+    positionalSources: positionalEndOfTurn(state, deps.cards),
   });
   return { kind: reasons.length === 0 ? 'fact' : 'assumption', bestBoard: best.board, actual, field, reasons };
+}
+
+const END_OF_TURN = /\bend of (?:your |each )?turn\b/i;
+/** «right- most» у Sulfuras пишется с пробелом после дефиса. */
+const POSITIONAL = /\b(?:adjacent|left-?\s*most|right-?\s*most)\b/i;
+
+/**
+ * Карты борда и сила героя, которые в конце хода усиливают СОСЕДЕЙ или КРАЙ:
+ * Sulfuras («give your left and right- most minions +8/+8»), Parasitic
+ * Fleshling, Timewarped Painter и Sensei, Young Murk-Eye — 24 карты пула.
+ * Борд перед боем уже несёт их прибавку для сыгранного порядка, а «лучший»
+ * порядок получает её на чужих местах, и место решает не только бой
+ * (ревью: part64, ход 9 с подставленной Sulfuras оставался фактом).
+ * Тринкеты того же рода — в `paidSlots`.
+ */
+export function positionalEndOfTurn(state: GameState, cards: CardIndex): string[] {
+  const ids = [...state.board.map((m) => m.cardId), state.hero?.heroPowerCardId ?? null].filter(
+    (id): id is string => id !== null,
+  );
+  const names = new Set<string>();
+  for (const id of ids) {
+    const info = cards.info(id);
+    const text = (info?.text ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+    if (END_OF_TURN.test(text) && POSITIONAL.test(text)) names.add(info?.name ?? id);
+  }
+  return [...names];
 }
 
 /**
@@ -380,6 +407,8 @@ export function notFactReasons(input: {
   readonly fieldBuild: number | null;
   readonly gameBuild: number | null;
   readonly paidSlotSources: readonly string[];
+  /** Карты борда и сила, в конце хода усиливающие соседей или край. */
+  readonly positionalSources?: readonly string[];
 }): string[] {
   const reasons: string[] = [];
   if (input.robust === null) {
@@ -395,6 +424,12 @@ export function notFactReasons(input: {
   if (input.paidSlotSources.length > 0) {
     reasons.push(
       `тринкет ${input.paidSlotSources.join(', ')} платит краю борда каждый ход — расстановка решает не только бой`,
+    );
+  }
+  const positional = input.positionalSources ?? [];
+  if (positional.length > 0) {
+    reasons.push(
+      `${positional.join(', ')} в конце хода усиливает соседей или край борда — порядок решает не только бой`,
     );
   }
   return reasons;

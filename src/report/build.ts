@@ -8,6 +8,7 @@ import type { GameState, Minion, PlayerActionType } from '../state/types.js';
 import { minionLabel, recommendationLine } from '../ui/format.js';
 import { judgePlan, planFinding } from './assumptions.js';
 import {
+  DEFAULT_RECOUNT_OPTIONS,
   fieldBuild,
   fieldFitsGame,
   judgePositioning,
@@ -145,7 +146,14 @@ export async function buildPostGameReport(
   );
 
   const final = timeline.final;
-  const ctx = { cards, actions: final.actions };
+  const skips = new Map<string, Skip>();
+  const ctx = {
+    cards,
+    actions: final.actions,
+    silenced: (what: string, reason: string) => {
+      addSkip(skips, what, reason);
+    },
+  };
   const recountDeps: RecountDeps = {
     simulator: deps.simulator,
     cards,
@@ -162,7 +170,6 @@ export async function buildPostGameReport(
       ? null
       : { episode, state: turn.beforeCombat, setup: nextBattleSetup(episode, turn.beforeCombat) };
   };
-  const skips = new Map<string, Skip>();
   const gameOver = final.phase === 'gameOver';
 
   // ── факты из лога ──
@@ -188,7 +195,8 @@ export async function buildPostGameReport(
           added === null
             ? {
                 ...withBattle,
-                impactNote: 'Борд был полон: покупка ушла бы в руку и ближайшего боя не изменила бы.',
+                impactNote:
+                  'Борд был полон: покупка ушла бы в руку и ближайшего боя не изменила бы. Потеря — около 1 золота, которое карта дала бы продажей на следующем ходу, или сама карта.',
               }
             : {
                 ...withBattle,
@@ -204,11 +212,13 @@ export async function buildPostGameReport(
       } else if (finding.klass === 'unplacedMinion') {
         const minion = unplacedMinions(turn, cards)[0];
         const recount = minion === undefined ? null : recountPlacement(next.setup, minion, recountDeps);
-        // Пункт утверждает «надо было поставить». Если пересчёт различимо
-        // говорит, что с ним бой шёл хуже, утверждать нечего: такой пункт
-        // спорил бы с собственным числом (part73, ход 23: Gatekeeper
-        // Amalgam на борде — 79 % → 69 %).
+        // Предположение «надо было поставить» пересчёт против соперника,
+        // различимо говорящий «с ним хуже», снимает: спорить с собственным
+        // числом ему нечем (part73, ход 23: Gatekeeper Amalgam — 79 % → 69 %).
+        // Факт (ход оборван таймером) так не снимается: он решён тем, что
+        // было в момент хода, а соперник — знание задним числом (D303).
         if (
+          finding.kind === 'assumption' &&
           recount !== null &&
           recount.distinguishable &&
           recount.alternative.scorePct < recount.played.scorePct
@@ -245,8 +255,11 @@ export async function buildPostGameReport(
         field === null
           ? 'поля бордов на этом ходу мало — проверки «при любом сопернике» нет'
           : `${field.against}: ${field.played.scorePct.toFixed(1)} % → ${field.alternative.scorePct.toFixed(1)} % (${fieldGain >= 0 ? '+' : '−'}${Math.abs(fieldGain).toFixed(1)} п.п.)${field.distinguishable ? '' : ', в пределах шума'}`;
-      // Факт решён полем; фактический соперник — только графа влияния.
-      const fieldBacked = field !== null && field.distinguishable && fieldGain > 0;
+      // Заголовок «сильнее против поля» — только при том же пороге, что
+      // у факта; иначе карточка попала в отчёт по фактическому сопернику
+      // и обязана так и сказать (ревью: part57, ход 9 — +1.5 п.п. по полю).
+      const fieldBacked =
+        field !== null && field.distinguishable && fieldGain >= DEFAULT_RECOUNT_OPTIONS.factFieldGapPp;
       positionFindings.push({
         kind: judgement.kind,
         klass: 'positioning',
@@ -306,7 +319,17 @@ export async function buildPostGameReport(
       } else {
         planTally.planStronger += 1;
         const next = setupOf(turn);
-        planFindings.push({ ...planFinding(turn, judgement, boardLine), nextBattle: battleFact(next?.episode) });
+        const finding = planFinding(turn, judgement, boardLine);
+        planFindings.push({
+          ...finding,
+          nextBattle: battleFact(next?.episode),
+          caveats: fieldFitsGame(recountDeps)
+            ? finding.caveats
+            : [
+                ...finding.caveats,
+                `Поле бордов собрано на билде ${String(fieldBuild(deps.field))}, а партия — на ${String(final.buildNumber)}: пул карт другой.`,
+              ],
+        });
       }
     }
   }
@@ -349,7 +372,12 @@ export async function buildPostGameReport(
       startedAt: timeline.firstTime?.slice(0, 8) ?? null,
       endedAt: timeline.lastTime?.slice(0, 8) ?? null,
       tavernTurns: timeline.turns.length,
-      partial: !gameOver || !text.includes('CREATE_GAME'),
+      // Дамп переподключения тоже начинается с CREATE_GAME, поэтому
+      // «неполная» — не по этой строке, а по первому ходу ленты, как
+      // в импорте датасета (dataset/import.ts): партия, начатая не с хода 1,
+      // — кусок после переподключения (ревью: part35 — 2 хода из 13).
+      partial: !gameOver || (timeline.turns[0]?.turn ?? 1) !== 1,
+      firstTavernTurn: timeline.turns[0]?.tavernTurn ?? null,
     },
     analysis: {
       appVersion: options.appVersion,
@@ -357,6 +385,7 @@ export async function buildPostGameReport(
       fieldBuiltAt: deps.field?.builtAt ?? null,
       fieldBuild: fieldBuild(deps.field),
       fieldFitsGame: fieldFitsGame(recountDeps),
+      sections: { positioning: options.positioning !== false, plan: options.plan !== false },
     },
     turns,
     facts,

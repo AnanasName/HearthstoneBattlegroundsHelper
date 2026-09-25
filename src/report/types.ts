@@ -164,6 +164,8 @@ export interface PostGameReport {
      * шва дал бы ложные «сгорело» и «не взята» — поэтому пометка.
      */
     readonly partial: boolean;
+    /** С какого хода таверны начинается разбор (у куска после переподключения — не с 1). */
+    readonly firstTavernTurn: number | null;
   };
   /**
    * Чем посчитан отчёт — версия анализа, а не только формы: советник,
@@ -177,6 +179,11 @@ export interface PostGameReport {
     readonly fieldBuild: number | null;
     /** Поле собрано на той же игре, что партия: иначе расстановка фактом не бывает. */
     readonly fieldFitsGame: boolean;
+    /**
+     * Какие дорогие разделы считались. Быстрый разбор (`--fast`) их
+     * пропускает, и отчёт обязан это сказать, а не писать «предположений нет».
+     */
+    readonly sections: { readonly positioning: boolean; readonly plan: boolean };
   };
   readonly turns: readonly TurnRow[];
   readonly facts: readonly Finding[];

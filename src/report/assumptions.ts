@@ -120,6 +120,11 @@ export function judgePlan(
   if (plan.truncated || plan.steps.some((s) => s.opaque)) {
     return { kind: 'skip', reason: 'план с обновлением, силой или заклинанием — итогового борда у него нет' };
   }
+  // Магнит в итоговом борде плана статов носителю не отдаёт — сравнение
+  // вышло бы в пользу игрока (ревью: part74, ход таверны 6).
+  if (plan.steps.some((s) => s.recommendation.minion !== null && cards.info(s.recommendation.minion.cardId)?.magnetic === true)) {
+    return { kind: 'skip', reason: 'в плане магнит — статы носителя итоговый борд плана не несёт' };
+  }
   const planState = last.stateAfter;
   const player = turn.end;
   // Подъём у любой стороны — размен статов на темп, а темп ближайший бой

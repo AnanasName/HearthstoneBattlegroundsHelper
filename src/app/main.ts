@@ -95,6 +95,13 @@ let reportBusy = false;
 /** Конец партии, пришедший, пока шёл прошлый разбор, — разобрать следом. */
 let reportQueued: string | null = null;
 let reportWatch = { session: '', watch: createGameOverWatch() };
+/**
+ * Почему последний разбор не собрался. Своей строкой, а не в `setupText`:
+ * там предупреждение о настройке игры, без которого игрок теряет логи,
+ * и ошибка разбора не должна его затирать (ревью). Сбрасывается первым
+ * удачным разбором.
+ */
+let reportError: string | null = null;
 
 function latestReport(): LastReport | null {
   const newest = readReports(REPORTS_DIR)[0];
@@ -127,12 +134,14 @@ function scheduleReport(partPath: string): void {
       .then((result) => {
         if (result.kind === 'written') {
           lastReport = { htmlPath: result.written.htmlPath, facts: result.facts };
+          reportError = null;
         } else if (result.kind === 'exists') {
           lastReport ??= latestReport();
+          reportError = null;
         }
       })
       .catch((error: unknown) => {
-        setupText = `разбор партии не собран: ${error instanceof Error ? error.message : String(error)}`;
+        reportError = `разбор партии не собран: ${error instanceof Error ? error.message : String(error)}`;
       })
       .finally(() => {
         reportBusy = false;
@@ -162,6 +171,7 @@ function refreshTray(): void {
     `логи: ${logsRoot}`,
     `в архиве сессий: ${String(archived)}` + (live === null || live === undefined ? '' : `, слежу за ${live.session}`),
     ...(setupText === null ? [] : [setupText]),
+    ...(reportError === null ? [] : [reportError]),
   ];
   tray.setToolTip(lines.join('\n'));
   tray.setContextMenu(
@@ -169,6 +179,7 @@ function refreshTray(): void {
       { label: lines[0] ?? '', enabled: false },
       { label: lines[2] ?? '', enabled: false },
       ...(setupText === null ? [] : [{ label: setupText, enabled: false }]),
+      ...(reportError === null ? [] : [{ label: reportError, enabled: false }]),
       { type: 'separator' },
       {
         label: 'Оверлей с советами',

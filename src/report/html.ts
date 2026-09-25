@@ -138,7 +138,7 @@ function impactHtml(impact: BattleRecount): string {
   const d = impact.alternative.scorePct - impact.played.scorePct;
   const dmg = impact.played.expectedDamage - impact.alternative.expectedDamage;
   const noise = impact.distinguishable ? '' : ' <span class="noise">(разница в пределах шума)</span>';
-  return `<div class="impact">В бою после хода ${esc(impact.against)}: победа ${pct(impact.played.scorePct)} → ${pct(impact.alternative.scorePct)} (${signed(d)} п.п.), ожидаемый урон по герою ${impact.played.expectedDamage.toFixed(1)} → ${impact.alternative.expectedDamage.toFixed(1)} hp (${signed(-dmg)})${noise}${impact.singleOpponent ? ' <span class="noise">— урон против одного соперника: оценка, не калиброванное число (D283)</span>' : ''}</div>`;
+  return `<div class="impact">В бою после хода ${esc(impact.against)}: победы с половиной ничьих ${pct(impact.played.scorePct)} → ${pct(impact.alternative.scorePct)} (${signed(d)} п.п.), ожидаемый урон по герою ${impact.played.expectedDamage.toFixed(1)} → ${impact.alternative.expectedDamage.toFixed(1)} hp (${signed(-dmg)})${noise}${impact.singleOpponent ? ' <span class="noise">— урон против одного соперника: оценка, не калиброванное число (D283)</span>' : ''}</div>`;
 }
 
 function findingHtml(f: Finding): string {
@@ -237,10 +237,15 @@ function planTallyHtml(report: PostGameReport): string {
 function headerNotes(report: PostGameReport): string {
   const notes: string[] = [];
   if (report.game.partial) {
-    notes.push('Партия неполная (переподключение или не доиграна): ход на шве может дать ложный пункт.');
+    const from = report.game.firstTavernTurn;
+    notes.push(
+      from !== null && from > 1
+        ? `Партия неполная: разбор начинается с хода таверны ${String(from)} (переподключение) — то, что было раньше, в отчёт не вошло.`
+        : 'Партия неполная (переподключение или не доиграна): ход на шве может дать ложный пункт.',
+    );
   }
   const a = report.analysis;
-  if (a.fieldBuiltAt !== null && !a.fieldFitsGame) {
+  if (a.fieldBuiltAt !== null && !a.fieldFitsGame && (a.sections.positioning || a.sections.plan)) {
     notes.push(
       `Поле бордов собрано ${a.fieldBuiltAt.slice(0, 10)} на билде ${String(a.fieldBuild)}, а партия — на ${String(report.game.buildNumber)}: пул карт другой, поэтому расстановка здесь бывает только предположением.`,
     );
@@ -274,6 +279,14 @@ export function renderReportHtml(report: PostGameReport): string {
     report.facts.length === 0
       ? '<p class="empty">Однозначных ошибок прибор не нашёл. Это не «сыграно идеально»: чего он не судит — ниже.</p>'
       : report.facts.map(findingHtml).join('\n');
+  const { sections } = report.analysis;
+  const notComputed = [!sections.positioning ? 'расстановка' : null, !sections.plan ? 'план советника' : null].filter(
+    (x): x is string => x !== null,
+  );
+  const fastNote =
+    notComputed.length === 0
+      ? ''
+      : `<p class="sub warn">Быстрый разбор: ${esc(notComputed.join(' и '))} не считались — их пунктов здесь нет не потому, что всё чисто.</p>`;
   const assumptions =
     report.assumptions.length === 0
       ? '<p class="empty">Предположений нет.</p>'
@@ -300,6 +313,7 @@ ${facts}
 
 <h2>Предположения</h2>
 <p class="sub">Сравнение с планом советника и с бордом соперника, которого в таверне видно не было. Это числа о ближайшем бое, а не приговор: темп, экономику и карты в руке они не видят.</p>
+${fastNote}
 ${planTallyHtml(report)}
 ${assumptions}
 
@@ -311,7 +325,7 @@ ${timelineHtml(report)}
 <ul class="details">${notJudged}</ul>
 ${skipped}
 
-<footer>Собрано ${esc(localTime(report.generatedAt))}${report.analysis.appVersion === null ? '' : ` · версия ${esc(report.analysis.appVersion)}`}${report.analysis.simulatorVersion === null ? '' : ` · симулятор ${esc(report.analysis.simulatorVersion)}`} · ${(report.elapsedMs / 1000).toFixed(0)} с. Советы и пороги — текущей версии приложения: после её обновления отчёт по той же партии может измениться.</footer>
+<footer>Собрано ${esc(localTime(report.generatedAt))}${report.analysis.appVersion === null ? '' : ` · версия ${esc(report.analysis.appVersion)}`}${report.analysis.simulatorVersion === null ? '' : ` · симулятор ${esc(report.analysis.simulatorVersion)}`} · ${(report.elapsedMs / 1000).toFixed(0)} с. Проценты боя — победы плюс половина ничьих. Советы и пороги — текущей версии приложения: после её обновления отчёт по той же партии может измениться.</footer>
 `;
   return page(reportTitle(report), body);
 }
@@ -323,10 +337,13 @@ export interface IndexEntry {
 }
 
 export function renderIndexHtml(entries: readonly IndexEntry[]): string {
-  const games = entries.length;
+  // Сводка «в скольких партиях повторяется» — только по полным партиям:
+  // кусок после переподключения посчитал бы одну партию дважды.
+  const whole = entries.filter((e) => !e.report.game.partial);
+  const games = whole.length;
   const perClass = CLASS_ORDER.map((k) => {
-    const withIt = entries.filter((e) => e.report.facts.some((f) => f.klass === k)).length;
-    const total = entries.reduce((sum, e) => sum + e.report.facts.filter((f) => f.klass === k).length, 0);
+    const withIt = whole.filter((e) => e.report.facts.some((f) => f.klass === k)).length;
+    const total = whole.reduce((sum, e) => sum + e.report.facts.filter((f) => f.klass === k).length, 0);
     return { k, withIt, total };
   }).filter((c) => c.total > 0);
 
@@ -344,7 +361,12 @@ export function renderIndexHtml(entries: readonly IndexEntry[]): string {
     .map((e) => {
       const g = e.report.game;
       const when = [g.date, g.startedAt].filter((x): x is string => x !== null).join(' ');
-      return `<tr><td>${esc(when)}</td><td><a href="${esc(encodeURI(e.file))}">${esc(g.heroName ?? '—')}</a></td>
+      const marks = [
+        g.partial ? 'неполная' : null,
+        e.report.analysis.sections.positioning && e.report.analysis.sections.plan ? null : 'быстрый разбор',
+      ].filter((x): x is string => x !== null);
+      const mark = marks.length === 0 ? '' : ` <span class="noise">(${esc(marks.join(', '))})</span>`;
+      return `<tr><td>${esc(when)}</td><td><a href="${esc(encodeURI(e.file))}">${esc(g.heroName ?? '—')}</a>${mark}</td>
 <td class="num">${g.place === null ? '—' : String(g.place)}</td>
 <td class="num">${String(e.report.facts.length)}</td><td>${esc(countByClass(e.report.facts)) || '—'}</td>
 <td class="num">${String(e.report.assumptions.length)}</td><td class="num">${String(e.report.turns.filter((t) => t.cutByTimer).length)}</td><td>${esc(e.report.analysis.appVersion ?? '—')}</td></tr>`;
@@ -353,7 +375,7 @@ export function renderIndexHtml(entries: readonly IndexEntry[]): string {
 
   const body = `
 <h1>Разборы партий</h1>
-<p class="sub">Партий ${String(games)}. Сверху — какие однозначные ошибки повторяются.</p>
+<p class="sub">Партий ${String(games)}${entries.length > games ? ` и неполных ${String(entries.length - games)} (в сводку не входят)` : ''}. Сверху — какие однозначные ошибки повторяются.</p>
 ${summary}
 <h2>Партии</h2>
 <div class="scroll"><table>

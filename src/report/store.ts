@@ -28,7 +28,12 @@ export interface WrittenReport {
 
 export function writeReport(report: PostGameReport, dir: string): WrittenReport {
   mkdirSync(dir, { recursive: true });
-  const base = reportFileBase(report.source);
+  // Быстрый разбор (без расстановки и плана) пишется рядом, а не поверх:
+  // иначе он молча заменял бы полный разбор той же партии из трея,
+  // и догон приложения принимал бы его за готовый (ревью).
+  const { sections } = report.analysis;
+  const fast = !sections.positioning || !sections.plan;
+  const base = `${reportFileBase(report.source)}${fast ? '_fast' : ''}`;
   const htmlPath = join(dir, `${base}.html`);
   const jsonPath = join(dir, `${base}.json`);
   writeFileSync(htmlPath, renderReportHtml(report), 'utf8');
@@ -36,7 +41,30 @@ export function writeReport(report: PostGameReport, dir: string): WrittenReport 
   return { htmlPath, jsonPath, indexPath: rebuildIndex(dir) };
 }
 
-/** Отчёты каталога: только своей схемы — чужие и битые пропускаются молча. */
+/**
+ * Годен ли разобранный JSON для индекса: номер схемы и поля, которые
+ * индекс читает. Одного номера мало — пока схема не выпущена, форма
+ * менялась под тем же номером, и старый файл ронял пересборку индекса
+ * на `analysis.appVersion` (25.09, собственный прогон).
+ */
+function isReport(x: unknown): x is PostGameReport {
+  if (typeof x !== 'object' || x === null) return false;
+  const r = x as Partial<PostGameReport>;
+  return (
+    r.schema === REPORT_SCHEMA &&
+    typeof r.analysis === 'object' &&
+    r.analysis !== null &&
+    typeof r.game === 'object' &&
+    r.game !== null &&
+    typeof r.source === 'object' &&
+    r.source !== null &&
+    Array.isArray(r.turns) &&
+    Array.isArray(r.facts) &&
+    Array.isArray(r.assumptions)
+  );
+}
+
+/** Отчёты каталога: только годной формы — чужие, старые и битые пропускаются молча. */
 export function readReports(dir: string): IndexEntry[] {
   const entries: IndexEntry[] = [];
   let files: string[];
@@ -47,8 +75,8 @@ export function readReports(dir: string): IndexEntry[] {
   }
   for (const file of files) {
     try {
-      const report = JSON.parse(readFileSync(join(dir, file), 'utf8')) as PostGameReport;
-      if (report.schema !== REPORT_SCHEMA) continue;
+      const report: unknown = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+      if (!isReport(report)) continue;
       entries.push({ file: file.replace(/\.json$/, '.html'), report });
     } catch {
       continue;

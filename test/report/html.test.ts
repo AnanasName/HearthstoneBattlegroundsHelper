@@ -61,6 +61,7 @@ const report = (over: Partial<PostGameReport> = {}): PostGameReport => ({
     endedAt: '21:46:23',
     tavernTurns: 2,
     partial: false,
+    firstTavernTurn: 9,
   },
   analysis: {
     appVersion: '0.1.1',
@@ -68,6 +69,7 @@ const report = (over: Partial<PostGameReport> = {}): PostGameReport => ({
     fieldBuiltAt: '2026-09-19T10:00:00.000Z',
     fieldBuild: 251952,
     fieldFitsGame: true,
+    sections: { positioning: true, plan: true },
   },
   turns: [
     row(17),
@@ -93,7 +95,7 @@ describe('отчёт после партии: HTML', () => {
   it('факт несёт ход таверны, часы, цену в бою и то, что было на деле', () => {
     const html = renderReportHtml(report());
     expect(html).toContain('ход таверны 10 · 21:34:22');
-    expect(html).toContain('победа 40.0 % → 55.0 % (+15.0 п.п.)');
+    expect(html).toContain('победы с половиной ничьих 40.0 % → 55.0 % (+15.0 п.п.)');
     expect(html).toContain('ожидаемый урон по герою 5.2 → 3.9 hp (−1.3)');
     expect(html).toContain('На деле бой после хода ничья.');
   });
@@ -117,6 +119,25 @@ describe('отчёт после партии: HTML', () => {
     expect(renderReportHtml(report())).toContain(
       'совпал — 2, разница в пределах шума — 1, ваш стол сильнее — 2, план сильнее — 1 (ниже)',
     );
+  });
+
+  it('быстрый разбор говорит, что расстановку и план не считали, а не «предположений нет» молча', () => {
+    const base = report();
+    const html = renderReportHtml({ ...base, analysis: { ...base.analysis, sections: { positioning: false, plan: false } } });
+    expect(html).toContain('Быстрый разбор: расстановка и план советника не считались');
+    expect(renderReportHtml(base)).not.toContain('Быстрый разбор');
+  });
+
+  it('кусок после переподключения назван: с какого хода начат разбор', () => {
+    const base = report();
+    const html = renderReportHtml({ ...base, game: { ...base.game, partial: true, firstTavernTurn: 12 } });
+    expect(html).toContain('разбор начинается с хода таверны 12');
+  });
+
+  it('проценты боя названы честно: победы с половиной ничьих', () => {
+    const html = renderReportHtml(report());
+    expect(html).toContain('победы с половиной ничьих 40.0 %');
+    expect(html).toContain('Проценты боя — победы плюс половина ничьих');
   });
 
   it('урон против одного соперника подписан как оценка (D283)', () => {
@@ -149,6 +170,17 @@ describe('отчёт после партии: HTML', () => {
     expect(html).toContain('Золото: <b>3</b> в 2 из 3 партий');
     expect(html).toContain('href="part45.html"');
   });
+
+  it('неполная партия в сводку повторов не входит и помечена в таблице', () => {
+    const base = report();
+    const html = renderIndexHtml([
+      { file: 'a.html', report: base },
+      { file: 'b.html', report: { ...base, game: { ...base.game, partial: true } } },
+    ]);
+    expect(html).toContain('Партий 1 и неполных 1 (в сводку не входят)');
+    expect(html).toContain('Золото: <b>1</b> в 1 из 1 партий');
+    expect(html).toContain('(неполная)');
+  });
 });
 
 describe('отчёт после партии: файлы', () => {
@@ -168,10 +200,21 @@ describe('отчёт после партии: файлы', () => {
   it('запись кладёт HTML и JSON и пересобирает индекс; чужая схема в индекс не идёт', () => {
     dir = mkdtempSync(join(tmpdir(), 'hsbg-report-'));
     writeFileSync(join(dir, 'old.json'), JSON.stringify({ schema: 0 }), 'utf8');
+    // Тот же номер схемы, но без полей, которые индекс читает, — не ронять.
+    writeFileSync(join(dir, 'stale.json'), JSON.stringify({ ...report(), analysis: undefined }), 'utf8');
     writeFileSync(join(dir, 'broken.json'), '{', 'utf8');
     const written = writeReport(report(), dir);
     expect(readFileSync(written.htmlPath, 'utf8')).toContain('Разбор партии: Vol&#39;jin, 2 место');
     expect(readReports(dir).map((e) => e.file)).toEqual(['part68.html']);
     expect(readFileSync(written.indexPath, 'utf8')).toContain('Партий 1.');
+  });
+
+  it('быстрый разбор пишется рядом с полным, а не поверх него', () => {
+    dir = mkdtempSync(join(tmpdir(), 'hsbg-report-'));
+    const base = report();
+    const full = writeReport(base, dir);
+    const fast = writeReport({ ...base, analysis: { ...base.analysis, sections: { positioning: false, plan: false } } }, dir);
+    expect(full.htmlPath.endsWith('part68.html')).toBe(true);
+    expect(fast.htmlPath.endsWith('part68_fast.html')).toBe(true);
   });
 });
