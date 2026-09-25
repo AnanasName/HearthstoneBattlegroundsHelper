@@ -67,7 +67,7 @@ const report = (over: Partial<PostGameReport> = {}): PostGameReport => ({
     appVersion: '0.1.1',
     simulatorVersion: '1.1.757',
     fieldBuiltAt: '2026-09-19T10:00:00.000Z',
-    fieldBuild: 251952,
+    fieldPool: null,
     fieldFitsGame: true,
     sections: { positioning: true, plan: true },
   },
@@ -144,15 +144,15 @@ describe('отчёт после партии: HTML', () => {
     expect(renderReportHtml(report())).toContain('урон против одного соперника: оценка');
   });
 
-  it('поле бордов чужого билда названо в шапке: расстановка тогда только предположение', () => {
+  it('поле бордов другого пула названо в шапке: расстановка тогда только предположение (D304)', () => {
     const base = report();
+    const reason = 'партия сыграна на другом пуле карт: в её витрине были Molten Rock — их в нынешнем пуле нет';
     const html = renderReportHtml({
       ...base,
-      game: { ...base.game, buildNumber: 253216 },
-      analysis: { ...base.analysis, fieldFitsGame: false },
+      analysis: { ...base.analysis, fieldPool: reason, fieldFitsGame: false },
     });
-    expect(html).toContain('Поле бордов собрано 2026-09-19 на билде 251952, а партия — на 253216');
-    expect(renderReportHtml(base)).not.toContain('Поле бордов собрано');
+    expect(html).toContain(`Поле бордов не о той же игре: ${reason} — поэтому расстановка`);
+    expect(renderReportHtml(base)).not.toContain('Поле бордов не о той же игре');
   });
 
   it('лента отмечает оборванный ход и значок пункта', () => {

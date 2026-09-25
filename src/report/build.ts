@@ -3,14 +3,15 @@ import type { BattleSimulator } from '../advisors/battle/simulator.js';
 import type { FieldSnapshot } from '../advisors/strength/boards.js';
 import { readTavernTurns, readTavernTurnsAsync } from '../advisors/tavern/turns.js';
 import type { CardIndex } from '../data/cards.js';
+import { offPoolShopCards } from '../data/pool.js';
 import type { Yielder } from '../parser/blocks.js';
 import type { GameState, Minion, PlayerActionType } from '../state/types.js';
 import { minionLabel, recommendationLine } from '../ui/format.js';
 import { judgePlan, planFinding } from './assumptions.js';
 import {
   DEFAULT_RECOUNT_OPTIONS,
-  fieldBuild,
   fieldFitsGame,
+  fieldPoolReason,
   judgePositioning,
   nextBattleSetup,
   recountAddition,
@@ -159,8 +160,9 @@ export async function buildPostGameReport(
     cards,
     field: deps.field,
     excludePart: options.excludePart,
-    gameBuild: final.buildNumber,
+    gameOffPool: offPoolShopCards(final.seenShopPoolCardIds, cards),
   };
+  const poolReason = fieldPoolReason(recountDeps);
   const turnByNumber = new Map(timeline.turns.map((t) => [t.turn, t] as const));
   const boardLine = (board: readonly Minion[]): string =>
     board.length === 0 ? '—' : board.map((m) => minionLabel(m, cards)).join(' | ');
@@ -323,12 +325,8 @@ export async function buildPostGameReport(
         planFindings.push({
           ...finding,
           nextBattle: battleFact(next?.episode),
-          caveats: fieldFitsGame(recountDeps)
-            ? finding.caveats
-            : [
-                ...finding.caveats,
-                `Поле бордов собрано на билде ${String(fieldBuild(deps.field))}, а партия — на ${String(final.buildNumber)}: пул карт другой.`,
-              ],
+          caveats:
+            poolReason === null ? finding.caveats : [...finding.caveats, `Поле бордов не о той же игре: ${poolReason}.`],
         });
       }
     }
@@ -383,7 +381,7 @@ export async function buildPostGameReport(
       appVersion: options.appVersion,
       simulatorVersion: options.simulatorVersion ?? null,
       fieldBuiltAt: deps.field?.builtAt ?? null,
-      fieldBuild: fieldBuild(deps.field),
+      fieldPool: poolReason,
       fieldFitsGame: fieldFitsGame(recountDeps),
       sections: { positioning: options.positioning !== false, plan: options.plan !== false },
     },

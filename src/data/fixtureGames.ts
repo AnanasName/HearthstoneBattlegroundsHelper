@@ -123,14 +123,38 @@
  * Поле бордов пересобрано тем же шагом: с этого дня `readBattleEpisodes`
  * отдаёт и последний бой выбывшего игрока.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
-/** Номера партий текущего билда, по возрастанию. */
+/**
+ * Номера партий текущего билда, по возрастанию.
+ *
+ * С 22.09.2026 «текущий билд» здесь — не текущий ПУЛ: part4–part55 сыграны
+ * до ротации пула (part67 | part68, `src/data/pool.ts`). Список остаётся
+ * списком батареи замеров ради сравнимости чисел, а поле бордов отбирается
+ * по пулу — правилом, а не этим списком (`fixturePartsAll`, D304).
+ */
 export const CURRENT_BUILD_PARTS: readonly number[] = [
   4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
   29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
   53, 54, 55,
 ];
+
+/**
+ * Все фикстуры с логом, начиная с part4, по возрастанию.
+ *
+ * part1–part3 сыграны на прежних правилах и остаются проверкой разбора
+ * (шапка модуля). Остальные отбираются читателем по своему правилу:
+ * поле бордов — по пулу витрины (`src/advisors/strength/fit.ts`).
+ */
+export function fixturePartsAll(): number[] {
+  if (!existsSync('data/fixtures')) return [];
+  return readdirSync('data/fixtures')
+    .map((name) => /^part(\d+)$/.exec(name)?.[1])
+    .filter((n): n is string => n !== undefined)
+    .map(Number)
+    .filter((part) => part >= 4 && fixtureLogPaths(part).length > 0)
+    .sort((a, b) => a - b);
+}
 
 /** Путь к логу партии — тот же, что у фикстур в `data/fixtures/`. */
 export function fixtureLogPath(part: number): string {

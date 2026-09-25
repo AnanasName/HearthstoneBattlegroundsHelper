@@ -40,7 +40,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_PATHS } from '../../app/paths.js';
-import type { Minion } from '../../state/types.js';
+import type { Deity, Minion } from '../../state/types.js';
 
 export const FIELD_BOARDS_PATH = join(APP_PATHS.dataDir, 'field', 'boards.json');
 
@@ -55,12 +55,26 @@ export interface FieldBoard {
   readonly board: readonly Minion[];
   /** Тринкеты владельца борда, как dbfId из лога. */
   readonly trinketDbfIds: readonly number[];
+  /**
+   * Божество владельца борда в этом бою (D287) — или `null`. С пулом 22.09
+   * сигил Божества есть у КАЖДОГО игрока (part68–part77: 138 боёв из 138),
+   * а живой счёт силы отдаёт симулятору наше Божество: поле без Божеств
+   * соперников — односторонняя точность (D205, D304). Нет поля — борд
+   * собран до 25.09.
+   */
+  readonly deity?: Deity | null;
 }
 
 export interface FieldSnapshot {
   /** Когда собран — снапшот устаревает с патчем, как и снапшот карт. */
   readonly builtAt: string;
-  /** Партии-источники: тот же `CURRENT_BUILD_PARTS`, что у всех замеров. */
+  /**
+   * Отпечаток пула снапшота карт, на котором собрано поле
+   * (`poolFingerprint`, D304). Нет его — поле собрано до 25.09, и пул его
+   * неизвестен: с партией оно не сверяется.
+   */
+  readonly pool?: string;
+  /** Партии-источники: фикстуры нынешнего пула (`fit.ts`, `offPoolShopCards`). */
   readonly parts: readonly number[];
   readonly boards: readonly FieldBoard[];
   /** Цена поражения по ходам таверны — см. `FieldDamage`. */

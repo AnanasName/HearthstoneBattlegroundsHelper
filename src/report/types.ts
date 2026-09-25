@@ -174,9 +174,14 @@ export interface PostGameReport {
   readonly analysis: {
     readonly appVersion: string | null;
     readonly simulatorVersion: string | null;
-    /** Когда собрано поле бордов и на каком билде. */
+    /** Когда собрано поле бордов. */
     readonly fieldBuiltAt: string | null;
-    readonly fieldBuild: number | null;
+    /**
+     * Почему поле не о той же игре, что партия (`fieldPoolReason`, D304);
+     * `null` — о той же. В отчётах до 25.09 этого поля нет: там стоял
+     * номер билда поля (`fieldBuild`).
+     */
+    readonly fieldPool?: string | null;
     /** Поле собрано на той же игре, что партия: иначе расстановка фактом не бывает. */
     readonly fieldFitsGame: boolean;
     /**

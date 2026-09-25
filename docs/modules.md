@@ -39,13 +39,14 @@
 | `src/advisors/position/rng.ts` | детерминированный ГПСЧ, подмена `Math.random` |
 | `src/advisors/position/spike.ts` | замеры фазы 3, воспроизводимые |
 | `src/advisors/strength/boards.ts` | эталонное поле: чужие борды по ходам таверны, снапшот `data/field/` |
-| `src/advisors/strength/fit.ts` | сборка снапшота поля из логов фикстур (`npm run field:fit`) |
+| `src/advisors/strength/fit.ts` | сборка снапшота поля из логов фикстур нынешнего пула (`npm run field:fit`, D304) |
 | `src/advisors/strength/strength.ts` | сила своего стола: доля выигранных боёв против поля хода |
 | `src/advisors/strength/spike.ts` | замер калибровки силы (`npm run spike:strength`) |
 | `src/advisors/position/spikeField.ts` | замеры цели-поля: молчание, цена K бордов, качество |
 | `src/data/cards.ts` | справочник карт: племя, тир, статы по cardId; пул миньонов тира |
 | `src/data/bgStats.ts` | статистика мест героев и тринкетов (снапшот Firestone) |
-| `src/data/fixtureGames.ts` | партии текущего билда — один список на все скрипты, и одно чтение партии (`readFixtureGame`: `game.log` либо сегменты) |
+| `src/data/fixtureGames.ts` | список партий батареи замеров (`CURRENT_BUILD_PARTS`), все фикстуры (`fixturePartsAll`) и одно чтение партии (`readFixtureGame`: `game.log` либо сегменты) |
+| `src/data/pool.ts` | пул миньонов по снапшоту карт: отпечаток пула, карты витрины вне пула — «та же игра» для всего, что читает карты (D304) |
 | `src/data/cardStats.ts` | статистика мест миньонов — только для замера, вне рантайма |
 | `src/advisors/tavern/measureCardStats.ts` | дамп «кандидат покупки → исход боя» |
 | `src/advisors/tavern/statAnalysis.ts` | арифметика замера: ранжирование, связь, перестановки |
@@ -161,7 +162,7 @@ npm run spike:horizon               сколько ходов таверны и 
 npm run spike:arena                 чей ход лучше по ближайшему бою: игрок, советник, оракул
 npm run spike:strength              калибрована ли «сила стола» (сверка с фактическими боями)
 npm run spike:converter             точнее ли бой со счётчиком заклинаний из числа на Faceless Converter
-npm run field:fit                   пересобрать эталонное поле бордов в data/field/
+npm run field:fit                   пересобрать эталонное поле бордов в data/field/ — из фикстур нынешнего пула (D304); после каждой новой фикстуры и обновления снапшота карт
 npm run capture                     архивация растущего Power.log
 npm run fixture:passport            паспорта партий в логе; --frame, --game/--write
 npm run fixture:at -- partN ЧЧ:ММ   кадр игрока по часам: состояние, действия, советы с обоснованиями

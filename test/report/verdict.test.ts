@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { FIELD_BUILD_FALLBACK, fieldBuild, notFactReasons } from '../../src/report/battle.js';
+import { fieldFitsGame, fieldPoolReason, notFactReasons } from '../../src/report/battle.js';
 import type { FieldSnapshot } from '../../src/advisors/strength/boards.js';
+import { createCardIndex } from '../../src/data/cards.js';
+import { poolFingerprint } from '../../src/data/pool.js';
 
 /**
  * Ворота факта для расстановки — по условию за раз. Числовая часть
@@ -9,14 +11,10 @@ import type { FieldSnapshot } from '../../src/advisors/strength/boards.js';
  * здесь — условия, каждое из которых снимает «однозначность».
  */
 describe('расстановка: почему не факт', () => {
-  const clean = { robust: true, fieldBuild: 251952, gameBuild: 251952, paidSlotSources: [] };
+  const clean = { robust: true, fieldPool: null, paidSlotSources: [] };
 
   it('все условия выполнены — факт', () => {
     expect(notFactReasons(clean)).toEqual([]);
-  });
-
-  it('баланс внутри группы совместимости — та же игра (250339 и 251952, builds.ts)', () => {
-    expect(notFactReasons({ ...clean, gameBuild: 250339 })).toEqual([]);
   });
 
   it('вывод не держится на борде эпизода или проверить его нечем', () => {
@@ -25,8 +23,10 @@ describe('расстановка: почему не факт', () => {
   });
 
   it('поле другой игры и платный край — каждая причина своей строкой', () => {
-    expect(notFactReasons({ ...clean, gameBuild: 253216, paidSlotSources: ['Emergency Gearblade'] })).toEqual([
-      'поле бордов собрано на билде 251952, а партия — на 253216: пул карт другой',
+    expect(
+      notFactReasons({ ...clean, fieldPool: 'партия сыграна на другом пуле карт', paidSlotSources: ['Emergency Gearblade'] }),
+    ).toEqual([
+      'партия сыграна на другом пуле карт',
       'тринкет Emergency Gearblade платит краю борда каждый ход — расстановка решает не только бой',
     ]);
   });
@@ -36,11 +36,48 @@ describe('расстановка: почему не факт', () => {
       'Sulfuras в конце хода усиливает соседей или край борда — порядок решает не только бой',
     ]);
   });
+});
 
-  it('билд поля — из снапшота, а без него — последний билд партий, из которых поле собрано', () => {
-    const field = { builtAt: '2026-09-19', parts: [4], boards: [], damage: [] } as FieldSnapshot;
-    expect(fieldBuild(field)).toBe(FIELD_BUILD_FALLBACK);
-    expect(fieldBuild({ ...field, build: 253216 } as FieldSnapshot)).toBe(253216);
-    expect(fieldBuild(null)).toBeNull();
+/**
+ * Поле и партия сверяются по ПУЛУ, а не по номеру билда (D304): 22.09 пул
+ * сменился посреди билда 251952 (part67 | part68), а 253216 его не тронул.
+ */
+describe('поле бордов и пул партии', () => {
+  const cards = createCardIndex([
+    { id: 'HOPEBRINGER', name: 'Hopebringer', type: 'Minion', techLevel: 5, isBaconPool: true },
+    { id: 'MOLTEN_ROCK', name: 'Molten Rock', type: 'Minion', techLevel: 1, isBaconPool: false },
+    { id: 'SAND_SWIRLER', name: 'Sand Swirler', type: 'Minion', techLevel: 3, isBaconPool: false },
+  ]);
+  const field: FieldSnapshot = {
+    builtAt: '2026-09-25T18:00:00.000Z',
+    pool: poolFingerprint(cards),
+    parts: [68],
+    boards: [],
+    damage: [],
+  };
+  const deps = { field, cards, gameOffPool: [] as string[] };
+
+  it('поле нынешнего пула и партия без карт вне пула — та же игра', () => {
+    expect(fieldPoolReason(deps)).toBeNull();
+    expect(fieldFitsGame(deps)).toBe(true);
+  });
+
+  it('партия другого пула: причина называет карты её витрины', () => {
+    const reason = fieldPoolReason({ ...deps, gameOffPool: ['MOLTEN_ROCK', 'SAND_SWIRLER'] });
+    expect(reason).toBe(
+      'партия сыграна на другом пуле карт: в её витрине были Molten Rock, Sand Swirler — их в нынешнем пуле нет',
+    );
+    expect(fieldFitsGame({ ...deps, gameOffPool: ['MOLTEN_ROCK'] })).toBe(false);
+  });
+
+  it('поле другого пула или без отпечатка (собрано до D304) — не та игра', () => {
+    expect(fieldPoolReason({ ...deps, field: { ...field, pool: 'другой' } })).toMatch(/на другом пуле карт/);
+    const old: FieldSnapshot = { builtAt: field.builtAt, parts: field.parts, boards: [], damage: [] };
+    expect(fieldPoolReason({ ...deps, field: old })).toMatch(/собрано 2026-09-25 на другом пуле карт/);
+  });
+
+  it('поля нет — причины нет, но и «той же игры» нет', () => {
+    expect(fieldPoolReason({ ...deps, field: null })).toBeNull();
+    expect(fieldFitsGame({ ...deps, field: null })).toBe(false);
   });
 });

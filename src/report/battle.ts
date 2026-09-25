@@ -14,8 +14,8 @@ import {
   type Estimate,
 } from '../advisors/position/score.js';
 import { boardsOfTurn, type FieldSnapshot } from '../advisors/strength/boards.js';
-import { sameGameBuild } from '../data/builds.js';
 import type { CardIndex } from '../data/cards.js';
+import { poolFingerprint } from '../data/pool.js';
 import type { GameState, Minion } from '../state/types.js';
 import { BOARD_LIMIT } from './facts.js';
 import type { BattleNumbers, BattleRecount } from './types.js';
@@ -51,7 +51,7 @@ import { boards as boardsWord } from './words.js';
  * примерно вдвое. Отбор идёт на одних зёрнах, числа отчёта — на других.
  * Множественность проверок по шуму не страшна (≈ 0.007 ложного факта
  * на партию при двух тестах по 2σ), опасна систематика модели — от неё
- * устойчивость, поле своего билда и молчание при баффах конца хода.
+ * устойчивость, поле своего пула и молчание при баффах конца хода.
  */
 
 export interface RecountDeps {
@@ -61,8 +61,12 @@ export interface RecountDeps {
   readonly field: FieldSnapshot | null;
   /** Партия-фикстура, которую нельзя мерить об её же борды (`boardsOfTurn`). */
   readonly excludePart: number | null;
-  /** Билд разбираемой партии: поле чужого билда факта не даёт. */
-  readonly gameBuild: number | null;
+  /**
+   * Карты витрины партии, которых нет в пуле снапшота карт
+   * (`offPoolShopCards`): партия другого пула против нынешнего поля факта
+   * не даёт (D304).
+   */
+  readonly gameOffPool: readonly string[];
 }
 
 export interface RecountOptions {
@@ -94,14 +98,6 @@ export const DEFAULT_RECOUNT_OPTIONS: RecountOptions = {
   guessGapPp: 5,
 };
 
-/**
- * Билд, на котором собрано поле бордов, если снапшот его не называет:
- * поле 19.09 собрано из part4–55 (`CURRENT_BUILD_PARTS`), последний
- * их билд — 251952. Снапшот, пересобранный после этого, обязан нести
- * `build` сам (next-steps).
- */
-export const FIELD_BUILD_FALLBACK = 251952;
-
 /** Зёрна отбора и проверки разведены, чтобы проверка не видела отбора. */
 const PICK_SEED = 20260925;
 const VERIFY_SEED_PLAYED = 20260926;
@@ -123,15 +119,30 @@ export function numbersOf(e: Estimate): BattleNumbers {
   };
 }
 
-/** Билд поля: из снапшота, если он его знает. */
-export function fieldBuild(field: FieldSnapshot | null): number | null {
-  if (field === null) return null;
-  return (field as FieldSnapshot & { readonly build?: number }).build ?? FIELD_BUILD_FALLBACK;
+/**
+ * Почему поле бордов не говорит о той же игре, что партия, — или `null`.
+ *
+ * Сверка по ПУЛУ, а не по номеру билда (D304): 22.09 пул сменился посреди
+ * билда 251952, а билд 253216 его не тронул. Поле годится, если собрано
+ * на пуле нынешнего снапшота карт И в витрине партии не было карт вне
+ * этого пула. Поля нет — причины тоже нет: судить против него нечего.
+ */
+export function fieldPoolReason(deps: Pick<RecountDeps, 'field' | 'cards' | 'gameOffPool'>): string | null {
+  if (deps.field === null) return null;
+  if (deps.field.pool !== poolFingerprint(deps.cards)) {
+    return `поле бордов собрано ${deps.field.builtAt.slice(0, 10)} на другом пуле карт, чем нынешний снапшот`;
+  }
+  if (deps.gameOffPool.length > 0) {
+    const names = deps.gameOffPool.slice(0, 3).map((id) => deps.cards.info(id)?.name ?? id);
+    const more = deps.gameOffPool.length > names.length ? ` и ещё ${String(deps.gameOffPool.length - names.length)}` : '';
+    return `партия сыграна на другом пуле карт: в её витрине были ${names.join(', ')}${more} — их в нынешнем пуле нет`;
+  }
+  return null;
 }
 
 /** Поле собрано на той же игре, что разбираемая партия. */
-export function fieldFitsGame(deps: Pick<RecountDeps, 'field' | 'gameBuild'>): boolean {
-  return sameGameBuild(fieldBuild(deps.field), deps.gameBuild);
+export function fieldFitsGame(deps: Pick<RecountDeps, 'field' | 'cards' | 'gameOffPool'>): boolean {
+  return deps.field !== null && fieldPoolReason(deps) === null;
 }
 
 /** Бой после хода: соперник и исход из эпизода, свой стол — конца таверны. */
@@ -248,7 +259,7 @@ function reorder(board: readonly Minion[], order: readonly Minion[]): Minion[] |
  *
  * ФАКТ: лучшая различимо лучше сыгранной против поля хода не меньше чем
  * на `factFieldGapPp`, вывод держится и на борде эпизода, поле собрано
- * на игре того же билда, платного края тринкета нет.
+ * на том же пуле карт, платного края тринкета нет.
  * ПРЕДПОЛОЖЕНИЕ: лучше против фактического соперника, разница
  * ≥ `guessGapPp` — или факт, не прошедший одно из условий выше (причина
  * пишется).
@@ -299,7 +310,8 @@ export function judgePositioning(
           opponentBoard: b.board,
           opponentTrinketDbfIds: b.trinketDbfIds,
           opponentGlobalInfo: undefined,
-          opponentDeity: undefined,
+          // Божество соперника поля — из его боя (D304); у бордов до 25.09 его нет.
+          opponentDeity: b.deity ?? undefined,
         },
         options.fieldSimsPerBoard,
       ),
@@ -352,8 +364,7 @@ export function judgePositioning(
   }
   const reasons = notFactReasons({
     robust,
-    fieldBuild: fieldBuild(deps.field),
-    gameBuild: deps.gameBuild,
+    fieldPool: fieldPoolReason(deps),
     paidSlotSources: paidSlots(state, deps.cards).map((p) => p.source),
     positionalSources: positionalEndOfTurn(state, deps.cards),
   });
@@ -396,7 +407,8 @@ export function positionalEndOfTurn(state: GameState, cards: CardIndex): string[
  *    борда в бою другой, и проверить нечем (в эталоне критика вывод
  *    от источника борда менялся в 7 боях из 40);
  *  - поле собрано на другой игре — пул карт другой (после ротации 22.09
- *    у 357 из 662 бордов поля есть карты вне пула);
+ *    у 357 из 662 бордов прежнего поля были карты вне пула); причину
+ *    называет `fieldPoolReason` (D304);
  *  - тринкет платит краю борда каждый ход: part52, бой 16 — Cord Puller
  *    первым стоял под Emergency Gearblade, и «лучшая по бою» расстановка
  *    отдала бы выплату. Разведка считала этот бой единственной ошибкой
@@ -404,8 +416,8 @@ export function positionalEndOfTurn(state: GameState, cards: CardIndex): string[
  */
 export function notFactReasons(input: {
   readonly robust: boolean | null;
-  readonly fieldBuild: number | null;
-  readonly gameBuild: number | null;
+  /** Почему поле не о той же игре (`fieldPoolReason`); `null` — о той же. */
+  readonly fieldPool: string | null;
   readonly paidSlotSources: readonly string[];
   /** Карты борда и сила, в конце хода усиливающие соседей или край. */
   readonly positionalSources?: readonly string[];
@@ -416,11 +428,7 @@ export function notFactReasons(input: {
   } else if (!input.robust) {
     reasons.push('на втором снимке борда (эпизод боя) разница не держится — вывод зависит от модели');
   }
-  if (!sameGameBuild(input.fieldBuild, input.gameBuild)) {
-    reasons.push(
-      `поле бордов собрано на билде ${String(input.fieldBuild)}, а партия — на ${String(input.gameBuild)}: пул карт другой`,
-    );
-  }
+  if (input.fieldPool !== null) reasons.push(input.fieldPool);
   if (input.paidSlotSources.length > 0) {
     reasons.push(
       `тринкет ${input.paidSlotSources.join(', ')} платит краю борда каждый ход — расстановка решает не только бой`,

@@ -20,8 +20,11 @@
  *
  * **Вопрос.** Совпадает ли предсказанная сила с фактической долей побед?
  *
- * **Точки.** Все бои партий `CURRENT_BUILD_PARTS`, где у нас непустой борд
- * и в поле хода есть хотя бы `minBoards` чужих бордов ИЗ ДРУГИХ ПАРТИЙ.
+ * **Точки.** Все бои партий САМОГО ПОЛЯ (`snapshot.parts`; до 25.09 это был
+ * `CURRENT_BUILD_PARTS`, с D304 — партии нынешнего пула), где у нас
+ * непустой борд и в поле хода есть хотя бы `minBoards` чужих бордов
+ * ИЗ ДРУГИХ ПАРТИЙ. Бои другого пула против поля нынешнего мерили бы
+ * не ту игру.
  * Своя партия из поля исключается всегда: борд фактического соперника
  * этого самого боя лежит в том же логе, и мерить им себя значит спрашивать
  * ответ у ответа.
@@ -60,7 +63,7 @@
 import { readBattleEpisodes } from '../battle/episodes.js';
 import { createBattleSimulator } from '../battle/simulator.js';
 import type { BattleSetup } from '../battle/mapper.js';
-import { CURRENT_BUILD_PARTS, readFixtureGame } from '../../data/fixtureGames.js';
+import { readFixtureGame } from '../../data/fixtureGames.js';
 import { tavernTurnOf } from '../tavern/rules.js';
 import { EMPTY_GLOBAL_INFO, type GlobalInfo, type Minion } from '../../state/types.js';
 import { boardsOfTurn, loadFieldBoards } from './boards.js';
@@ -109,7 +112,7 @@ function main(): void {
   const simulator = createBattleSimulator();
   const points: Point[] = [];
 
-  for (const part of CURRENT_BUILD_PARTS) {
+  for (const part of snapshot.parts) {
     const text = readFixtureGame(part);
     if (text === null) continue;
 
@@ -132,8 +135,11 @@ function main(): void {
             techLevel: episode.techLevel,
             anomalyCardId: episode.anomalyCardId,
             globalInfo,
+            playerDeity: episode.playerDeity,
             playerTrinketDbfIds: episode.playerTrinketDbfIds,
             opponentTrinketDbfIds: opponent.trinketDbfIds,
+            opponentDeity: opponent.deity ?? null,
+            playersAlive: episode.playersAlive,
           }),
         );
         return runFieldStrength({ tavernTurn, setups }, { simulator }, null, OPTIONS).percent;
@@ -162,7 +168,7 @@ function main(): void {
 
   console.log('');
   console.log(
-    `точек ${String(points.length)} на ${String(CURRENT_BUILD_PARTS.length)} партиях, ` +
+    `точек ${String(points.length)} на ${String(snapshot.parts.length)} партиях, ` +
       `симуляций на борд ${String(OPTIONS.simulations)}`,
   );
   console.log(

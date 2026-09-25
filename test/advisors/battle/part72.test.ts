@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { readBattleEpisodesAsync, type BattleEpisode } from '../../../src/advisors/battle/episodes.js';
@@ -103,7 +105,10 @@ describe('part72, кадр 19:45: смерть против поля хода', 
   it('потолок 15 не пробивает запас 28: смерти ноль, доля побед прежняя', () => {
     // До правки на экране стояло «смерть в 2 % этих боёв» (1.97 % в пересчёте
     // кадра) при тех же 32 % побед: потолок меняет урон, а не исход боя.
-    const strength = fieldStrength(state, loadFieldBoards(), sharedBattleSimulator());
+    // Поле — то, что стояло на экране: ход таверны 9 поля 19.09, замороженный
+    // в тестовых данных. Живое поле с 25.09 собирается по пулу (D304).
+    const frozen = loadFieldBoards(fileURLToPath(new URL('../../field-2026-09-19-turns8-9.json', import.meta.url)));
+    const strength = fieldStrength(state, frozen, sharedBattleSimulator());
     expect(strength).not.toBeNull();
     expect(strength!.deathPercent).toBe(0);
     expect(strength!.percent).toBeGreaterThan(25);

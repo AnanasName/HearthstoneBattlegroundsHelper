@@ -155,6 +155,8 @@ export function fieldStrengthQuestion(
       playerTrinketDbfIds:
         state.playerId === null ? [] : (state.trinketsByPlayer[state.playerId] ?? []),
       opponentTrinketDbfIds: opponent.trinketDbfIds,
+      // Наше Божество в бой идёт — идёт и Божество соперника поля (D304).
+      opponentDeity: opponent.deity ?? null,
       playersAlive: alive,
     }),
   );

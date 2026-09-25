@@ -247,7 +247,7 @@ function headerNotes(report: PostGameReport): string {
   const a = report.analysis;
   if (a.fieldBuiltAt !== null && !a.fieldFitsGame && (a.sections.positioning || a.sections.plan)) {
     notes.push(
-      `Поле бордов собрано ${a.fieldBuiltAt.slice(0, 10)} на билде ${String(a.fieldBuild)}, а партия — на ${String(report.game.buildNumber)}: пул карт другой, поэтому расстановка здесь бывает только предположением.`,
+      `Поле бордов не о той же игре${a.fieldPool === undefined || a.fieldPool === null ? '' : `: ${a.fieldPool}`} — поэтому расстановка здесь бывает только предположением.`,
     );
   }
   return notes.map((n) => `<p class="sub warn">${esc(n)}</p>`).join('\n');

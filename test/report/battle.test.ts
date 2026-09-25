@@ -1,9 +1,12 @@
+import { fileURLToPath } from 'node:url';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { readBattleEpisodesAsync, type BattleEpisode } from '../../src/advisors/battle/episodes.js';
 import { sharedBattleSimulator } from '../../src/advisors/battle/simulator.js';
-import { loadFieldBoards } from '../../src/advisors/strength/boards.js';
+import { loadFieldBoards, type FieldSnapshot } from '../../src/advisors/strength/boards.js';
 import { loadCardIndex } from '../../src/data/cards.js';
+import { poolFingerprint } from '../../src/data/pool.js';
 import {
   judgePositioning,
   nextBattleSetup,
@@ -24,6 +27,13 @@ import { part52Game, part68Game } from '../fixtures.js';
  * расстановка лучше сыгранной, этот — единственный, где лучшая лучше
  * и против поля хода. Борд — конца таверны, а не эпизода: эпизод снят
  * после Start of Combat.
+ *
+ * Поле — ЗАМОРОЖЕННОЕ: ходы таверны 8–9 поля 19.09 (part4–55, 52 борда
+ * на ход), `test/field-2026-09-19-turns8-9.json`. Живое поле с 25.09
+ * собирается по пулу (D304) и на этих ходах пока уже порога в 12 бордов;
+ * ворота факта проверяются здесь на неизменных числах. Сверка пула
+ * пройдена нарочно (отпечаток нынешнего пула, в витрине ничего вне него):
+ * part52 сыгран до ротации, а сама сверка проверяется в verdict.test.ts.
  */
 describe('отчёт после партии: пересчёт боя', () => {
   let deps: RecountDeps;
@@ -33,9 +43,11 @@ describe('отчёт после партии: пересчёт боя', () => {
   let episodes68: BattleEpisode[];
 
   beforeAll(async () => {
-    const field = loadFieldBoards();
-    // part52 сыгран на 251952 — той же игре, что поле бордов (part4–55).
-    deps = { simulator: sharedBattleSimulator(), cards: loadCardIndex(), field, excludePart: 52, gameBuild: 251952 };
+    const cards = loadCardIndex();
+    const frozen = loadFieldBoards(fileURLToPath(new URL('../field-2026-09-19-turns8-9.json', import.meta.url)));
+    if (frozen === null) throw new Error('нет замороженного поля');
+    const field: FieldSnapshot = { ...frozen, pool: poolFingerprint(cards) };
+    deps = { simulator: sharedBattleSimulator(), cards, field, excludePart: 52, gameOffPool: [] };
     const text52 = part52Game();
     game52 = await readTimelineAsync(text52, createBreather());
     episodes52 = await readBattleEpisodesAsync(text52, createBreather());
@@ -89,7 +101,7 @@ describe('отчёт после партии: пересчёт боя', () => {
     expect(judgement.actual.singleOpponent).toBe(true);
   }, 300_000);
 
-  it('тот же бой на партии чужого билда — к причинам добавляется поле', () => {
+  it('тот же бой на партии другого пула — к причинам добавляется поле (D304)', () => {
     const { turn, episode } = pick(game52, episodes52, 15);
     if (turn.beforeCombat === null) throw new Error('нет борда перед боем');
     const judgement = judgePositioning(
@@ -97,10 +109,11 @@ describe('отчёт после партии: пересчёт боя', () => {
       episode,
       turn.beforeCombat,
       turn.tavernTurn,
-      { ...deps, gameBuild: 253216 },
+      // Molten Rock `BGS_127` — элементаль, ушедший из пула 22.09.
+      { ...deps, gameOffPool: ['BGS_127'] },
     );
     if (judgement.kind !== 'assumption') throw new Error(`ожидалось предположение, а не ${judgement.kind}`);
-    expect(judgement.reasons.join(' ')).toMatch(/поле бордов собрано на билде 251952, а партия — на 253216/);
+    expect(judgement.reasons.join(' ')).toMatch(/партия сыграна на другом пуле карт: в её витрине были Molten Rock/);
   }, 300_000);
 
   it('part52, бой 2: первый ход таверны не судится (D087)', () => {
