@@ -18,7 +18,9 @@ import type { FieldSnapshot } from '../advisors/strength/boards.js';
 import {
   damageOnLoss,
   fieldStrengthQuestion,
+  SCREEN_FIELD_STRENGTH_OPTIONS,
   type FieldStrength,
+  type FieldStrengthOptions,
   type FieldStrengthQuestion,
 } from '../advisors/strength/strength.js';
 import type { CardIndex } from '../data/cards.js';
@@ -102,6 +104,8 @@ export interface LiveAdvisorOptions {
   readonly quietMs: number;
   readonly rules: TavernRules;
   readonly search: Partial<SearchOptions>;
+  /** Когда блоку силы стола молчать — порог экрана, а не замеров (D305). */
+  readonly strength: FieldStrengthOptions;
 }
 
 export const DEFAULT_LIVE_ADVISOR_OPTIONS: LiveAdvisorOptions = {
@@ -110,6 +114,7 @@ export const DEFAULT_LIVE_ADVISOR_OPTIONS: LiveAdvisorOptions = {
   quietMs: 350,
   rules: DEFAULT_TAVERN_RULES,
   search: {},
+  strength: SCREEN_FIELD_STRENGTH_OPTIONS,
 };
 
 export interface LiveAdvisorHandlers {
@@ -311,7 +316,11 @@ export class LiveAdvisor {
     // же причине, что досчёт покупок: очередь воркера одна.
     const strengthSource = this.#deps.strength;
     if (strengthSource !== undefined) {
-      const ask = fieldStrengthQuestion(state, this.#deps.fieldBoards ?? null);
+      const ask = fieldStrengthQuestion(
+        state,
+        this.#deps.fieldBoards ?? null,
+        this.#options.strength,
+      );
       if (ask !== null) {
         strengthSource
           .strength(ask, damageOnLoss(this.#deps.fieldBoards ?? null, ask.tavernTurn))

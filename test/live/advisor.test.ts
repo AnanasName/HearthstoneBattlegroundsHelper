@@ -2,12 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BattleSetup } from '../../src/advisors/battle/mapper.js';
 import type { PositionAdvice } from '../../src/advisors/position/advisor.js';
+import type { FieldSnapshot } from '../../src/advisors/strength/boards.js';
+import type {
+  FieldStrength,
+  FieldStrengthQuestion,
+} from '../../src/advisors/strength/strength.js';
 import type { BuyCandidate, BuyCheckResult } from '../../src/advisors/tavern/simulated.js';
 import {
   LiveAdvisor,
   situationKey,
   type BuyCheckSource,
   type PositionSource,
+  type StrengthSource,
 } from '../../src/live/advisor.js';
 import { loadCardIndex, type CardIndex } from '../../src/data/cards.js';
 import { EMPTY_STATE, type GameState, type Minion } from '../../src/state/types.js';
@@ -71,6 +77,37 @@ class FakeBuys implements BuyCheckSource {
     this.#resolve = null;
     resolve?.(result);
   }
+}
+
+/** Счёт силы стола: запоминает вопросы и не отвечает — здесь важно, спросили ли. */
+class FakeStrength implements StrengthSource {
+  readonly calls: FieldStrengthQuestion[] = [];
+
+  strength(question: FieldStrengthQuestion): Promise<FieldStrength | null> {
+    this.calls.push(question);
+    return new Promise(() => undefined);
+  }
+
+  cancel(): void {
+    // Отмена здесь не проверяется.
+  }
+}
+
+/** Поле из `count` бордов одного хода таверны — по одному на партию, как в снапшоте. */
+function fieldOf(tavernTurn: number, count: number): FieldSnapshot {
+  const parts = Array.from({ length: count }, (_, i) => 68 + i);
+  return {
+    builtAt: '2026-09-25T00:00:00.000Z',
+    parts,
+    boards: parts.map((part) => ({
+      tavernTurn,
+      part,
+      turn: tavernTurn * 2,
+      board: board([900 + part]),
+      trinketDbfIds: [],
+    })),
+    damage: [],
+  };
 }
 
 const HERO: GameState['hero'] = {
@@ -272,6 +309,45 @@ describe('живой советник: когда звать и когда бр�
     await vi.waitFor(() => {
       expect(onBuyCheck).toHaveBeenCalledWith(null, expect.anything(), expect.anything());
     });
+  });
+
+  it('сила стола на экране говорит при десяти бордах хода — столько их в поле нового пула (D305)', async () => {
+    // 25.09 поле нового пула — part68–part77, по 10 бордов на ходах таверны
+    // 1–11. При замерном пороге 12 блок молчал везде; экран считает с 10.
+    const strength = new FakeStrength();
+    const advisor = new LiveAdvisor(
+      { cards, position, strength, fieldBoards: fieldOf(5, 10) },
+      {},
+      { quietMs: QUIET },
+    );
+
+    // Ход партии 9 — пятый ход таверны.
+    advisor.update(tavernState());
+
+    await vi.waitFor(() => {
+      expect(strength.calls).toHaveLength(1);
+    });
+    expect(strength.calls[0]?.tavernTurn).toBe(5);
+    expect(strength.calls[0]?.setups).toHaveLength(10);
+  });
+
+  it('сила стола на экране молчит при девяти бордах хода', async () => {
+    const onTavern = vi.fn();
+    const strength = new FakeStrength();
+    const advisor = new LiveAdvisor(
+      { cards, position, strength, fieldBoards: fieldOf(5, 9) },
+      { onTavern },
+      { quietMs: QUIET },
+    );
+
+    advisor.update(tavernState());
+
+    // Сила спрашивается в том же проходе, что и совет таверны: раз он пришёл,
+    // вопрос о силе уже был бы задан.
+    await vi.waitFor(() => {
+      expect(onTavern).toHaveBeenCalledTimes(1);
+    });
+    expect(strength.calls).toHaveLength(0);
   });
 
   it('ключ положения ловит покупку и не ловит служебные события', () => {
