@@ -450,6 +450,14 @@ export function createReducer(players: Players): Reducer {
    * носит борд противника, а там бывают токены вне пула — фаза обязательна.
    */
   const seenShopCardIds = new Set<string>();
+  /**
+   * Те же карты витрины, но только помеченные игрой картой пула
+   * (`IS_BACON_POOL_MINION`, D304). Тег приходит в блоке сущности ПОЗЖЕ
+   * зоны и владельца (part68, строки 91405–91406: `TECH_LEVEL`, затем
+   * `IS_BACON_POOL_MINION`), поэтому отмечается и при смене зоны, и при
+   * самом теге — тем же условием витрины.
+   */
+  const seenShopPoolCardIds = new Set<string>();
 
   /**
    * Племя, которое лог называет САМ, — тег `CARDRACE` на сущности карты.
@@ -497,12 +505,27 @@ export function createReducer(players: Players): Reducer {
     logRaces.set(e.cardId, value);
   };
 
-  const noteShopMinion = (e: Entity): void => {
-    if (phase !== 'tavern' || e.cardId === '') return;
-    if (e.cardType !== 'MINION' || e.zone !== 'PLAY') return;
+  const isShopMinion = (e: Entity): boolean => {
+    if (phase !== 'tavern' || e.cardId === '') return false;
+    if (e.cardType !== 'MINION' || e.zone !== 'PLAY') return false;
     const self = players.selfPlayerId;
-    if (self === null || e.controller === null || e.controller === self) return;
-    seenShopCardIds.add(e.cardId);
+    return self !== null && e.controller !== null && e.controller !== self;
+  };
+
+  const noteShopMinion = (e: Entity): void => {
+    if (isShopMinion(e)) seenShopCardIds.add(e.cardId);
+  };
+
+  /**
+   * Карта пула витрины — только по СВОИМ тегам сущности. Не в момент смены
+   * карты: превращение (`CHANGE_ENTITY`) меняет `cardId` строкой заголовка,
+   * а теги прежней карты сбрасывает уже блоком ниже. part69, строки
+   * 81221–81253: Sacrificial Wrathguard витрины превращён в Fishbait
+   * `BG36_205`, и метка пула 1 от стража держалась до
+   * `IS_BACON_POOL_MINION value=0` тридцатью строками ниже.
+   */
+  const noteShopPoolMinion = (e: Entity): void => {
+    if (isShopMinion(e) && flag(e, 'IS_BACON_POOL_MINION')) seenShopPoolCardIds.add(e.cardId);
   };
 
   const touch = (id: number, cardId?: string, authoritative = false): Entity => {
@@ -556,17 +579,25 @@ export function createReducer(players: Players): Reducer {
       case 'CARDRACE':
         if (fromCardBlock) noteCardRace(e, value);
         return;
-      case 'ZONE':
+      case 'ZONE': {
+        const moved = e.zone !== value;
         e.zone = value;
         noteShopMinion(e);
+        // Только настоящее перемещение: блок превращения повторяет прежнюю
+        // зону при чужих ещё тегах (см. `noteShopPoolMinion`).
+        if (moved) noteShopPoolMinion(e);
         return;
+      }
       case 'ZONE_POSITION':
         if (n !== null) e.zonePos = n;
         return;
-      case 'CONTROLLER':
+      case 'CONTROLLER': {
+        const handed = n !== null && e.controller !== n;
         if (n !== null) e.controller = n;
         noteShopMinion(e);
+        if (handed) noteShopPoolMinion(e);
         return;
+      }
       case 'ATTACHED':
         if (n !== null) e.attached = n;
         return;
@@ -574,6 +605,10 @@ export function createReducer(players: Players): Reducer {
         e.cardType = value;
         if (value === 'BATTLEGROUND_ANOMALY' && e.cardId !== '') anomalyCardId = e.cardId;
         noteShopMinion(e);
+        return;
+      case 'IS_BACON_POOL_MINION':
+        if (n !== null) e.tags.set(tag, n);
+        noteShopPoolMinion(e);
         return;
       default:
         if (n !== null) e.tags.set(tag, n);
@@ -1687,6 +1722,7 @@ export function createReducer(players: Players): Reducer {
       // Порядок фиксирован: множество недетерминированно только в порядке
       // обхода, а состояние обязано быть воспроизводимым до байта.
       seenShopCardIds: [...seenShopCardIds].sort(),
+      seenShopPoolCardIds: [...seenShopPoolCardIds].sort(),
       // Порядок фиксирован по той же причине, что у витрины: снимок обязан
       // быть воспроизводимым до байта.
       logRaces: Object.fromEntries([...logRaces].sort(([a], [b]) => a.localeCompare(b))),

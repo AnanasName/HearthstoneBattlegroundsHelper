@@ -956,6 +956,18 @@ export interface GameState {
    */
   readonly seenShopCardIds: readonly string[];
   /**
+   * Карты витрины, которые игра САМА пометила картой пула — тег
+   * `IS_BACON_POOL_MINION=1` на сущности. Подмножество `seenShopCardIds`
+   * без жетонов, которые эффекты кладут прямо в таверну (Dark Paradox
+   * `BG36_360t5` в part68 тега не несёт, соседний миньон витрины — несёт).
+   *
+   * Нужен сверке «та же игра» по пулу (`src/data/pool.ts`, D304): снапшот
+   * карт Firestone стирает ушедшим из пула картам и флаг, и тир, и по нему
+   * ушедшая карта от жетона неотличима. Тег есть во всех фикстурах,
+   * от part4 (1000 строк) до part77 (3135).
+   */
+  readonly seenShopPoolCardIds: readonly string[];
+  /**
    * Племя карты, НАЗВАННОЕ логом, — тег `CARDRACE` на её сущности.
    *
    * Запасной источник племени для карт, которых снапшот не знает: новое
@@ -1055,6 +1067,7 @@ export const EMPTY_STATE: GameState = {
   heroChoice: null,
   trinketsByPlayer: {},
   seenShopCardIds: [],
+  seenShopPoolCardIds: [],
   logRaces: {},
   finalPlace: null,
   buildNumber: null,

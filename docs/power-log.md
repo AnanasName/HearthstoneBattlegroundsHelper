@@ -696,6 +696,21 @@ playerInfos[0]=[ID=8 …] playerInfos[1]=[ID=7 …] … playerInfos[7]=[ID=1 …
 - Прочее: `IS_BACON_POOL_MINION`, `BACON_ACTION_CARD`, `BACON_HEROPOWER_BASE_HERO_ID`,
   `BACON_COMPANION_ID`, `BACON_HERO_CAN_BE_DRAFTED`, `NUM_TURNS_IN_PLAY`, `NUM_TURNS_IN_HAND`
 
+**`IS_BACON_POOL_MINION=1` — игра сама метит карту пула** (25.09, D304).
+Тег стоит в блоке сущности миньона витрины после `ZONE` и `TECH_LEVEL`
+(part68, строки 91405–91406), есть во всех фикстурах — от part4 (1000
+строк со значением 1) до part77 (3135). Жетонов, которые эффекты кладут
+прямо в таверну, он не метит: Dark Paradox `BG36_360t5` (part68,
+строка 91414) создаётся с `CREATOR` и `TECH_LEVEL`, но без метки. Превращение
+витринного миньона сбрасывает её явно: part69, строка 81221 —
+`CHANGE_ENTITY` Sacrificial Wrathguard → Fishbait `BG36_205`, строка
+81253 — `IS_BACON_POOL_MINION value=0`. Это единственный надёжный признак
+«карта пула» для партии прошлого пула: снапшот Firestone ушедшим из пула
+картам стирает и `isBaconPool`, и `techLevel`, и Molten Rock `BGS_127`
+в нём неотличим от жетона. Покрытие: у партий старого пула метку несёт
+вся витрина (part4 — 36 карт из 36), у нового — вся, кроме одного-двух
+жетонов (part73 — 126 из 128).
+
 **Скидка на покупку миньона** — теги на самом миньоне витрины:
 `BACON_REDUCE_BUY_COST` (сколько золота скинуто) в паре
 с `BACON_SHOW_OVERRIDEN_MINION_COST=1` (клиенту — рисовать новую цену).

@@ -106,4 +106,18 @@ describe('part69: Rustlin’ Rokara — жертва на полном борд�
     const victim = weakestOwn(state, { cards }, DEFAULT_TAVERN_RULES);
     expect(nameOf(victim!.minion)).not.toBe('Banana Slamma');
   });
+
+  /**
+   * Метка пула витрины (D304). game.log:81221: Sacrificial Wrathguard
+   * `BG36_362` витрины превращён (`CHANGE_ENTITY`) в Fishbait `BG36_205`,
+   * и метку `IS_BACON_POOL_MINION` блок превращения сбрасывает в 0 лишь
+   * тридцатью строками ниже (81253). Fishbait в витрине был, картой пула —
+   * нет: иначе партия нового пула читалась бы партией другого.
+   */
+  it('превращённый в витрине Fishbait виден витриной, но не картой пула', () => {
+    const last = turns[turns.length - 1]!.state;
+    expect(last.seenShopCardIds).toContain('BG36_205');
+    expect(last.seenShopPoolCardIds).not.toContain('BG36_205');
+    expect(last.seenShopPoolCardIds).toContain('BG36_362');
+  });
 });
