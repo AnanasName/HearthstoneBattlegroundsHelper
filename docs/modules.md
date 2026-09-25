@@ -160,6 +160,7 @@ npm run spike:hand                  что даёт розыгрыш карты,
 npm run spike:horizon               сколько ходов таверны и покупок остаётся впереди
 npm run spike:arena                 чей ход лучше по ближайшему бою: игрок, советник, оракул
 npm run spike:strength              калибрована ли «сила стола» (сверка с фактическими боями)
+npm run spike:converter             точнее ли бой со счётчиком заклинаний из числа на Faceless Converter
 npm run field:fit                   пересобрать эталонное поле бордов в data/field/
 npm run capture                     архивация растущего Power.log
 npm run fixture:passport            паспорта партий в логе; --frame, --game/--write
