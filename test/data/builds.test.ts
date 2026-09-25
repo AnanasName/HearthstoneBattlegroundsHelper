@@ -17,6 +17,10 @@ describe('совместимость билдов', () => {
     expect(sameGameBuild(251952, 250339)).toBe(true);
     expect(sameGameBuild(250339, 251952)).toBe(true);
     expect(sameGameBuild(251952, 248348)).toBe(true);
+    // 253216 — клиент без изменений режима (25.09, D304): пул тот же,
+    // что у 251952 после ротации 22.09.
+    expect(sameGameBuild(253216, 251952)).toBe(true);
+    expect(sameGameBuild(251952, 253216)).toBe(true);
   });
 
   it('контентный патч остаётся чужим', () => {
