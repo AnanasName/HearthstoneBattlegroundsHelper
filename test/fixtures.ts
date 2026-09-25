@@ -1680,3 +1680,19 @@ export function part74Game(): string {
 export function part75Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part75', 'game.log'), 'utf8');
 }
+
+/**
+ * part76 — 25.09.2026, Drek'Thar `BG22_HERO_002`, 2-е место, 16 ходов
+ * таверны (15:12–15:45), билд 253216, сессия клиента 15:11:43 — одна партия.
+ * Кадр игрока — `data/screenshots/part76/15_15.png` (ход 5, Flighty Scout
+ * в руке: сила стола 62 % с ним и 32 % без руки).
+ *
+ * Сборка — элементали: Unbound Tempest, раскормленная Living Azerite через
+ * витрину, и Kelp Keeper на Tavern Tempest при Brann. Финальный бой (ход 32)
+ * проигран соперником Трас'тат с Божеством К'Тун и золотым Faceless
+ * Converter: число хрипа 404 (game.log:450693) — счётчик его заклинаний
+ * таверны, которого симулятор иначе не знает.
+ */
+export function part76Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part76', 'game.log'), 'utf8');
+}
