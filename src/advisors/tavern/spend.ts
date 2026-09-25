@@ -449,7 +449,10 @@ export function applyRecommendation(
       const sold = rec.sellFirst;
       const board = sold === null ? state.board : withoutEntity(state.board, sold.entityId);
       const refund = sold === null ? 0 : rules.sellGold;
-      const hand = withoutEntity(state.hand, rec.minion.entityId);
+      // Пара «When you play one, discard the other» уходит из руки целиком
+      // (part78): второго розыгрыша из неё в игре не бывает.
+      const discarded = new Set(rec.discardsFromHand ?? []);
+      const hand = withoutEntity(state.hand, rec.minion.entityId).filter((m) => !discarded.has(m.entityId));
 
       // Розыгрыш бесплатен (cost 0), но продажа ради места возвращает золото,
       // и остаток обязан это учесть — как и `goldSpent` следом за ним.

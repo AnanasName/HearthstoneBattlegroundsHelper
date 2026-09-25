@@ -1750,6 +1750,31 @@ export interface TavernRules {
   readonly selfAuraWords: readonly string[];
 
   /**
+   * Признак ПОСТОЯННОЙ ауры над всем бордом у ИСТОЧНИКА энчанта — «Your
+   * minions have +{0} Attack» (Hammer of Twilight, part78), «Your minions
+   * have +2/+1» (Feral Talisman), награды The Smoking Gun и Volatile Venom.
+   *
+   * Игра кладёт такую ауру энчантом на КАЖДОГО своего миньона, и тег ATK
+   * её включает. Но надбавка висит на игроке, а не на теле: купленный
+   * миньон получит ту же, и мерить ею тело — продавать по числу, которое
+   * не про эту карту (D059). part78, ход таверны 6: после Hammer (+6)
+   * борд 8/1 против витрины 2/1 — и все покупки через продажу пропали.
+   *
+   * «until next turn» (Haunted Carapace) отсечено: будет ли временную ауру
+   * получать купленный следом миньон, лог не показывал. Решение — D306.
+   */
+  readonly boardAuraWords: readonly string[];
+
+  /**
+   * Текст ЭНЧАНТА пары «When you play one, discard the other» — Dark Ritual
+   * Kith'ix, Faceless Operative, Wandering Willbreaker (part78). Игра кладёт
+   * на каждую карту пары энчант «Discard after you play the other
+   * minion(s)» (`BG36_308e`) с id создателя в `TAG_SCRIPT_DATA_NUM_2`;
+   * розыгрыш одной сбрасывает остальные карты с тем же создателем (D307).
+   */
+  readonly pairedDiscardWords: readonly string[];
+
+  /**
    * Эффект на ЧУЖИХ, висящий на ТРИГГЕРЕ, а не на ауре (part69).
    *
    * `selfAuraWords` делит карты с механикой `AURA`, но та же порода карт —
@@ -2526,6 +2551,10 @@ export const DEFAULT_TAVERN_RULES: TavernRules = {
   ],
 
   selfAuraWords: ['\\bhas \\+'],
+
+  boardAuraWords: ['^(?:\\[x\\])?your minions have \\+(?![^.]*\\buntil\\b)'],
+
+  pairedDiscardWords: ['^discard after you play the other\\b'],
 
   otherRecipientWords: [
     '\\byour\\s+(?:other\\s+)?\\w+s\\b[^.]*\\bthis game\\b',

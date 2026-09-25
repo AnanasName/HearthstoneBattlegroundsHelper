@@ -358,6 +358,12 @@ export interface Recommendation {
    */
   readonly refreshesShop?: boolean;
   /**
+   * Сущности руки, которые розыгрыш СБРОСИТ: пара «When you play one,
+   * discard the other» (`pairedPartners`, part78). План убирает их из руки
+   * вместе с разыгранной картой — второй розыгрыш из пары в игре не бывает.
+   */
+  readonly discardsFromHand?: readonly number[];
+  /**
    * Золото, которое заберут покупки, обещанные ПОСЛЕ обновления витрины
    * (`refreshesShop`): «на 4 золота покупок 4 по 1» — это четыре золота.
    * Нужно плану: шаг обрывает цепочку, и без этого поля остаток числился
@@ -1637,6 +1643,56 @@ const PAYOFF_TRIBES_CACHE = new WeakMap<
   WeakMap<CardIndex, Map<string, readonly string[]>>
 >();
 
+/**
+ * Сколько статов миньона — надбавка постоянной ауры над всем бордом
+ * (`boardAuraWords`): она достанется любому следующему телу, и тело ею
+ * не мерится (part78, Hammer of Twilight).
+ *
+ * Источник — карта энчанта без последней «e» (`BG36_MagicItem_403e` →
+ * `BG36_MagicItem_403`), величина — плейсхолдеры самого энчанта
+ * (part78, game.log:52340: `TAG_SCRIPT_DATA_NUM_1=6`). Энчант без чисел
+ * не вычитается: литералы текста угадывать не будем.
+ */
+function boardAuraStats(
+  m: Minion,
+  cards: CardIndex,
+  rules: TavernRules,
+): { readonly attack: number; readonly health: number } {
+  let attack = 0;
+  let health = 0;
+  for (const e of m.enchantments) {
+    if (!e.cardId.endsWith('e')) continue;
+    const text = cards.info(e.cardId.slice(0, -1))?.text ?? '';
+    if (!rules.boardAuraWords.some((w) => new RegExp(w, 'i').test(text))) continue;
+    attack += e.scriptDataNum1 ?? 0;
+    health += e.scriptDataNum2 ?? 0;
+  }
+  return { attack, health };
+}
+
+/**
+ * Карты руки, которые розыгрыш `m` сбросит: пара «When you play one,
+ * discard the other» (`pairedDiscardWords`). Напарник — карта с тем же
+ * энчантом пары и тем же создателем в его `scriptDataNum2` (part78,
+ * game.log:4733–4734: 197 — Dark Ritual).
+ */
+export function pairedPartners(
+  m: Minion,
+  hand: readonly Minion[],
+  cards: CardIndex,
+  rules: TavernRules,
+): readonly Minion[] {
+  const pairOf = (x: Minion): number | null => {
+    const e = x.enchantments.find((en) =>
+      rules.pairedDiscardWords.some((w) => new RegExp(w, 'i').test(cards.info(en.cardId)?.text ?? '')),
+    );
+    return e?.scriptDataNum2 ?? null;
+  };
+  const pair = pairOf(m);
+  if (pair === null) return [];
+  return hand.filter((x) => x.entityId !== m.entityId && pairOf(x) === pair);
+}
+
 /** Ценность миньона: во что складываются веса из таблицы правил. */
 export function minionValue(
   candidate: Minion,
@@ -1653,7 +1709,11 @@ export function minionValue(
   // названной механики нет, платить не за что. Решение — ниже, после того
   // как носители посчитаны (`tierPremiumSilent`).
   const techFull = (candidate.techLevel ?? info?.techLevel ?? 1) * w.perTechLevel;
-  const stats = ((candidate.attack ?? 0) + (candidate.health ?? 0)) * w.perStatPoint;
+  // Тело мерится без ауры над всем бордом: её получит и любое другое тело.
+  const aura = boardAuraStats(candidate, cards, rules);
+  const ownAttack = (candidate.attack ?? 0) - aura.attack;
+  const ownHealth = (candidate.health ?? 0) - aura.health;
+  const stats = (ownAttack + ownHealth) * w.perStatPoint;
 
   const mates = tribeMates(candidate, state.board, cards);
   const tribe = mates * w.perTribeMate;
@@ -1668,7 +1728,7 @@ export function minionValue(
       .filter(([, field]) => field !== 'venomous' || !candidate.poisonous)
       .reduce(
         (sum, [, field]) =>
-          sum + keywordValue(field, candidate.attack ?? 0, candidate.health ?? 0, rules),
+          sum + keywordValue(field, ownAttack, ownHealth, rules),
         0,
       ) +
     (reached === null
@@ -4757,6 +4817,10 @@ export function playRules(
     );
     if (battlecryGain !== null) notes.push(battlecryGain.note);
     if (coinGold > 0) notes.push(`сила героя: даст монетку (+${String(coinGold)} золота)`);
+    const partners = pairedPartners(minion, state.hand, deps.cards, rules);
+    if (partners.length > 0) {
+      notes.push(`${partners.map((p) => deps.cards.info(p.cardId)?.name ?? p.cardId).join(', ')} сбросится`);
+    }
     if (value.completesTriple) notes.push('собирает тройку');
     else if (value.tripleBet) notes.push('копия уже есть — ставка на тройку живёт и в руке');
     if (minion.golden) notes.push('золотой');
@@ -4829,6 +4893,7 @@ export function playRules(
           ? {}
           : { destroysTarget: { rebornCopy: sacrifice.destroyed.rebornCopy } }),
         ...(battlecryGain === null ? {} : { battlecryGain: battlecryGain.gain }),
+        ...(partners.length > 0 ? { discardsFromHand: partners.map((p) => p.entityId) } : {}),
         // Цель ветви — в самой строке действия: «Choose One» у миньона игра
         // спрашивает сразу после розыгрыша, и «на кого» — половина вопроса
         // (part43). Цель считается на борде ПОСЛЕ розыгрыша: сам миньон уже

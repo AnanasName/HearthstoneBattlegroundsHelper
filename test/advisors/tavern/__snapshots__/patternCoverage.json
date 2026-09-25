@@ -70,6 +70,15 @@
    "BG35_MagicItem_431t"
   ],
   "bloodGemWords": 199,
+  "boardAuraWords": [
+   "BG24_Reward_125",
+   "BG24_Reward_364",
+   "BG30_MagicItem_880",
+   "BG30_MagicItem_880t",
+   "BG32_MagicItem_934",
+   "BG36_MagicItem_403",
+   "BG36_MagicItem_403t"
+  ],
   "boardCountBuffWords": [
    "BG33_811",
    "BG33_812"
@@ -591,6 +600,10 @@
    "BG27_Anomaly_555"
   ],
   "otherRecipientWords": 55,
+  "pairedDiscardWords": [
+   "BG36_307e",
+   "BG36_308e"
+  ],
   "playPayoffWords": [
    "BG31_177",
    "BG31_177_G",
