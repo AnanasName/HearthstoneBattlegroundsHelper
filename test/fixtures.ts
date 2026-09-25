@@ -1731,3 +1731,22 @@ export function part77Game(): string {
 export function part78Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part78', 'game.log'), 'utf8');
 }
+
+/**
+ * part79 — 25.09.2026, Patchwerk `TB_BaconShop_HERO_34`, 4-е место,
+ * 12 ходов таверны (21:15–21:38), билд 253216, одна партия в сессии
+ * клиента 21:14:50. Кадр игрока `data/screenshots/part79/21-19.png`
+ * (ход 7): совет «КУПИТЬ Tavern Dish Banana → на Wrath Weaver» при
+ * Suspicious Prisonguard `BG36_345` на борде.
+ *
+ * Сила All Patched Up — пассивная (+30 здоровья на старте). Сборка —
+ * демоны на усилении витрины: Wrath Weaver, Devout Hellcaller, Sacrificial
+ * Wrathguard (жат на каждом ходу с 13-го), Soulkeeping Jailer, Flaming
+ * Enforcer, Ashen Corruptor, Devilish Distractor; тринкет Glowing Gauntlet
+ * («Minions in the Tavern have +{0}/+{1}. The Tavern always has 7 cards»).
+ * Активация Prisonguard на ходу 7 — game.log:24561 (PLAY), 24563
+ * (RESOURCES_USED 5 → 6), 24582–24583 (Wrath Weaver 6/8 → 9/11).
+ */
+export function part79Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part79', 'game.log'), 'utf8');
+}

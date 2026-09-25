@@ -1597,3 +1597,31 @@ Ghur'sha продан раньше, чем застал сброс.
 191 действие) — в журнале, `j-0925-9`. Тесты —
 `test/advisors/tavern/part78.test.ts`: аура тринкета в ценности миньона
 и пара карт силы в плане.
+
+`part79` — 25.09, Patchwerk `TB_BaconShop_HERO_34`, **4-е место**, 12 ходов
+таверны (21:15–21:38), 41 МБ, билд 253216; единственная партия сессии
+клиента 21:14:50, вырезана `fixture:passport --game=1 --write=part79`.
+Кадр `data/screenshots/part79/21-19.png` (ход 7) воспроизводится срезом
+`fixture:at part79 21:19:30` до знака: тир 3, золото 1/6, hp 58, борд
+Wrath Weaver 6/8 и Suspicious Prisonguard 3/3, витрина Flittering Bat,
+Electric Synthesizer, Clever Castaway, Patient Scout и Tavern Dish Banana
+за 1, совет «КУПИТЬ Tavern Dish Banana за 1 → на Wrath Weaver 6/8».
+
+Сила All Patched Up — пассивная (+30 здоровья на старте). Сборка — демоны
+на усилении витрины: Wrath Weaver, Devout Hellcaller ×2, Flaming Enforcer
+(поглощает витрину в конце хода), Soulkeeping Jailer, Ashen Corruptor,
+Devilish Distractor, Malchezaar, Sacrificial Wrathguard; тринкеты Glowing
+Gauntlet (ход 11, game.log:49262) и Bloodfury Shield (ход 17,
+game.log:136579). Тёмный дар Dark Discovery нажат трижды (ходы 13, 15, 19).
+
+Активация Suspicious Prisonguard `BG36_345` на ходу 7 — game.log:24561
+(PLAY), 24563 (`RESOURCES_USED` 5 → 6), 24582–24583 (Wrath Weaver
+6/8 → 9/11), цена — `INTERACTABLE_OBJECT_COST` 1, прибавка — scriptData
+[3, 3]. Тег `HAS_ACTIVATE_POWER=1` стоит и на миньонах без активации
+(здесь Wrath Weaver, Devout Hellcaller, Flaming Enforcer; так же в part44
+у `BG29_611`): признак активации — текст «Activate (…):», тег его
+не заменяет.
+
+Расхождения с советником (прибор `npm run review -- part79`, 12 точек,
+100 действий) — в журнале, `j-0925-10`. Тесты —
+`test/advisors/tavern/part79.test.ts`: активация против банана (D308).
