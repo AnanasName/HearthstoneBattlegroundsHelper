@@ -1713,3 +1713,21 @@ export function part76Game(): string {
 export function part77Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part77', 'game.log'), 'utf8');
 }
+
+/**
+ * part78 — 25.09.2026, Kith'ix `BG36_HERO_002`, 4-е место, 12 ходов
+ * таверны (20:50–21:12), билд 253216, одна партия в сессии клиента
+ * 20:49:13. Кадров игрока нет.
+ *
+ * Сила Dark Ritual `BG36_HERO_002p` («Get 2 random minions. When you play
+ * one, discard the other.», 2 золота) нажата 11 раз из 12 — двигатель
+ * сброса сам по себе. Сборка — аберрации на сбросе: Brain Rotter, Abyssal
+ * Envoy, N'raqi Frostcaller, Cutthroat K'Thir, Mindbender Ghur'sha,
+ * Harbinger Aph'lass, Sludge Corrosion в руке под сброс. Тринкет Hammer
+ * of Twilight («Your minions have +{0} Attack», растёт от сброса) —
+ * аура лежит энчантом `BG36_MagicItem_403e` на каждом своём миньоне,
+ * надбавка в его `TAG_SCRIPT_DATA_NUM_1` (game.log:52340, 6 при взятии).
+ */
+export function part78Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part78', 'game.log'), 'utf8');
+}

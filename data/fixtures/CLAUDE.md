@@ -1558,3 +1558,42 @@ of Doubt (+5/+5 Божеству за карту в руку), Faceless Converte
 Расхождения с советником (прибор `npm run review -- part77`, 17 точек,
 306 действий) — в журнале, `j-0925-6`. Тестов пока нет: правки ждут
 решения игрока (next-steps).
+
+`part78` — 25.09, Kith'ix `BG36_HERO_002`, **4-е место**, 12 ходов
+таверны (20:50–21:12), 49 МБ, билд 253216; единственная партия сессии
+клиента 20:49:13, вырезана `fixture:passport --game=1 --write=part78`.
+Кадров игрока нет.
+
+Сила Dark Ritual `BG36_HERO_002p` («Get 2 random minions. When you play
+one, discard the other.») — сущность id=197, `COST=2` без единого
+`TAG_CHANGE` за партию. Нажата 11 раз из 12 (пропущен ход таверны 6,
+ход тринкета); первое — game.log:4571. Тир пришедших — не выше тира
+таверны, но и не равен ему: на тире 2 пришла пара тира 1 (game.log:18292),
+на тире 5 — пары тиров 4–5. Племя пары не общее (одно совпадение из 11).
+
+Пару связывает энчант `BG36_308e` «Discard Minion» («Discard after you
+play the other minion(s)») на каждой карте, с id создателя
+в `TAG_SCRIPT_DATA_NUM_2` (game.log:4733–4734: 197). Прямой ссылки карты
+на карту нет. Сбрасывает вторую карту триггер игрока `BG36_307pe`
+«Discard Paired Cards Player Ench» при розыгрыше первой — HAND → GRAVEYARD
+без тега `DISCARD` (game.log:5197–5204). Та же связка у Faceless Operative
+(создатель — id самого Operative) и у Wandering Willbreaker, где пара —
+заклинания и энчант `BG36_307e` «Discard Spell». Пару до конца хода игрок
+не держал ни разу.
+
+Тринкет Hammer of Twilight `BG36_MagicItem_403` («Your minions have +{0}
+Attack», растёт от каждого сброса) взят на ходу таверны 6 (game.log:52134).
+Аура лежит энчантом `BG36_MagicItem_403e` на КАЖДОМ своём миньоне:
+`ATTACHED` — миньон, `CREATOR` — тринкет, надбавка
+в `TAG_SCRIPT_DATA_NUM_1` (game.log:52340: 6 при взятии), и тег ATK её
+включает. Счётчик тринкета растёт на каждый сброс из любого источника —
+до 29 к концу партии. Сбросов у игрока за партию 52 (HAND → GRAVEYARD):
+сила, Faceless Operative ×2, Willbreaker, Brain Rotter ×3, Abyssal Envoy ×6,
+N'raqi Frostcaller ×4 и другие. На сброс срабатывают Cutthroat K'Thir
+(game.log:100571) и Harbinger Aph'lass (game.log:236237); Mindbender
+Ghur'sha продан раньше, чем застал сброс.
+
+Расхождения с советником (прибор `npm run review -- part78`, 12 точек,
+191 действие) — в журнале, `j-0925-9`. Тесты —
+`test/advisors/tavern/part78.test.ts`: аура тринкета в ценности миньона
+и пара карт силы в плане.
