@@ -1696,3 +1696,20 @@ export function part75Game(): string {
 export function part76Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part76', 'game.log'), 'utf8');
 }
+
+/**
+ * part77 — 25.09.2026, Doctor Holli'dae `BG28_HERO_801`, 1-е место,
+ * 17 ходов таверны (15:57–16:33), билд 253216 — вторая партия сессии
+ * клиента 15:11:43 (первая — part76). Кадров игрока нет.
+ *
+ * Сила Blessing of the Nine Frogs `BG28_HERO_801p` («Get a random Tavern
+ * spell», COST=1 всю партию) нажата 16 раз — на каждом ходу таверны
+ * со второго; заклинание приходит тира НЕ ВЫШЕ тира таверны (тег
+ * `TECH_LEVEL` созданной карты: на ходу 11 при тире 3 — Them Apples тира 1).
+ * Сборка — аберрации и Божество на заклинаниях: Vicious Mindslasher
+ * («Whenever you cast a Tavern spell…») при тринкете Mindslasher Portrait,
+ * The Shadow of Doubt, Faceless Converter, сброс через Brain Rotter.
+ */
+export function part77Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part77', 'game.log'), 'utf8');
+}

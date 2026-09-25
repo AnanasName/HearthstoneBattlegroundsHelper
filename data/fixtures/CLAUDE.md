@@ -1530,3 +1530,31 @@ game.log:207604). Активация Kelp Keeper — блок `PLAY` с `Target=
 Расхождения с советником (прибор `npm run review -- part76`, 16 точек,
 268 действий) — в журнале, `j-0925-4`. Тестов пока нет: правка маппера
 ждёт решения игрока (next-steps).
+
+`part77` — 25.09, Doctor Holli'dae `BG28_HERO_801`, **1-е место**, 17 ходов
+таверны (15:57–16:33), 65 МБ, билд 253216; ВТОРАЯ партия сессии клиента
+15:11:43 (первая — part76; когда резали part76, вторая ещё шла),
+вырезана `fixture:passport --game=2 --write=part77`. Кадров игрока нет.
+
+Сила Blessing of the Nine Frogs `BG28_HERO_801p` («Get a random Tavern
+spell») — сущность id=197, `COST=1` и `HAS_ACTIVATE_POWER=1` без единого
+`TAG_CHANGE` за партию, плейсхолдеров и `LOCK_VISUAL` нет; меняется только
+`EXHAUSTED`. Нажата 16 раз, на каждом ходу таверны со второго (первое —
+game.log:10014, 15:58:55). Карта от нажатия создаётся ДВАЖДЫ: копия
+в `SETASIDE` и настоящая в `HAND` (game.log:10056). Тир пришедшего
+заклинания (тег `TECH_LEVEL` на нём) — от 1 до тира таверны, выше
+не бывает: ход 11 при тире 3 — Them Apples тира 1 (game.log:52466), ход 25
+при тире 5 — Saloon's Finest тира 5. Средняя цена шестнадцати — 1.8 золота.
+Бадди `BG28_HERO_801_Buddy` в логе не появлялся ни разу.
+
+Сборка — аберрации на заклинаниях: Vicious Mindslasher (`BG36_108`,
+«Whenever you cast a Tavern spell, give this and your Deity +{0}/+{1}»,
+scriptData 1/3, золотой 2/6) с тринкетом Mindslasher Portrait, The Shadow
+of Doubt (+5/+5 Божеству за карту в руку), Faceless Converter (число хрипа
+96 → 196 за ходы 25–33), сброс через Brain Rotter при Cutthroat K'Thir
+и Mindbender Ghur'sha; тринкет Mask of Ancient Ones сделал Божество
+золотым. Божество к ходу 33 — 2281/2624.
+
+Расхождения с советником (прибор `npm run review -- part77`, 17 точек,
+306 действий) — в журнале, `j-0925-6`. Тестов пока нет: правки ждут
+решения игрока (next-steps).
