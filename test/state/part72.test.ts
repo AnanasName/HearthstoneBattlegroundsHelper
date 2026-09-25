@@ -11,6 +11,8 @@ import { part72Game } from '../fixtures.js';
 
 /** Leaf Through the Pages: «Gain 2 free Refreshes». */
 const LEAF = 'BG28_827';
+/** Tricky Trousers: «Give a minion +{0}/+{1} and Taunt». */
+const TROUSERS = 'BG28_520';
 
 /**
  * part72 — Иллидан (24.09.2026), 6-е место. Фактура партии — в `test/fixtures.ts`.
@@ -70,9 +72,17 @@ describe('part72: бесплатные обновления из руки при
     // «РАЗЫГРАТЬ Leaf Through the Pages» перед Tricky Trousers за 1:
     // два обновления, на находки которых не хватает ни на что. Игрок
     // в этот ход сделал ровно покупки и Trousers, карту придержал.
+    //
+    // Последний золотой с D308 (part79) план кладёт в активацию Suspicious
+    // Prisonguard (+3/+3 на Cord Puller, 3.0), а не в Trousers (+2/+1
+    // и провокация, 2.5): нажатие больше не платит цену дважды. Этот тест
+    // о Leaf, и держит он одно: золотой уходит в усиление, а не в карту.
     const steps = spendPlan(at(9), { cards }).steps.map((s) => s.recommendation);
     expect(steps.map((r) => r.minion?.cardId ?? r.spellCardId)).not.toContain(LEAF);
-    expect(steps.filter((r) => r.action === 'buy')).toHaveLength(3);
+    expect(steps.filter((r) => r.action === 'buy' && r.minion !== null)).toHaveLength(2);
+    const last = steps.at(-1);
+    expect(last?.cost).toBe(1);
+    expect(last?.action === 'activate' || last?.spellCardId === TROUSERS).toBe(true);
   });
 
   it('ход 15: при 11 золотых Leaf советуется — там, где игрок его и сыграл', () => {

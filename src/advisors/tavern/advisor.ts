@@ -8400,8 +8400,9 @@ function activationStats(minion: Minion, effectText: string): number {
  *
  * Цена нажатия в золоте здесь НЕ вычитается, и это осознанно: слагаемое
  * отвечает на вопрос «сколько стоит ЭТО ТЕЛО», а не «нажать ли сейчас» —
- * на второй отвечает `activationRules`, и там золото вычитается. Оценка
- * от этого ВЕРХНЯЯ на цену золота и НИЖНЯЯ на число будущих нажатий.
+ * на второй отвечает `activationRules` вместе с планом: золото нажатия
+ * там ограничение цепочки, как у покупки (D308). Оценка от этого ВЕРХНЯЯ
+ * на цену золота и НИЖНЯЯ на число будущих нажатий.
  *
  * Класс назван: в пуле 395 миньонов активация у 17, точно читаемых
  * эффектов — три (Suspicious Prisonguard, Tyrael, Dead Bellringer, причём
@@ -8804,6 +8805,11 @@ export function activationRules(
     // и она ОБРАТНАЯ (наименьший свой получает больше всех) — своим полем,
     // а не общим правилом «крупнейший».
     const others = state.board.filter((m) => m.entityId !== minion.entityId);
+    // «Give ANOTHER minion» без другого миньона — прибавке некуда лечь,
+    // та же граница, что у `activationBoardStats`. Пока нажатие Prisonguard
+    // стоило ноль, дыру прятал вычет цены; после D308 план на part49 (ход 1)
+    // покупал Prisonguard на пустой борд и тут же жал его без цели.
+    if (stats > 0 && /\banother\b/i.test(effectText) && others.length === 0) return [];
 
     // Племя цели, если текст его называет: указать на миньона чужого племени
     // игра не даст вовсе («a different friendly Undead»). Пустой отбор
@@ -8864,16 +8870,24 @@ export function activationRules(
     // «Get a random <Tribe>», чью карту кормят плательщики за розыгрыш.
     const retrigger = retriggerValueOn(minion, state.board, state, deps.cards, rules);
 
+    // Нажатие, которое кладёт СТАТЫ на наш борд, цену в очки НЕ вычитает —
+    // ровно как покупка заклинания-усиления и поглощение витрины заклинанием:
+    // золото считает план (D151), а сгоревший остаток он штрафует сам.
+    // Вычитание делало одно и то же золото дороже вдвое, и на part79 (ход 7,
+    // кадр 21:19) Suspicious Prisonguard «+3/+3 за 1» выходил ровно в ноль
+    // (6 × 0.5 − 1 × 3) и гас, а банан «+2/+2 за 1» стоял первым с 2.0 —
+    // D308. Обмены на золото и на миньона (ниже) цену вычитают по-прежнему:
+    // там она — половина самого обмена.
     if (bait !== null) {
-      score = bait.total * rules.value.perStatPoint - cost * rules.goldPointValue;
+      score = bait.total * rules.value.perStatPoint;
       what = bait.words;
     } else if (consumed !== null) {
-      score = consumed.stats * rules.value.perStatPoint - cost * rules.goldPointValue;
+      score = consumed.stats * rules.value.perStatPoint;
       what =
         `${String(consumed.eaters)} своих съедят витрину — ` +
         `около +${String(Math.round(consumed.stats))} статов всего`;
     } else if (setStats !== null && setBest !== null && setBest.gain > 0) {
-      score = setBest.gain * rules.value.perStatPoint - cost * rules.goldPointValue;
+      score = setBest.gain * rules.value.perStatPoint;
       what =
         `сделает ${deps.cards.info(setBest.minion.cardId)?.name ?? setBest.minion.cardId} ` +
         `${String(setStats.attack)}/${String(setStats.health)} — ` +
@@ -8884,9 +8898,7 @@ export function activationRules(
       // `BG36_511`). Наш борд от нажатия всё равно растёт на те же статы,
       // поэтому очки прежние; врала не цифра, а ЦЕЛЬ и СЛОВА. Выплата
       // плательщиков за перерождение цели — сверху (part59).
-      score =
-        (stats + (rebornPick?.payoff ?? 0)) * rules.value.perStatPoint -
-        cost * rules.goldPointValue;
+      score = (stats + (rebornPick?.payoff ?? 0)) * rules.value.perStatPoint;
       what =
         `+${String(stats)} статов САМОМУ ${name}; ` +
         `цель получит перерождение и будет уничтожена — вернётся базовой копией` +
@@ -8894,7 +8906,7 @@ export function activationRules(
           ? ''
           : `; её перерождение даст плательщикам +${String(rebornPick.payoff)} статов`);
     } else if (stats > 0) {
-      score = stats * rules.value.perStatPoint - cost * rules.goldPointValue;
+      score = stats * rules.value.perStatPoint;
       what = `+${String(stats)} статов`;
     } else if (goldNextTurn > 0) {
       score = (goldNextTurn - cost) * rules.goldPointValue;
