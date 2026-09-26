@@ -1625,3 +1625,39 @@ game.log:136579). Тёмный дар Dark Discovery нажат трижды (х
 Расхождения с советником (прибор `npm run review -- part79`, 12 точек,
 100 действий) — в журнале, `j-0925-10`. Тесты —
 `test/advisors/tavern/part79.test.ts`: активация против банана (D308).
+
+`part80` — 26.09, Marin the Manager `BG30_HERO_304`, **4-е место**,
+48 МБ, билд 253216; **хвост после вылета клиента**. Сессия клиента
+18:57:39 зависала на подключении к игровому серверу (дважды
+«ProcessNetwork not called for 17s», разрыв `DisconnectAfterFailedPings`
+в 18:59:17), первый ход таверны прошёл без клиента, и **Power.log у этой
+сессии не записан вовсе** — остались только Hearthstone.log и
+LoadingScreen.log. Лог партии — сессия 19:00:23, вырезана
+`fixture:passport --game=1 --write=part80`; начинается ДАМПОМ
+ПЕРЕПОДКЛЮЧЕНИЯ (`CREATE_GAME` с `tag=TURN value=3`, game.log:8): ход
+таверны 2, пустой борд, золото 4/4 — на первом ходу ничего не куплено.
+Точек решения 12 (ходы таверны 2–13, 19:01–19:24); отчёт после партии
+ход таверны 2 в ленту не берёт. Скриншотов нет, пометок `verifiedBy` нет.
+
+Сила Fantastic Treasure `BG30_HERO_304p` — «On Turn 5, choose a Lesser
+Trinket to buy»: счётчик `TAG_SCRIPT_DATA_NUM_1` 3 → 2 → 1 (game.log:692,
+5344, 12826), выбор из четырёх с источником-силой на ходу таверны 5
+(game.log:23314–23319; Pocket Cyclone, Rockin' Music Box за 1, Nomi
+Sticker, Sunken Anchor за 4), взята Nomi Sticker (27936) — тег
+`BACON_HEROPOWER_TRINKET_DATABASE_ID` на герое (27984), сила сама
+становится тринкетом через `CHANGE_ENTITY` (28060). Штатные тринкеты —
+Sellemental Portrait (ход 6, 39326) и Colorful Compass (ход 9, 98241):
+у героя к концу ТРИ тринкета (D309). Первая партия корпуса со своей
+Марин после part18.
+
+Сборка — элементали на усилении витрины: Nomi Sticker («After you play an
+Elemental, give Elementals in the Tavern +3/+2») и Sellemental Portrait
+кормят цикл «разыграть Sellemental — продать», витрина к ходу 13
+по 112/76 и больше; Wildfire Elemental 319/260, Waveling, Air Revenant,
+Unbound Tempest 660/553, Dark Paradox. Тёмный дар Dark Discovery — ходы
+таверны 5, 10, 11. Hp 29 → 6 за ходы 7–9, смерть в бою после хода 13.
+
+Расхождения с советником (прибор `npm run review -- part80`, 12 точек,
+221 действие) — в журнале, `j-0926-1`. Тесты —
+`test/state/part80.test.ts`: предложение силы, три взятых тринкета,
+точки решения хвоста и напоминание о тринкете (D309, D310).

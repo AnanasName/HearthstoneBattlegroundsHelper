@@ -1750,3 +1750,27 @@ export function part78Game(): string {
 export function part79Game(): string {
   return readFileSync(join(FIXTURES_DIR, 'part79', 'game.log'), 'utf8');
 }
+
+/**
+ * part80 — 26.09.2026, Marin the Manager `BG30_HERO_304`, 4-е место,
+ * 12 ходов таверны в логе (19:01–19:24), билд 253216. Клиент вылетел
+ * на первом ходу таверны: у сессии вылета 18:57:39 Power.log не записан
+ * вовсе, и лог — это сессия 19:00:23, начатая ДАМПОМ ПЕРЕПОДКЛЮЧЕНИЯ
+ * (`CREATE_GAME` с `tag=TURN value=3`, game.log:8): второй ход таверны,
+ * пустой борд, золото 4/4. Скриншотов нет.
+ *
+ * Сила Fantastic Treasure `BG30_HERO_304p` («On Turn 5, choose a Lesser
+ * Trinket to buy»): счётчик `TAG_SCRIPT_DATA_NUM_1` 3 → 2 → 1
+ * (game.log:692, 5344, 12826), на ходу таверны 5 — выбор из четырёх
+ * с источником-силой (game.log:23314–23319), взята Nomi Sticker
+ * (27936), после чего сущность силы сама становится тринкетом
+ * (`CHANGE_ENTITY … CardID=BG30_MagicItem_544`, 28060), а на герое
+ * появляется ТРЕТИЙ тег взятого тринкета —
+ * `BACON_HEROPOWER_TRINKET_DATABASE_ID=112392` (27984), помимо штатных
+ * FIRST (Sellemental Portrait, 39326) и SECOND (Colorful Compass, 98241).
+ * Сборка — элементали на усилении витрины: Nomi Sticker, Sellemental
+ * Portrait, Wildfire Elemental, Waveling, Air Revenant, Unbound Tempest.
+ */
+export function part80Game(): string {
+  return readFileSync(join(FIXTURES_DIR, 'part80', 'game.log'), 'utf8');
+}
