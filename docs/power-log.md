@@ -1292,6 +1292,29 @@ part22/27/30/34: сброс в ноль всегда до смены `TURN`).
 принадлежность карты к подмножеству» остаётся верной — на тринкетах тот же
 тег называет племя ЭФФЕКТА.
 
+## Тринкет от СИЛЫ героя: третий тег на герое (part80, D309)
+
+Сила «On Turn N, choose a Lesser/Greater Trinket to buy. ({0} turns left!)»
+— Marin `BG30_HERO_304p` (ход таверны 5), Кнопка `BG32_HERO_002p` (ход 8).
+Счётчик — `TAG_SCRIPT_DATA_NUM_1` на силе (part80: 3 → 2 → 1, game.log:692,
+5344, 12826); цены у силы нет, `EXHAUSTED` нет. На своём ходу — обычный
+`DebugPrintEntityChoices` из четырёх `BATTLEGROUND_TRINKET` с `BACON_TRINKET=1`
+в `SETASIDE`, только `Source` — сама сила, а не `BG30_Trinket_1st/2nd`
+(game.log:23314), у вариантов `CREATOR` = сущность силы.
+
+После выбора:
+
+- на герое — **`BACON_HEROPOWER_TRINKET_DATABASE_ID`** (game.log:27984),
+  ТРЕТИЙ тег сверх штатных `BACON_FIRST/SECOND_TRINKET_DATABASE_ID`; штатные
+  предложения 6-го и 9-го ходов приходят как обычно, и тринкетов у героя
+  к концу партии три;
+- сама сущность силы через `CHANGE_ENTITY` становится взятым тринкетом
+  (`CardID=BG30_MagicItem_544`, `CARDTYPE=BATTLEGROUND_TRINKET`,
+  game.log:28060) — сила из состояния исчезает.
+
+Тег встречается в 18 партиях корпуса, в 16 — у соперников (Марин, Кнопка,
+раз — Финли `TB_BaconShop_HERO_40`); свой — part18 и part80.
+
 ## DebugPrintOptions
 
 Перечисляет все доступные игроку действия с полными дескрипторами:
