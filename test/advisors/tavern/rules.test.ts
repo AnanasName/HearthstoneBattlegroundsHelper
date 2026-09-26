@@ -2470,6 +2470,37 @@ describe('напоминание о тринкетах за ход до пред
     expect(adviseTavern(state({ turn: 9 }), deps)?.trinketForecast).not.toBeNull();
     expect(adviseTavern(state({ turn: 7 }), deps)?.trinketForecast).toBeNull();
   });
+
+  it('сила «On Turn N, choose a Trinket» добавляет свой ход предложения', () => {
+    // part80: Marin выбирал тринкет силой на 5-м ходу таверны (turn 9,
+    // game.log:23314) — сверх штатных 6-го и 9-го. Тексты сил дословно
+    // из снапшота; у Кнопки (BG32_HERO_002p) — 8-й ход, Greater.
+    const powerCards = createCardIndex([
+      ...STUB_CARDS,
+      {
+        id: 'BG30_HERO_304p',
+        name: 'Fantastic Treasure',
+        type: 'Hero_power',
+        text: '[x]On Turn 5, choose a\nLesser <b>Trinket</b> to buy.\n<i>({0} turns left!)</i>',
+      },
+      {
+        id: 'BG32_HERO_002p',
+        name: 'Growing Collection',
+        type: 'Hero_power',
+        text: '[x]On Turn 8, choose a\nGreater <b>Trinket</b> to buy.\n<i>({0} turns left!)</i>',
+      },
+    ]);
+    const withPower = (cardId: string, turn: number): GameState =>
+      state({ turn, board: [shopMinion(1, 'MURLOC_1')], hero: { ...hero(40), heroPowerCardId: cardId } });
+    const marin = { cards: powerCards };
+
+    expect(trinketForecast(withPower('BG30_HERO_304p', 7), marin)).toContain('держите пару миньонов');
+    expect(trinketForecast(withPower('BG30_HERO_304p', 5), marin)).toBeNull();
+    expect(trinketForecast(withPower('BG32_HERO_002p', 13), marin)).toContain('держите пару миньонов');
+    expect(trinketForecast(withPower('BG32_HERO_002p', 7), marin)).toBeNull();
+    // Штатные ходы силы не отменяет.
+    expect(trinketForecast(withPower('BG30_HERO_304p', 9), marin)).toContain('держите пару миньонов');
+  });
 });
 
 describe('совет по выбору тринкета', () => {

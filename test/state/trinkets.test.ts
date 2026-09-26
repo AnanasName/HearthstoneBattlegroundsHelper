@@ -63,4 +63,12 @@ describe('тринкеты в состоянии партии', () => {
     // К концу партии тринкеты есть у большинства из восьми игроков.
     expect(players.length).toBeGreaterThanOrEqual(6);
   });
+
+  it('тринкет, взятый силой героя соперника, тоже известен', () => {
+    // Марин (entity 192, игрок 1) взял силой Frigid Blossom 133340 —
+    // тег BACON_HEROPOWER_TRINKET_DATABASE_ID, game.log:36437. Без него
+    // у игрока 1 было бы два тринкета из трёх (part80 — то же у себя).
+    expect(finalState.trinketsByPlayer[1]).toContain(133340);
+    expect(finalState.trinketsByPlayer[1]).toHaveLength(3);
+  });
 });

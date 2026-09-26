@@ -1608,6 +1608,11 @@ export function createReducer(players: Players): Reducer {
     // Взятые тринкеты всех игроков — теги на сущностях героев. Один игрок
     // может быть представлен несколькими сущностями героя (пересадки,
     // дубликаты в SETASIDE), поэтому значения сливаются в множество.
+    //
+    // Тегов ТРИ, а не два: тринкет, взятый СИЛОЙ героя (Marin «On Turn 5,
+    // choose a Lesser Trinket», Кнопка BG32_HERO_002), игра пишет отдельным
+    // `BACON_HEROPOWER_TRINKET_DATABASE_ID` сверх штатных FIRST/SECOND
+    // (part80, game.log:27984; у соперников — в 17 партиях корпуса).
     const trinketsByPlayer: Record<number, number[]> = {};
     // Тем же проходом собираются сущности героев для таблицы лобби ниже:
     // снимок делается на каждом шаге разбора, и второй обход всей карты
@@ -1617,11 +1622,12 @@ export function createReducer(players: Players): Reducer {
       if (e.cardType === 'HERO' && e.zone !== 'REMOVEDFROMGAME') heroEntities.push(e);
       const first = e.tags.get('BACON_FIRST_TRINKET_DATABASE_ID') ?? 0;
       const second = e.tags.get('BACON_SECOND_TRINKET_DATABASE_ID') ?? 0;
-      if (first <= 0 && second <= 0) continue;
+      const fromPower = e.tags.get('BACON_HEROPOWER_TRINKET_DATABASE_ID') ?? 0;
+      if (first <= 0 && second <= 0 && fromPower <= 0) continue;
       const owner = heroOwner.get(e.id) ?? e.tags.get('PLAYER_ID');
       if (owner === undefined) continue;
       const known = (trinketsByPlayer[owner] ??= []);
-      for (const dbfId of [first, second]) {
+      for (const dbfId of [first, second, fromPower]) {
         if (dbfId > 0 && !known.includes(dbfId)) known.push(dbfId);
       }
     }

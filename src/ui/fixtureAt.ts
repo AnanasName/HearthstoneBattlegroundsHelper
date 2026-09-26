@@ -156,6 +156,15 @@ function main(): number {
     console.log('\nсоветник молчит на этом состоянии');
     return 0;
   }
+  // Предложение тринкетов оверлей показывает отдельной панелью поверх
+  // советов, и кадр без неё врёт о том, что видел игрок (part80: выбор
+  // силы Марин на ходу таверны 5 в срезе не печатался вовсе).
+  if (advice.trinkets.length > 0) {
+    console.log('\nвыбор тринкета на момент кадра:');
+    advice.trinkets.forEach((t, i) => {
+      console.log(`  ${String(i + 1)}. ${t.name} — ${t.reason}`);
+    });
+  }
   console.log('\nсоветы на момент кадра:');
   const plan = spendPlan(state, { cards });
   if (plan.steps.length >= 2) console.log(`  ${spendPlanLine(plan, cards)}`);

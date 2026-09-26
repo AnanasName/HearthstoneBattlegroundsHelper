@@ -12470,13 +12470,24 @@ export function afterTrinketPick(state: GameState, trinkets: readonly TrinketAdv
  *
  * Амальгамы (`ALL`) в счёт не идут: тьюторингу нужен внятный сигнал
  * борда, а амальгама «своя» для всех племён сразу.
+ *
+ * Сверх штатных ходов предложение приносит сила героя «On Turn N, choose
+ * a Lesser/Greater Trinket to buy» (Marin — 5, Кнопка — 8): part80, выбор
+ * силы на 5-м ходу таверны (game.log:23314). Номер хода берётся из текста
+ * силы — он в шкале ходов таверны, как и в тексте.
  */
 export function trinketForecast(
   state: GameState,
   deps: TavernAdvisorDeps,
   rules: TavernRules = DEFAULT_TAVERN_RULES,
 ): string | null {
-  if (!rules.trinketOfferTurns.includes(state.turn + 2)) return null;
+  const next = state.turn + 2;
+  const powerId = state.hero?.heroPowerCardId ?? null;
+  const powerTurn = /On Turn (\d+), choose a (?:Lesser|Greater) <b>Trinket<\/b>/i.exec(
+    powerId === null ? '' : (deps.cards.info(powerId)?.text ?? '').replace(/\s+/g, ' '),
+  )?.[1];
+  const byPower = powerTurn !== undefined && tavernTurnOf(next) === Number(powerTurn);
+  if (!rules.trinketOfferTurns.includes(next) && !byPower) return null;
 
   const counts = new Map<string, number>();
   for (const m of state.board) {
